@@ -38,6 +38,8 @@ import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.utils.txt
 import com.lagradost.cloudstream3.utils.UiText
+import com.lagradost.cloudstream3.utils.asString
+import com.lagradost.cloudstream3.utils.asStringNull
 import com.lagradost.cloudstream3.utils.UIHelper.colorFromAttribute
 import com.lagradost.cloudstream3.actions.VideoClickAction
 import com.lagradost.cloudstream3.actions.VideoClickActionHolder

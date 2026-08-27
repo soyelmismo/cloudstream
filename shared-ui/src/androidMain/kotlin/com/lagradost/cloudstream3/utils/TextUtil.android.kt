@@ -23,8 +23,18 @@ fun UiText.asString(context: Context): String {
     }
 }
 
+fun UiText.asStringNull(context: Context?): String? {
+    if (context == null) return null
+    return try {
+        asString(context)
+    } catch (_: Throwable) {
+        null
+    }
+}
+
 private fun Context.getStringByName(name: String, args: List<Any>): String? {
     val resId = resources.getIdentifier(name, ANDROID_STRING_RES_TYPE, packageName)
     if (resId == RESOURCE_NOT_FOUND) return null
     return if (args.isEmpty()) getString(resId) else getString(resId, *args.toTypedArray())
 }
+

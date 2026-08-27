@@ -21,6 +21,8 @@ import com.lagradost.cloudstream3.utils.AppContextUtils.createNotificationChanne
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.UIHelper.colorFromAttribute
 import com.lagradost.cloudstream3.utils.txt
+import com.lagradost.cloudstream3.utils.asString
+import com.lagradost.cloudstream3.utils.asStringNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock

@@ -8,6 +8,8 @@ import com.lagradost.cloudstream3.actions.VideoClickAction
 import com.lagradost.cloudstream3.models.LinkLoadingResult
 import com.lagradost.cloudstream3.models.ResultEpisode
 import com.lagradost.cloudstream3.utils.txt
+import com.lagradost.cloudstream3.utils.asString
+import com.lagradost.cloudstream3.utils.asStringNull
 import com.lagradost.cloudstream3.utils.getViewPos
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType

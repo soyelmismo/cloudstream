@@ -12,6 +12,8 @@ import com.lagradost.cloudstream3.CommonActivity
 import com.lagradost.cloudstream3.ErrorLoadingException
 import com.lagradost.cloudstream3.MainActivity
 import cloudstream.shared_ui.generated.resources.*
+import com.lagradost.cloudstream3.utils.asString
+import com.lagradost.cloudstream3.utils.asStringNull
 import com.lagradost.cloudstream3.actions.temp.BiglyBTPackage
 import com.lagradost.cloudstream3.actions.temp.CopyClipboardAction
 import com.lagradost.cloudstream3.actions.temp.JustPlayerPackage
