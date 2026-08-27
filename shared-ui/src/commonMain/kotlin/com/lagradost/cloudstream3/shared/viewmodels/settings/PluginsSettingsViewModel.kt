@@ -4,8 +4,12 @@ import androidx.compose.runtime.Immutable
 import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.plugins.PluginLoader
 import com.lagradost.cloudstream3.shared.mvi.BaseViewModel
 import com.lagradost.cloudstream3.shared.mvi.UiState
+import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager
+import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceRepository
 import com.lagradost.cloudstream3.utils.UiText
 import com.lagradost.cloudstream3.utils.txt
 import kotlinx.collections.immutable.ImmutableList
@@ -16,13 +20,18 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.jetbrains.compose.resources.StringResource
 import kotlin.coroutines.CoroutineContext
 
+@Serializable
 @Immutable
 data class PluginRepositoryItem(
-    val name: String,
-    val url: String,
+    val name: String = "",
+    val url: String = "",
     val isRemovable: Boolean = true,
     val pluginCount: Int = 0,
     val iconUrl: String? = null,
@@ -30,14 +39,14 @@ data class PluginRepositoryItem(
     val lastSyncTime: Long? = null
 )
 
+@Serializable
 @Immutable
 data class PluginItem(
-    val id: String = "",
     val internalName: String = "",
     val name: String = "",
     val version: Int = 1,
     val description: String? = null,
-    val authors: ImmutableList<String> = persistentListOf(),
+    val authors: List<String> = emptyList(),
     val iconUrl: String? = null,
     val repositoryUrl: String = "",
     val isDownloaded: Boolean = false,
@@ -50,13 +59,17 @@ data class PluginItem(
     val url: String = repositoryUrl,
     val fileHash: String? = null,
     val localFilePath: String? = null,
-    val tvTypes: ImmutableList<String> = persistentListOf(),
+    val tvTypes: List<String> = emptyList(),
     val changelog: String? = null,
     val progress: Float? = null,
     val status: PluginStatus = PluginStatus.NOT_INSTALLED,
     val permissions: List<String> = emptyList(),
     val isInstalled: Boolean = isDownloaded
 ) {
+    val id: String get() = internalName.ifBlank { name }
+    val authorsImmutable: ImmutableList<String> get() = authors.toImmutableList()
+    val tvTypesImmutable: ImmutableList<String> get() = tvTypes.toImmutableList()
+
     constructor(
         internalName: String,
         name: String,
@@ -77,12 +90,11 @@ data class PluginItem(
         isEnabled: Boolean = true,
         status: PluginStatus = PluginStatus.NOT_INSTALLED
     ) : this(
-        id = internalName.ifBlank { name },
         internalName = internalName,
         name = name,
         version = version,
         description = description,
-        authors = authors.toImmutableList(),
+        authors = authors,
         iconUrl = iconUrl,
         repositoryUrl = repositoryUrl,
         isDownloaded = isDownloaded || isInstalled,
@@ -95,7 +107,7 @@ data class PluginItem(
         url = url.ifBlank { repositoryUrl },
         fileHash = null,
         localFilePath = localFilePath,
-        tvTypes = tvTypes.toImmutableList(),
+        tvTypes = tvTypes,
         changelog = changelog,
         progress = null,
         status = status,
@@ -119,11 +131,16 @@ enum class PluginFilterMode {
     UPDATES_AVAILABLE
 }
 
+@Serializable
 @Immutable
 data class RepositoryManifest(
-    val name: String,
+    val name: String? = null,
+    val description: String? = null,
+    val iconUrl: String? = null,
+    val manifestVersion: Int? = null,
     val pluginCount: Int = 0,
-    val plugins: ImmutableList<PluginItem> = persistentListOf()
+    val pluginLists: List<String> = emptyList(),
+    val plugins: List<PluginItem> = emptyList()
 )
 
 @Immutable
@@ -261,38 +278,262 @@ interface PluginsRepository {
 }
 
 class DefaultPluginsRepository(
-    private val preferenceRepository: Any? = null
+    private val preferenceRepository: AppPreferenceRepository? = null,
+    private val pluginLoader: PluginLoader? = null,
+    private val json: Json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        encodeDefaults = true
+    }
 ) : PluginsRepository {
     companion object {
+        const val KEY_REPOSITORIES = "REPOSITORIES_KEY"
+        const val KEY_INSTALLED_PLUGINS = "INSTALLED_PLUGINS_KEY"
         val PREBUILT_REPOSITORIES: List<PluginRepositoryItem> = emptyList()
     }
 
-    private val repositoriesList = mutableListOf<PluginRepositoryItem>()
-    private val installedPluginsList = mutableListOf<PluginItem>()
-
-    override suspend fun getRepositories(): List<PluginRepositoryItem> = repositoriesList.toList()
-    override suspend fun getInstalledPlugins(): List<PluginItem> = installedPluginsList.toList()
-    override suspend fun getAvailablePlugins(repositories: List<PluginRepositoryItem>): List<PluginItem> = emptyList()
+    override suspend fun getRepositories(): List<PluginRepositoryItem> {
+        val savedJson = preferenceRepository?.getString(KEY_REPOSITORIES)
+            ?: AppPreferenceManager.getStringSync(KEY_REPOSITORIES)
+        return if (!savedJson.isNullOrBlank()) {
+            try {
+                json.decodeFromString<List<PluginRepositoryItem>>(savedJson)
+            } catch (_: Throwable) {
+                try {
+                    val array = json.decodeFromString<List<Map<String, String>>>(savedJson)
+                    array.mapNotNull { map ->
+                        val url = map["url"] ?: return@mapNotNull null
+                        val name = map["name"] ?: "Repository"
+                        PluginRepositoryItem(name = name, url = url)
+                    }
+                } catch (_: Throwable) {
+                    emptyList()
+                }
+            }
+        } else {
+            emptyList()
+        }
+    }
 
     override suspend fun addRepository(repository: PluginRepositoryItem) {
-        repositoriesList.removeAll { it.url == repository.url }
-        repositoriesList.add(repository)
+        val currentRepos = getRepositories()
+        val updated = (currentRepos + repository).distinctBy { it.url }
+        val serialized = json.encodeToString(updated)
+        preferenceRepository?.setString(KEY_REPOSITORIES, serialized)
+        AppPreferenceManager.setStringSync(KEY_REPOSITORIES, serialized)
     }
 
     override suspend fun removeRepository(url: String) {
-        repositoriesList.removeAll { it.url == url }
+        val currentRepos = getRepositories()
+        val updated = currentRepos.filter { it.url != url }
+        val serialized = json.encodeToString(updated)
+        preferenceRepository?.setString(KEY_REPOSITORIES, serialized)
+        AppPreferenceManager.setStringSync(KEY_REPOSITORIES, serialized)
+    }
+
+    override suspend fun getInstalledPlugins(): List<PluginItem> {
+        val savedJson = preferenceRepository?.getString(KEY_INSTALLED_PLUGINS)
+            ?: AppPreferenceManager.getStringSync(KEY_INSTALLED_PLUGINS)
+        return if (!savedJson.isNullOrBlank()) {
+            try {
+                json.decodeFromString<List<PluginItem>>(savedJson)
+            } catch (_: Throwable) {
+                emptyList()
+            }
+        } else {
+            emptyList()
+        }
+    }
+
+    override suspend fun getAvailablePlugins(repositories: List<PluginRepositoryItem>): List<PluginItem> {
+        val installed = getInstalledPlugins()
+        val installedMap = installed.associateBy { it.internalName }
+        val allPlugins = mutableListOf<PluginItem>()
+
+        for (repo in repositories) {
+            try {
+                val repoBaseUrl = repo.url.substringBeforeLast("/")
+                val manifestRes = app.get(repo.url).text.trim()
+
+                if (manifestRes.startsWith("{")) {
+                    val manifest = json.decodeFromString<RepositoryManifest>(manifestRes)
+                    val manifestName = manifest.name?.trim()?.ifBlank { null }
+                    if (!manifestName.isNullOrBlank()) {
+                        val isGeneric = repo.name.isBlank() ||
+                                repo.name.equals("Custom Repository", ignoreCase = true) ||
+                                repo.name.equals("Repository", ignoreCase = true) ||
+                                repo.name.equals("repo", ignoreCase = true) ||
+                                repo.name.equals("repo.json", ignoreCase = true) ||
+                                repo.name.equals(repo.url.substringAfterLast("/").removeSuffix(".json"), ignoreCase = true)
+                        if (isGeneric && repo.name != manifestName) {
+                            try {
+                                val currentRepos = getRepositories().map {
+                                    if (it.url == repo.url) it.copy(
+                                        name = manifestName,
+                                        description = manifest.description?.trim()?.ifBlank { null } ?: it.description
+                                    ) else it
+                                }
+                                val serialized = json.encodeToString(currentRepos)
+                                preferenceRepository?.setString(KEY_REPOSITORIES, serialized)
+                                AppPreferenceManager.setStringSync(KEY_REPOSITORIES, serialized)
+                            } catch (_: Throwable) {}
+                        }
+                    }
+
+                    for (pluginListUrl in manifest.pluginLists) {
+                        try {
+                            val fullUrl = if (pluginListUrl.startsWith("http://", ignoreCase = true) || pluginListUrl.startsWith("https://", ignoreCase = true)) {
+                                pluginListUrl
+                            } else {
+                                "$repoBaseUrl/${pluginListUrl.removePrefix("/")}"
+                            }
+
+                            val pluginsRes = app.get(fullUrl).text.trim()
+                            if (pluginsRes.startsWith("[")) {
+                                val plugins = json.decodeFromString<List<PluginItem>>(pluginsRes)
+                                allPlugins.addAll(plugins.map { plugin ->
+                                    val resolvedUrl = if (plugin.url.isNotBlank()) {
+                                        if (plugin.url.startsWith("http://", ignoreCase = true) || plugin.url.startsWith("https://", ignoreCase = true)) {
+                                            plugin.url
+                                        } else {
+                                            "$repoBaseUrl/${plugin.url.removePrefix("/")}"
+                                        }
+                                    } else {
+                                        plugin.url
+                                    }
+                                    val resolvedIcon = plugin.iconUrl?.let { icon ->
+                                        if (icon.startsWith("http://", ignoreCase = true) || icon.startsWith("https://", ignoreCase = true)) {
+                                            icon
+                                        } else {
+                                            "$repoBaseUrl/${icon.removePrefix("/")}"
+                                        }
+                                    }
+
+                                    plugin.copy(
+                                        url = resolvedUrl,
+                                        iconUrl = resolvedIcon,
+                                        repositoryUrl = repo.url,
+                                        isInstalled = installedMap.containsKey(plugin.internalName)
+                                    )
+                                })
+                            }
+                        } catch (_: Throwable) {}
+                    }
+                } else if (manifestRes.startsWith("[")) {
+                    val plugins = json.decodeFromString<List<PluginItem>>(manifestRes)
+                    allPlugins.addAll(plugins.map { plugin ->
+                        val resolvedUrl = if (plugin.url.isNotBlank()) {
+                            if (plugin.url.startsWith("http://", ignoreCase = true) || plugin.url.startsWith("https://", ignoreCase = true)) {
+                                plugin.url
+                            } else {
+                                "$repoBaseUrl/${plugin.url.removePrefix("/")}"
+                            }
+                        } else {
+                            plugin.url
+                        }
+                        val resolvedIcon = plugin.iconUrl?.let { icon ->
+                            if (icon.startsWith("http://", ignoreCase = true) || icon.startsWith("https://", ignoreCase = true)) {
+                                icon
+                            } else {
+                                "$repoBaseUrl/${icon.removePrefix("/")}"
+                            }
+                        }
+
+                        plugin.copy(
+                            url = resolvedUrl,
+                            iconUrl = resolvedIcon,
+                            repositoryUrl = repo.url,
+                            isInstalled = installedMap.containsKey(plugin.internalName)
+                        )
+                    })
+                }
+            } catch (_: Throwable) {}
+        }
+        return allPlugins.distinctBy { it.internalName }
     }
 
     override suspend fun installPlugin(plugin: PluginItem): Result<PluginItem> {
-        val installed = plugin.copy(isDownloaded = true, isInstalled = true)
-        installedPluginsList.removeAll { it.internalName == plugin.internalName }
-        installedPluginsList.add(installed)
-        return Result.success(installed)
+        return try {
+            val pluginsDir = pluginLoader?.pluginsDirectory?.let { java.io.File(it) }
+                ?: java.io.File(System.getProperty("user.home") ?: ".", ".cloudstream/plugins")
+            if (!pluginsDir.exists()) {
+                pluginsDir.mkdirs()
+            }
+            val ext = if (plugin.url.endsWith(".jar", ignoreCase = true)) "jar" else "cs3"
+            val targetFile = plugin.localFilePath?.let { java.io.File(it) }?.takeIf { it.exists() }
+                ?: java.io.File(pluginsDir, "${plugin.internalName}.$ext")
+            var localPath = targetFile.absolutePath
+
+            if ((!targetFile.exists() || plugin.url.isNotBlank()) && plugin.url.startsWith("http", ignoreCase = true)) {
+                try {
+                    val response = app.get(plugin.url)
+                    val bytes = response.body.bytes()
+                    targetFile.parentFile?.mkdirs()
+                    targetFile.writeBytes(bytes)
+                    localPath = targetFile.absolutePath
+                } catch (e: Throwable) {
+                    if (!targetFile.exists()) {
+                        return Result.failure(e)
+                    }
+                }
+            }
+
+            if (plugin.isEnabled) {
+                if (targetFile.exists() && pluginLoader != null) {
+                    pluginLoader.unloadPlugin(targetFile.absolutePath)
+                    pluginLoader.unloadPlugin(plugin.internalName)
+                    pluginLoader.loadPlugin(targetFile.absolutePath)
+                }
+            } else {
+                if (pluginLoader != null) {
+                    pluginLoader.unloadPlugin(targetFile.absolutePath)
+                    pluginLoader.unloadPlugin(plugin.internalName)
+                    pluginLoader.unloadPlugin(plugin.name)
+                }
+            }
+
+            val currentInstalled = getInstalledPlugins().toMutableList()
+            val installedPlugin = plugin.copy(
+                isInstalled = true,
+                isDownloaded = true,
+                localFilePath = localPath
+            )
+            currentInstalled.removeAll { it.internalName == plugin.internalName }
+            currentInstalled.add(installedPlugin)
+            val serialized = json.encodeToString(currentInstalled)
+            preferenceRepository?.setString(KEY_INSTALLED_PLUGINS, serialized)
+            AppPreferenceManager.setStringSync(KEY_INSTALLED_PLUGINS, serialized)
+            APIHolder.notifyProvidersChanged()
+            Result.success(installedPlugin)
+        } catch (t: Throwable) {
+            Result.failure(t)
+        }
     }
 
     override suspend fun uninstallPlugin(filenameOrName: String): Result<Unit> {
-        installedPluginsList.removeAll { it.internalName == filenameOrName || it.name == filenameOrName }
-        return Result.success(Unit)
+        return try {
+            val pluginsDir = pluginLoader?.pluginsDirectory?.let { java.io.File(it) }
+                ?: java.io.File(System.getProperty("user.home") ?: ".", ".cloudstream/plugins")
+            val targetFile = java.io.File(pluginsDir, "$filenameOrName.cs3").takeIf { it.exists() }
+                ?: java.io.File(pluginsDir, "$filenameOrName.jar").takeIf { it.exists() }
+                ?: java.io.File(filenameOrName).takeIf { it.exists() }
+
+            if (pluginLoader != null) {
+                targetFile?.let { pluginLoader.unloadPlugin(it.absolutePath) }
+                pluginLoader.unloadPlugin(filenameOrName)
+            }
+            targetFile?.delete()
+
+            val currentInstalled = getInstalledPlugins().toMutableList()
+            currentInstalled.removeAll { it.internalName == filenameOrName || it.name == filenameOrName || it.localFilePath == filenameOrName }
+            val serialized = json.encodeToString(currentInstalled)
+            preferenceRepository?.setString(KEY_INSTALLED_PLUGINS, serialized)
+            AppPreferenceManager.setStringSync(KEY_INSTALLED_PLUGINS, serialized)
+            APIHolder.notifyProvidersChanged()
+            Result.success(Unit)
+        } catch (t: Throwable) {
+            Result.failure(t)
+        }
     }
 }
 
@@ -311,10 +552,12 @@ class PluginsSettingsViewModel(
     }
 
     constructor(
-        preferenceRepository: Any? = null,
-        pluginLoader: Any? = null,
+        preferenceRepository: AppPreferenceRepository? = null,
+        pluginLoader: PluginLoader? = null,
         onPluginLoaded: (() -> Unit)? = null
-    ) : this(DefaultPluginsRepository(preferenceRepository))
+    ) : this(
+        pluginsRepository = DefaultPluginsRepository(preferenceRepository, pluginLoader)
+    )
 
     constructor(
         pluginsRepository: PluginsRepository,

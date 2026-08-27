@@ -1104,7 +1104,7 @@ fun PluginCard(
                 )
             }
 
-            PluginTvTypesRow(tvTypes = plugin.tvTypes)
+            PluginTvTypesRow(tvTypes = plugin.tvTypesImmutable)
             PluginDownloadingProgressBar(operationState = operationState, plugin = plugin)
         }
     }
