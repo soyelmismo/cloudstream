@@ -8,13 +8,13 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.actions.OpenInAppAction
 import com.lagradost.cloudstream3.BuildConfig
 import com.lagradost.cloudstream3.SkipSerializationTest
-import com.lagradost.cloudstream3.ui.player.ExtractorUri
-import com.lagradost.cloudstream3.ui.player.SubtitleData
-import com.lagradost.cloudstream3.ui.player.SubtitleOrigin
-import com.lagradost.cloudstream3.ui.result.LinkLoadingResult
-import com.lagradost.cloudstream3.ui.result.ResultEpisode
+import com.lagradost.cloudstream3.shared.player.native.ExtractorUri
+import com.lagradost.cloudstream3.shared.player.native.SubtitleData
+import com.lagradost.cloudstream3.shared.player.native.SubtitleOrigin
+import com.lagradost.cloudstream3.models.LinkLoadingResult
+import com.lagradost.cloudstream3.models.ResultEpisode
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getViewPos
+import com.lagradost.cloudstream3.utils.getViewPos
 import com.lagradost.cloudstream3.utils.DrmExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkPlayList
@@ -39,7 +39,7 @@ import kotlinx.serialization.Serializable
 class CloudStreamPackage : OpenInAppAction(
     appName = txt("CloudStream"),
     packageName = BuildConfig.APPLICATION_ID, //"com.lagradost.cloudstream3" or "com.lagradost.cloudstream3.prerelease"
-    intentClass = "com.lagradost.cloudstream3.ui.player.DownloadedPlayerActivity"
+    intentClass = "com.lagradost.cloudstream3.MainActivity"
 ) {
     override val oneSource: Boolean = false
 

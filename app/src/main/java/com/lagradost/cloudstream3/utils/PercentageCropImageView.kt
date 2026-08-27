@@ -25,8 +25,7 @@ import com.lagradost.cloudstream3.mvvm.logError
  *     android:layout_height="match_parent"
  *     android:scaleType="matrix"
  *     app:cropYCenterOffsetPct="0.2"
- *     app:cropXCenterOffsetPct="0.5"
- *     tools:src="@drawable/example_poster" />
+ *     app:cropXCenterOffsetPct="0.5" />
  * ```
  * - `app:cropYCenterOffsetPct` → controls how far vertically the image shifts
  *   `0.0` = top-aligned, `0.5` = centered, `1.0` = bottom-aligned.

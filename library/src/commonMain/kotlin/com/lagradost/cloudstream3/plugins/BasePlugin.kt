@@ -20,8 +20,15 @@ abstract class BasePlugin {
     fun registerMainAPI(element: MainAPI) {
         Log.i(PLUGIN_TAG, "Adding ${element.name} (${element.mainUrl}) MainAPI")
         element.sourcePlugin = this.filename
-        APIHolder.allProviders.add(element)
+        APIHolder.allProviders.withLock {
+            APIHolder.allProviders.removeAll {
+                it.name.equals(element.name, ignoreCase = true) ||
+                (it.mainUrl.isNotBlank() && it.mainUrl.equals(element.mainUrl, ignoreCase = true))
+            }
+            APIHolder.allProviders.add(element)
+        }
         APIHolder.addPluginMapping(element)
+        APIHolder.notifyProvidersChanged()
     }
 
     /**
@@ -31,7 +38,13 @@ abstract class BasePlugin {
     fun registerExtractorAPI(element: ExtractorApi) {
         Log.i(PLUGIN_TAG, "Adding ${element.name} (${element.mainUrl}) ExtractorApi")
         element.sourcePlugin = this.filename
-        extractorApis.add(element)
+        extractorApis.withLock {
+            extractorApis.removeAll {
+                it.name.equals(element.name, ignoreCase = true) ||
+                (it.mainUrl.isNotBlank() && it.mainUrl.equals(element.mainUrl, ignoreCase = true))
+            }
+            extractorApis.add(element)
+        }
     }
 
     /**
@@ -60,6 +73,9 @@ abstract class BasePlugin {
             filename = value
         }
     var filename: String? = null
+
+    /** Manifest information extracted when the plugin was loaded */
+    var manifest: Manifest? = null
 
     @Serializable
     class Manifest {

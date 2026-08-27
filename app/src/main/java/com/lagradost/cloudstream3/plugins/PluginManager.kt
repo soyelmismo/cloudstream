@@ -23,9 +23,8 @@ import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.APIHolder.removePluginMapping
 import com.lagradost.cloudstream3.AllLanguagesName
 import com.lagradost.cloudstream3.AutoDownloadMode
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.removeKey
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
+import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.InternalAPI
 import com.lagradost.cloudstream3.MainAPI
@@ -34,8 +33,12 @@ import com.lagradost.cloudstream3.MainActivity.Companion.afterPluginsLoadedEvent
 import com.lagradost.cloudstream3.MainActivity.Companion.lastError
 import com.lagradost.cloudstream3.PROVIDER_STATUS_DOWN
 import com.lagradost.cloudstream3.PROVIDER_STATUS_OK
+import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.utils.txt
+import com.lagradost.cloudstream3.utils.UiText
+import com.lagradost.cloudstream3.utils.UIHelper.colorFromAttribute
 import com.lagradost.cloudstream3.actions.VideoClickAction
 import com.lagradost.cloudstream3.actions.VideoClickActionHolder
 import com.lagradost.cloudstream3.amap
@@ -47,15 +50,11 @@ import com.lagradost.cloudstream3.plugins.RepositoryManager.PREBUILT_REPOSITORIE
 import com.lagradost.cloudstream3.plugins.RepositoryManager.downloadPluginToFile
 import com.lagradost.cloudstream3.plugins.RepositoryManager.getRepoPlugins
 import com.lagradost.cloudstream3.plugins.RepositoryManager.sha256
-import com.lagradost.cloudstream3.ui.settings.extensions.REPOSITORIES_KEY
-import com.lagradost.cloudstream3.ui.settings.extensions.RepositoryData
 import com.lagradost.cloudstream3.utils.AppContextUtils.getApiProviderLangSettings
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.Coroutines.main
 import com.lagradost.cloudstream3.utils.ExtractorApi
 import com.lagradost.cloudstream3.utils.UIHelper.colorFromAttribute
-import com.lagradost.cloudstream3.utils.UiText
-import com.lagradost.cloudstream3.utils.downloader.DownloadFileManagement.sanitizeFilename
 import com.lagradost.cloudstream3.utils.extractorApis
 import com.lagradost.cloudstream3.utils.txt
 import dalvik.system.PathClassLoader
@@ -127,10 +126,11 @@ object PluginManager {
             if (data.isOnline) {
                 val plugins = getPluginsOnline()
                 val newPlugins = plugins.filter { it.filePath != data.filePath } + data
-                setKey(PLUGINS_KEY, newPlugins)
+                AppPreferenceManager.setStringSync(PLUGINS_KEY, toJson(newPlugins))
             } else {
                 val plugins = getPluginsLocal()
-                setKey(PLUGINS_KEY_LOCAL, plugins.filter { it.filePath != data.filePath } + data)
+                val newPlugins = plugins.filter { it.filePath != data.filePath } + data
+                AppPreferenceManager.setStringSync(PLUGINS_KEY_LOCAL, toJson(newPlugins))
             }
         }
     }
@@ -140,10 +140,10 @@ object PluginManager {
         lock.withLock {
             if (data.isOnline) {
                 val plugins = getPluginsOnline().filter { it.url != data.url }
-                setKey(PLUGINS_KEY, plugins)
+                AppPreferenceManager.setStringSync(PLUGINS_KEY, toJson(plugins))
             } else {
                 val plugins = getPluginsLocal().filter { it.filePath != data.filePath }
-                setKey(PLUGINS_KEY_LOCAL, plugins)
+                AppPreferenceManager.setStringSync(PLUGINS_KEY_LOCAL, toJson(plugins))
             }
         }
     }
@@ -157,7 +157,7 @@ object PluginManager {
             safe {
                 if (file.exists()) file.deleteRecursively()
             }
-            setKey(PLUGINS_KEY, plugins)
+            AppPreferenceManager.setStringSync(PLUGINS_KEY, toJson(plugins))
         }
     }
 
@@ -176,11 +176,15 @@ object PluginManager {
 
 
     fun getPluginsOnline(): Array<PluginData> {
-        return getKey<Array<PluginData>>(PLUGINS_KEY) ?: emptyArray()
+        return AppPreferenceManager.getStringSync(PLUGINS_KEY)?.let {
+            parseJson<Array<PluginData>>(it)
+        } ?: emptyArray()
     }
 
     fun getPluginsLocal(): Array<PluginData> {
-        return getKey<Array<PluginData>>(PLUGINS_KEY_LOCAL) ?: emptyArray()
+        return AppPreferenceManager.getStringSync(PLUGINS_KEY_LOCAL)?.let {
+            parseJson<Array<PluginData>>(it)
+        } ?: emptyArray()
     }
 
     private val CLOUD_STREAM_FOLDER =
@@ -198,8 +202,14 @@ object PluginManager {
     val urlPlugins: MutableMap<String, BasePlugin> =
         LinkedHashMap<String, BasePlugin>()
 
-    private val classLoaders: MutableMap<PathClassLoader, BasePlugin> =
-        HashMap<PathClassLoader, BasePlugin>()
+    private val classLoaders: MutableMap<ClassLoader, BasePlugin> =
+        HashMap<ClassLoader, BasePlugin>()
+
+    var pluginLoaderFactory: ((Context) -> PluginLoader)? = null
+
+    fun getPluginLoader(context: Context): PluginLoader {
+        return pluginLoaderFactory?.invoke(context) ?: AndroidPluginLoader(context)
+    }
 
     var loadedLocalPlugins = false
         private set
@@ -278,8 +288,7 @@ object PluginManager {
         ___DO_NOT_CALL_FROM_A_PLUGIN_loadAllOnlinePlugins(activity)
         afterPluginsLoadedEvent.invoke(false)
 
-        val urls = (getKey<Array<RepositoryData>>(REPOSITORIES_KEY)
-            ?: emptyArray()) + PREBUILT_REPOSITORIES
+        val urls = RepositoryManager.getRepositories() + PREBUILT_REPOSITORIES
 
         val onlinePlugins = urls.toList().amap {
             getRepoPlugins(it) ?: emptyList()
@@ -322,7 +331,7 @@ object PluginManager {
         }
 
         main {
-            val uitext = txt(R.string.plugins_updated, updatedPlugins.size)
+            val uitext = txt(cloudstream.shared_ui.generated.resources.Res.string.plugins_updated, updatedPlugins.size)
             createNotification(activity, uitext, updatedPlugins)
             /*val navBadge = (activity as MainActivity).binding?.navRailView?.getOrCreateBadge(R.id.navigation_settings)
             navBadge?.isVisible = true
@@ -356,8 +365,7 @@ object PluginManager {
         assertNonRecursiveCallstack()
 
         val newDownloadPlugins = mutableListOf<String>()
-        val urls = (getKey<Array<RepositoryData>>(REPOSITORIES_KEY)
-            ?: emptyArray()) + PREBUILT_REPOSITORIES
+        val urls = RepositoryManager.getRepositories() + PREBUILT_REPOSITORIES
         val onlinePlugins = urls.toList().amap {
             getRepoPlugins(it)?.toList() ?: emptyList()
         }.flatten().distinctBy { it.plugin.url }
@@ -433,7 +441,7 @@ object PluginManager {
         }
 
         main {
-            val uitext = txt(R.string.plugins_downloaded, newDownloadPlugins.size)
+            val uitext = txt(cloudstream.shared_ui.generated.resources.Res.string.plugins_downloaded, newDownloadPlugins.size)
             createNotification(activity, uitext, newDownloadPlugins)
         }
 
@@ -533,7 +541,7 @@ object PluginManager {
         }
 
         // Make sure all local plugins are fully refreshed.
-        removeKey(PLUGINS_KEY_LOCAL)
+        AppPreferenceManager.deletePreferenceSync(PLUGINS_KEY_LOCAL)
 
         sortedPlugins?.sortedBy { it.name }?.amap { file ->
             try {
@@ -597,41 +605,24 @@ object PluginManager {
         Log.i(TAG, "Loading plugin: $data")
 
         return try {
-            // In case of Android 14+ then
-            try {
-                // Set the file as read-only and log if it fails
-                if (!file.setReadOnly()) {
-                    Log.e(TAG, "Failed to set read-only on plugin file: ${file.name}")
-                }
-            } catch (t: Throwable) {
-                Log.e(TAG, "Failed to set dex as read-only")
-                logError(t)
+            val loader = getPluginLoader(context)
+            val pluginInstance = loader.loadPlugin(filePath) ?: run {
+                currentlyLoading = null
+                showToast(
+                    // context.getActivity(), // we are not always on the main thread
+                    txt(cloudstream.shared_ui.generated.resources.Res.string.plugin_load_fail, fileName),
+                    Toast.LENGTH_LONG
+                )
+                return false
             }
 
-            val loader = PathClassLoader(filePath, context.classLoader)
-            var manifest: BasePlugin.Manifest
-            loader.getResourceAsStream("manifest.json").use { stream ->
-                if (stream == null) {
-                    Log.e(TAG, "Failed to load plugin  $fileName: No manifest found")
-                    return false
-                }
-                InputStreamReader(stream).use { reader ->
-                    manifest = parseJson<BasePlugin.Manifest>(reader.readText())
-                }
-            }
-
-            val name: String = manifest.name ?: "NO NAME".also {
+            val manifest = pluginInstance.manifest ?: loader.getManifest(filePath)
+            val name: String = manifest?.name ?: "NO NAME".also {
                 Log.d(TAG, "No manifest name for ${data.internalName}")
             }
-            val version: Int = manifest.version ?: PLUGIN_VERSION_NOT_SET.also {
+            val version: Int = manifest?.version ?: PLUGIN_VERSION_NOT_SET.also {
                 Log.d(TAG, "No manifest version for ${data.internalName}")
             }
-
-            @Suppress("UNCHECKED_CAST")
-            val pluginClass: Class<*> =
-                loader.loadClass(manifest.pluginClassName) as Class<out BasePlugin?>
-            val pluginInstance: BasePlugin =
-                pluginClass.getDeclaredConstructor().newInstance() as BasePlugin
 
             // Sets with the proper version
             setPluginData(data.copy(version = version))
@@ -641,27 +632,14 @@ object PluginManager {
                 return true
             }
 
-            pluginInstance.filename = file.absolutePath
-            if (manifest.requiresResources) {
-                Log.d(TAG, "Loading resources for ${data.internalName}")
-                // based on https://stackoverflow.com/questions/7483568/dynamic-resource-loading-from-other-apk
-                val assets = AssetManager::class.java.getDeclaredConstructor().newInstance()
-                val addAssetPath =
-                    AssetManager::class.java.getMethod("addAssetPath", String::class.java)
-                addAssetPath.invoke(assets, file.absolutePath)
-
-                @Suppress("DEPRECATION")
-                (pluginInstance as? Plugin)?.resources = Resources(
-                    assets,
-                    context.resources.displayMetrics,
-                    context.resources.configuration
-                )
-            }
             synchronized(plugins) {
                 plugins[filePath] = pluginInstance
             }
             synchronized(classLoaders) {
-                classLoaders[loader] = pluginInstance
+                val classLoader = pluginInstance.javaClass.classLoader
+                if (classLoader != null) {
+                    classLoaders[classLoader] = pluginInstance
+                }
             }
             synchronized(urlPlugins) {
                 urlPlugins[data.url ?: filePath] = pluginInstance
@@ -678,7 +656,7 @@ object PluginManager {
             Log.e(TAG, "Failed to load $file: ${Log.getStackTraceString(e)}")
             showToast(
                 // context.getActivity(), // we are not always on the main thread
-                context.getString(R.string.plugin_load_fail).format(fileName),
+                txt(cloudstream.shared_ui.generated.resources.Res.string.plugin_load_fail, fileName),
                 Toast.LENGTH_LONG
             )
             currentlyLoading = null
@@ -728,6 +706,17 @@ object PluginManager {
         synchronized(urlPlugins) {
             urlPlugins.values.removeIf { v -> v == plugin }
         }
+    }
+
+    private const val RESERVED_CHARS = "|\\?*<\":>+[]/'"
+
+    internal fun sanitizeFilename(name: String, removeSpaces: Boolean = false): String {
+        var tempName = name
+        for (c in RESERVED_CHARS) {
+            tempName = tempName.replace(c, ' ')
+        }
+        if (removeSpaces) tempName = tempName.replace(" ", "")
+        return tempName.replace("  ", " ").trim(' ')
     }
 
     /**
@@ -830,13 +819,12 @@ object PluginManager {
     suspend fun ___DO_NOT_CALL_FROM_A_PLUGIN_manuallyReloadAndUpdatePlugins(activity: Activity) {
         assertNonRecursiveCallstack()
 
-        showToast(activity.getString(R.string.starting_plugin_update_manually), Toast.LENGTH_LONG)
+        showToast(cloudstream.shared_ui.generated.resources.Res.string.starting_plugin_update_manually, Toast.LENGTH_LONG)
 
         ___DO_NOT_CALL_FROM_A_PLUGIN_loadAllOnlinePlugins(activity)
         afterPluginsLoadedEvent.invoke(false)
 
-        val urls = (getKey<Array<RepositoryData>>(REPOSITORIES_KEY)
-            ?: emptyArray()) + PREBUILT_REPOSITORIES
+        val urls = RepositoryManager.getRepositories() + PREBUILT_REPOSITORIES
         val onlinePlugins = urls.toList().amap {
             getRepoPlugins(it) ?: emptyList()
         }.flatten().distinctBy { it.plugin.url }
@@ -877,15 +865,15 @@ object PluginManager {
         }.also {
             main {
                 val message = if (updatedPlugins.isNotEmpty()) {
-                    activity.getString(R.string.plugins_updated_manually, updatedPlugins.size)
+                    txt(cloudstream.shared_ui.generated.resources.Res.string.plugins_updated_manually, updatedPlugins.size)
                 } else {
-                    activity.getString(R.string.no_plugins_updated_manually)
+                    txt(cloudstream.shared_ui.generated.resources.Res.string.no_plugins_updated_manually)
                 }
                 showToast(message, Toast.LENGTH_LONG)
 
-                val notificationText = UiText.StringResource(
-                    R.string.plugins_updated_manually,
-                    listOf(updatedPlugins.size)
+                val notificationText = txt(
+                    cloudstream.shared_ui.generated.resources.Res.string.plugins_updated_manually,
+                    updatedPlugins.size
                 )
                 createNotification(activity, notificationText, updatedPlugins)
 

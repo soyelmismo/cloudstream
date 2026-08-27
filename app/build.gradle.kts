@@ -9,6 +9,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.dokka)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.compose.multiplatform)
+    alias(libs.plugins.compose.compiler)
 }
 
 val javaTarget = JvmTarget.fromTarget(libs.versions.jvmTarget.get())
@@ -145,6 +147,7 @@ android {
             isDebuggable = false
             isMinifyEnabled = false
             isShrinkResources = false
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -198,7 +201,8 @@ android {
 
     buildFeatures {
         buildConfig = true
-        viewBinding = true
+        viewBinding = false
+        compose = true
     }
 
     packaging {
@@ -209,7 +213,57 @@ android {
         }
     }
 
+    sourceSets {
+        getByName("main") {
+            res.srcDirs(
+                "../shared-ui/src/androidMain/res"
+            )
+        }
+    }
+
     namespace = "com.lagradost.cloudstream3"
+}
+
+abstract class CopyComposeResourcesTask : DefaultTask() {
+    @get:InputDirectory
+    abstract val sharedUiResourcesDir: DirectoryProperty
+
+    @get:InputDirectory
+    abstract val preparedResourcesDir: DirectoryProperty
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @TaskAction
+    fun copyResources() {
+        val out = outputDirectory.get().asFile
+        val targetDir = File(out, "composeResources/cloudstream.shared_ui.generated.resources")
+        targetDir.mkdirs()
+        val srcDir = sharedUiResourcesDir.get().asFile
+        if (srcDir.exists()) {
+            srcDir.copyRecursively(targetDir, overwrite = true)
+        }
+        val prepDir = preparedResourcesDir.get().asFile
+        if (prepDir.exists()) {
+            prepDir.copyRecursively(targetDir, overwrite = true)
+        }
+    }
+}
+
+val copyComposeResourcesToAppAssets by tasks.registering(CopyComposeResourcesTask::class) {
+    dependsOn(":shared-ui:prepareComposeResourcesTaskForCommonMain")
+    sharedUiResourcesDir.set(project(":shared-ui").projectDir.resolve("src/commonMain/composeResources"))
+    preparedResourcesDir.set(project(":shared-ui").layout.buildDirectory.dir("generated/compose/resourceGenerator/preparedResources/commonMain/composeResources"))
+    outputDirectory.set(layout.buildDirectory.dir("intermediates/composeResourcesAssets"))
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(
+            copyComposeResourcesToAppAssets,
+            CopyComposeResourcesTask::outputDirectory
+        )
+    }
 }
 
 dependencies {
@@ -230,40 +284,21 @@ dependencies {
     implementation(libs.appcompat)
     implementation(libs.fragment.ktx)
     implementation(libs.bundles.lifecycle)
-    implementation(libs.bundles.navigation)
     implementation(libs.kotlinx.collections.immutable)
     implementation(libs.kotlinx.serialization.json) // JSON Parser
 
     // Design & UI
-    implementation(libs.preference.ktx)
     implementation(libs.material)
-    implementation(libs.constraintlayout)
 
     // Coil Image Loading
     implementation(libs.bundles.coil)
 
-    // Media 3 (ExoPlayer)
-    implementation(libs.bundles.media3)
-    implementation(libs.video)
-
-    // FFmpeg Decoding
-    implementation(libs.bundles.nextlib)
-
-    // Anime-db for filler
-    implementation(libs.anime.db)
-
     // PlayBack
-    implementation(libs.colorpicker) // Subtitle Color Picker
     implementation(libs.newpipeextractor) // For Trailers
-    implementation(libs.juniversalchardet) // Subtitle Decoding
 
     // UI Stuff
-    implementation(libs.shimmer) // Shimmering Effect (Loading Skeleton)
-    implementation(libs.palette.ktx) // Palette for Images -> Colors
     implementation(libs.tvprovider)
-    implementation(libs.overlappingpanels) // Gestures
     implementation(libs.biometric) // Fingerprint Authentication
-    implementation(libs.previewseekbar.media3) // SeekBar Preview
     implementation(libs.qrcode.kotlin) // QR Code for PIN Auth on TV
 
     // Extensions & Other Libs
@@ -281,14 +316,15 @@ dependencies {
     // Deprecated; will be removed once extensions have time to migrate from using it
     implementation("me.xdrop:fuzzywuzzy:1.4.0")
 
-    // Torrent Support
-    implementation(libs.torrentserver)
-
     // Downloading & Networking
     implementation(libs.work.runtime.ktx)
     implementation(libs.nicehttp) // HTTP Lib
 
+    implementation(libs.activity.compose)
+    implementation(libs.room.runtime)
+    implementation(libs.anime.db)
     implementation(project(":library"))
+    implementation(project(":shared-ui"))
 }
 
 tasks.register<Jar>("androidSourcesJar") {

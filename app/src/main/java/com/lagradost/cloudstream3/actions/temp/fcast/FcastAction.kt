@@ -2,13 +2,13 @@ package com.lagradost.cloudstream3.actions.temp.fcast
 
 import android.content.Context
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getActivity
-import com.lagradost.cloudstream3.R
+import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.USER_AGENT
 import com.lagradost.cloudstream3.actions.VideoClickAction
-import com.lagradost.cloudstream3.ui.result.LinkLoadingResult
-import com.lagradost.cloudstream3.ui.result.ResultEpisode
+import com.lagradost.cloudstream3.models.LinkLoadingResult
+import com.lagradost.cloudstream3.models.ResultEpisode
 import com.lagradost.cloudstream3.utils.txt
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getViewPos
+import com.lagradost.cloudstream3.utils.getViewPos
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.SingleSelectionHelper.showBottomDialog
@@ -38,7 +38,7 @@ class FcastAction: VideoClickAction() {
             context?.getActivity()?.showBottomDialog(
                 devices.map { it.name },
                 -1,
-                txt(R.string.player_settings_select_cast_device).asString(context),
+                txt(Res.string.player_settings_select_cast_device).asString(context),
                 false,
                 {}) {
                 val position = getViewPos(video.id)?.position

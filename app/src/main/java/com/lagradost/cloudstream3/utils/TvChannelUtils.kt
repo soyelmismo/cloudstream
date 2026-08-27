@@ -10,30 +10,33 @@ import androidx.core.net.toUri
 import androidx.tvprovider.media.tv.Channel
 import androidx.tvprovider.media.tv.PreviewProgram
 import androidx.tvprovider.media.tv.TvContractCompat
+import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.MainActivity
-import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.base64Encode
-import com.lagradost.cloudstream3.syncproviders.AccountManager.Companion.APP_STRING_SHARE
-import com.lagradost.cloudstream3.utils.DataStore.getKey
-import com.lagradost.cloudstream3.utils.DataStore.setKey
+import com.lagradost.cloudstream3.shared.syncproviders.AccountManager.Companion.APP_STRING_SHARE
+import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager
+import com.lagradost.cloudstream3.utils.AppUtils.parseJson
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import java.net.URLEncoder
 
 const val PROGRAM_ID_LIST_KEY = "persistent_program_ids"
 
 object TvChannelUtils {
     fun Context.saveProgramId(programId: Long) {
-        val existing: List<Long> = getKey<List<Long>>(PROGRAM_ID_LIST_KEY) ?: emptyList()
+        val existing: List<Long> = getStoredProgramIds()
         val updated = (existing + programId).distinct()
-        setKey(PROGRAM_ID_LIST_KEY, updated)
+        AppPreferenceManager.setStringSync(PROGRAM_ID_LIST_KEY, toJson(updated))
     }
     fun Context.getStoredProgramIds(): List<Long> {
-        return getKey<List<Long>>(PROGRAM_ID_LIST_KEY) ?: emptyList()
+        return AppPreferenceManager.getStringSync(PROGRAM_ID_LIST_KEY)?.let {
+            parseJson<List<Long>>(it)
+        } ?: emptyList()
     }
     fun Context.removeProgramId(programId: Long) {
-        val existing: List<Long> = getKey<List<Long>>(PROGRAM_ID_LIST_KEY) ?: emptyList()
+        val existing: List<Long> = getStoredProgramIds()
         val updated = existing.filter { it != programId }
-        setKey(PROGRAM_ID_LIST_KEY, updated)
+        AppPreferenceManager.setStringSync(PROGRAM_ID_LIST_KEY, toJson(updated))
     }
 
 
@@ -80,7 +83,7 @@ object TvChannelUtils {
                     .setTitle(item.name)
                     .apply {
                         val scoreText = item.score?.toStringNull(0.1, 10, 1)?.let {
-                            " - " + txt(R.string.rating_format, it).asString(context)
+                            " - " + txt(Res.string.rating_format, it).asString(context)
                         } ?: ""
                         setDescription("${item.apiName}$scoreText")
                     }
@@ -142,7 +145,7 @@ object TvChannelUtils {
         val channel = Channel.Builder()
             .setType(TvContractCompat.Channels.TYPE_PREVIEW)
             .setAppLinkIconUri(iconUri)
-            .setDisplayName(context.getString(R.string.app_name))
+            .setDisplayName(txt(Res.string.app_name).asString(context))
             .setAppLinkIntent(Intent(Intent.ACTION_VIEW).apply {
                 data = "cloudstreamapp://open".toUri()
             })

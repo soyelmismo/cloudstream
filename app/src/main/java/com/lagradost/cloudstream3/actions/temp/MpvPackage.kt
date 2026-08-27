@@ -8,10 +8,10 @@ import com.lagradost.api.Log
 import com.lagradost.cloudstream3.actions.OpenInAppAction
 import com.lagradost.cloudstream3.actions.makeTempM3U8Intent
 import com.lagradost.cloudstream3.actions.updateDurationAndPosition
-import com.lagradost.cloudstream3.ui.result.LinkLoadingResult
-import com.lagradost.cloudstream3.ui.result.ResultEpisode
+import com.lagradost.cloudstream3.models.LinkLoadingResult
+import com.lagradost.cloudstream3.models.ResultEpisode
 import com.lagradost.cloudstream3.utils.txt
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getViewPos
+import com.lagradost.cloudstream3.utils.getViewPos
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 
 // https://github.com/mpv-android/mpv-android/blob/0eb3cdc6f1632636b9c30d52ec50e4b017661980/app/src/main/java/is/xyz/mpv/MPVActivity.kt#L904

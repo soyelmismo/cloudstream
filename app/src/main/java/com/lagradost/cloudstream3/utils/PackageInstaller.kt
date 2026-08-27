@@ -11,7 +11,9 @@ import android.content.pm.PackageInstaller
 import android.os.Build
 import android.util.Log
 import android.widget.Toast
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.context
+import cloudstream.shared_ui.generated.resources.*
+import com.lagradost.cloudstream3.appContext
+import com.lagradost.cloudstream3.utils.txt
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.services.PackageInstallerService
@@ -135,7 +137,7 @@ class ApkInstaller(private val service: PackageInstallerService) {
                 delayedInstaller = DelayedInstaller(session, intentSender)
                 main {
                     // Use real toast since it should show even if app is exited
-                    Toast.makeText(context, R.string.delayed_update_notice, Toast.LENGTH_LONG)
+                    Toast.makeText(context, txt(Res.string.delayed_update_notice).asString(context), Toast.LENGTH_LONG)
                         .show()
                 }
             } else {
@@ -165,7 +167,7 @@ class ApkInstaller(private val service: PackageInstallerService) {
                 addAction(INSTALL_ACTION)
             }
             Log.d(TAG, "Registering install action event receiver")
-            context?.registerBroadcastReceiver(installActionReceiver, intentFilter)
+            appContext?.registerBroadcastReceiver(installActionReceiver, intentFilter)
             isReceiverRegistered = true
         }
     }
@@ -174,7 +176,7 @@ class ApkInstaller(private val service: PackageInstallerService) {
         if (isReceiverRegistered) {
             Log.d(TAG, "Unregistering install action event receiver")
             try {
-                context?.unregisterReceiver(installActionReceiver)
+                appContext?.unregisterReceiver(installActionReceiver)
             } catch (e: Exception) {
                 logError(e)
             }

@@ -7,8 +7,8 @@ import android.os.Bundle
 import androidx.core.net.toUri
 import com.lagradost.cloudstream3.USER_AGENT
 import com.lagradost.cloudstream3.actions.OpenInAppAction
-import com.lagradost.cloudstream3.ui.result.LinkLoadingResult
-import com.lagradost.cloudstream3.ui.result.ResultEpisode
+import com.lagradost.cloudstream3.models.LinkLoadingResult
+import com.lagradost.cloudstream3.models.ResultEpisode
 import com.lagradost.cloudstream3.utils.txt
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 

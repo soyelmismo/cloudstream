@@ -130,19 +130,37 @@ object APIHolder {
 
     var apis: AtomicList<MainAPI> = atomicListOf()
     var apiMap: Map<String, Int>? = null
+    val onProvidersChanged = mutableListOf<() -> Unit>()
+
+    fun notifyProvidersChanged() {
+        onProvidersChanged.toList().forEach { listener ->
+            try {
+                listener.invoke()
+            } catch (_: Throwable) {}
+        }
+    }
 
     fun addPluginMapping(plugin: MainAPI) {
         apis.withLock {
-            apis = apis + plugin
+            apis = apis.filter {
+                !it.name.equals(plugin.name, ignoreCase = true) &&
+                !(it.mainUrl.isNotBlank() && it.mainUrl.equals(plugin.mainUrl, ignoreCase = true))
+            } + plugin
         }
         initMap(true)
+        notifyProvidersChanged()
     }
 
     fun removePluginMapping(plugin: MainAPI) {
         apis.withLock {
-            apis = apis.filter { it != plugin }
+            apis = apis.filter {
+                it != plugin &&
+                !it.name.equals(plugin.name, ignoreCase = true) &&
+                !(it.mainUrl.isNotBlank() && it.mainUrl.equals(plugin.mainUrl, ignoreCase = true))
+            }
         }
         initMap(true)
+        notifyProvidersChanged()
     }
 
     private fun initMap(forcedUpdate: Boolean = false) {
@@ -518,6 +536,7 @@ abstract class MainAPI {
     open var mainUrl = "NONE"
     open var storedCredentials: String? = null
     open var canBeOverridden: Boolean = true
+    open var iconUrl: String? = null
 
     /** if this is turned on then it will request the homepage one after the other,
     used to delay if they block many request at the same time*/

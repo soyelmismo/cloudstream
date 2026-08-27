@@ -15,9 +15,11 @@ import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.core.content.ContextCompat.getString
 import androidx.fragment.app.FragmentActivity
-import androidx.preference.PreferenceManager
 import com.lagradost.cloudstream3.CommonActivity.showToast
-import com.lagradost.cloudstream3.R
+import cloudstream.shared_ui.generated.resources.*
+import kotlinx.coroutines.runBlocking
+import org.jetbrains.compose.resources.StringResource
+import org.jetbrains.compose.resources.getString
 
 object BiometricAuthenticator {
 
@@ -67,10 +69,11 @@ object BiometricAuthenticator {
     // authentication dialog prompt builder
     private fun authenticationDialog(
         activity: Activity,
-        title: Int,
+        title: StringResource,
         setDeviceCred: Boolean,
     ) {
-        val description = activity.getString(R.string.biometric_prompt_description)
+        val description = txt(Res.string.biometric_prompt_description).asString(activity)
+        val titleText = txt(title).asString(activity)
 
         if (setDeviceCred) {
             // For API level > 30, Newer API setAllowedAuthenticators is used
@@ -78,14 +81,14 @@ object BiometricAuthenticator {
 
                 val authFlag = DEVICE_CREDENTIAL or BIOMETRIC_WEAK or BIOMETRIC_STRONG
                 promptInfo = BiometricPrompt.PromptInfo.Builder()
-                    .setTitle(activity.getString(title))
+                    .setTitle(titleText)
                     .setDescription(description)
                     .setAllowedAuthenticators(authFlag)
                     .build()
             } else {
                 // for apis < 30
                 promptInfo = BiometricPrompt.PromptInfo.Builder()
-                    .setTitle(activity.getString(title))
+                    .setTitle(titleText)
                     .setDescription(description)
                     .setDeviceCredentialAllowed(true)
                     .build()
@@ -93,7 +96,7 @@ object BiometricAuthenticator {
         } else {
             // fallback for A12+ when both fingerprint & Face unlock is absent but PIN is set
             promptInfo = BiometricPrompt.PromptInfo.Builder()
-                .setTitle(activity.getString(title))
+                .setTitle(titleText)
                 .setDescription(description)
                 .setDeviceCredentialAllowed(true)
                 .build()
@@ -160,7 +163,7 @@ object BiometricAuthenticator {
     }
 
     // function to start authentication in any fragment or activity
-    fun startBiometricAuthentication(activity: FragmentActivity, title: Int, setDeviceCred: Boolean) {
+    fun startBiometricAuthentication(activity: FragmentActivity, title: StringResource, setDeviceCred: Boolean) {
         initializeBiometrics(activity)
         authCallback = activity as? BiometricCallback
         if (isBiometricHardWareAvailable()) {
@@ -170,20 +173,20 @@ object BiometricAuthenticator {
         } else {
             if (deviceHasPasswordPinLock(activity)) {
                 authCallback = activity as? BiometricCallback
-                authenticationDialog(activity, R.string.password_pin_authentication_title, true)
+                authenticationDialog(activity, Res.string.password_pin_authentication_title, true)
                 promptInfo?.let { biometricPrompt?.authenticate(it) }
 
             } else {
-                showToast(R.string.biometric_unsupported)
+                showToast(Res.string.biometric_unsupported)
             }
         }
     }
 
-    fun isAuthEnabled(ctx: Context):Boolean {
-        return ctx.let {
-            PreferenceManager.getDefaultSharedPreferences(ctx)
-                .getBoolean(getString(ctx, R.string.biometric_key), false)
-        }
+    fun isAuthEnabled(ctx: Context): Boolean {
+        return com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager.getBooleanSync(
+            com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager.KEY_BIOMETRIC,
+            false
+        )
     }
 
     interface BiometricCallback {

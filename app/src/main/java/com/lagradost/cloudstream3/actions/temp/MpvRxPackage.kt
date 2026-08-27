@@ -8,9 +8,9 @@ import com.lagradost.api.Log
 import com.lagradost.cloudstream3.actions.OpenInAppAction
 import com.lagradost.cloudstream3.actions.updateDurationAndPosition
 import com.lagradost.cloudstream3.isEpisodeBased
-import com.lagradost.cloudstream3.ui.result.LinkLoadingResult
-import com.lagradost.cloudstream3.ui.result.ResultEpisode
-import com.lagradost.cloudstream3.utils.DataStoreHelper.getViewPos
+import com.lagradost.cloudstream3.models.LinkLoadingResult
+import com.lagradost.cloudstream3.models.ResultEpisode
+import com.lagradost.cloudstream3.utils.getViewPos
 import com.lagradost.cloudstream3.utils.txt
 
 /** https://github.com/Riteshp2001/mpvRx

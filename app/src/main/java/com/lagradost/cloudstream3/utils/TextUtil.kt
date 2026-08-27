@@ -8,6 +8,9 @@ import androidx.core.view.isGone
 import androidx.core.view.isVisible
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.utils.AppContextUtils.html
+import kotlinx.coroutines.runBlocking
+import org.jetbrains.compose.resources.StringResource as CmpStringResource
+import org.jetbrains.compose.resources.getString
 
 sealed class UiText {
     companion object {
@@ -43,6 +46,24 @@ sealed class UiText {
         }
     }
 
+    class ComposeStringResource(
+        val resource: CmpStringResource,
+        val args: List<Any>
+    ) : UiText() {
+        override fun toString(): String =
+            "resource = $resource\nargs = ${args.toList().map { "(${it::class} = $it)" }}"
+        override fun equals(other: Any?): Boolean {
+            if (other !is ComposeStringResource) return false
+            return this.resource == other.resource && this.args == other.args
+        }
+
+        override fun hashCode(): Int {
+            var result = resource.hashCode()
+            result = 31 * result + args.hashCode()
+            return result
+        }
+    }
+
     fun asStringNull(context: Context?): String? {
         try {
             return asString(context ?: return null)
@@ -58,6 +79,23 @@ sealed class UiText {
             is DynamicString -> value
             is StringResource -> {
                 val str = context.getString(resId)
+                if (args.isEmpty()) {
+                    str
+                } else {
+                    str.format(*args.map {
+                        when (it) {
+                            is UiText -> it.asString(context)
+                            else -> it
+                        }
+                    }.toTypedArray())
+                }
+            }
+            is ComposeStringResource -> {
+                val str = try {
+                    runBlocking { getString(resource) }
+                } catch (_: Throwable) {
+                    resource.key.substringAfterLast(':')
+                }
                 if (args.isEmpty()) {
                     str
                 } else {
@@ -92,6 +130,18 @@ fun txt(@StringRes resId: Int?, vararg args: Any?): UiText? {
         return null
     }
     return UiText.StringResource(resId, args.filterNotNull().toList())
+}
+
+fun txt(resource: CmpStringResource, vararg args: Any): UiText {
+    return UiText.ComposeStringResource(resource, args.toList())
+}
+
+@JvmName("txtNull")
+fun txt(resource: CmpStringResource?, vararg args: Any?): UiText? {
+    if (resource == null || args.any { it == null }) {
+        return null
+    }
+    return UiText.ComposeStringResource(resource, args.filterNotNull().toList())
 }
 
 fun TextView?.setText(text: UiText?) {

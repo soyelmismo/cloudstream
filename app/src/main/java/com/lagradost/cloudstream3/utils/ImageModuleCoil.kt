@@ -29,7 +29,8 @@ import coil3.request.crossfade
 import coil3.util.DebugLogger
 import com.lagradost.cloudstream3.BuildConfig
 import com.lagradost.cloudstream3.USER_AGENT
-import com.lagradost.cloudstream3.network.buildDefaultClient
+import com.lagradost.cloudstream3.network.buildSharedOkHttpClient
+import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager
 import okio.Path.Companion.toOkioPath
 import java.io.File
 import java.nio.ByteBuffer
@@ -38,6 +39,7 @@ object ImageLoader {
     private const val TAG = "CoilImgLoader"
     internal fun buildImageLoader(context: PlatformContext): ImageLoader {
         val isBrokenHardware = hasPotentialBrokenHardware()
+        val dns = AppPreferenceManager.getIntSync(AppPreferenceManager.KEY_DOH_PROVIDER, 0)
         return ImageLoader.Builder(context)
             .crossfade(200)
             .allowHardware(SDK_INT >= 28 && !isBrokenHardware)
@@ -58,7 +60,12 @@ object ImageLoader {
             /** Pass interceptors with care, unnecessary passing tokens to servers
             or image hosting services causes unauthorized exceptions **/
             .components {
-                add(OkHttpNetworkFetcherFactory(callFactory = { buildDefaultClient(context) }))
+                add(OkHttpNetworkFetcherFactory(callFactory = {
+                    buildSharedOkHttpClient(
+                        cacheDir = context.cacheDir,
+                        dnsPreference = dns
+                    )
+                }))
                 if (isBrokenHardware) {
                     add(BitmapFactoryDecoder.Factory())
                 } // sw decoder

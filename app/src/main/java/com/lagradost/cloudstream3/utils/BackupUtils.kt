@@ -8,32 +8,26 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.WorkerThread
 import androidx.core.net.toUri
 import androidx.fragment.app.FragmentActivity
-import androidx.preference.PreferenceManager
 import com.fasterxml.jackson.annotation.JsonProperty
+import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.CloudStreamApp.Companion.getActivity
 import com.lagradost.cloudstream3.CommonActivity.showToast
-import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.plugins.PLUGINS_KEY
 import com.lagradost.cloudstream3.plugins.PLUGINS_KEY_LOCAL
-import com.lagradost.cloudstream3.syncproviders.AccountManager
-import com.lagradost.cloudstream3.syncproviders.providers.AniListApi.Companion.ANILIST_CACHED_LIST
-import com.lagradost.cloudstream3.syncproviders.providers.MALApi.Companion.MAL_CACHED_LIST
-import com.lagradost.cloudstream3.syncproviders.providers.KitsuApi.Companion.KITSU_CACHED_LIST
+import com.lagradost.cloudstream3.shared.syncproviders.AccountManager
+import com.lagradost.cloudstream3.shared.syncproviders.providers.AniListApi.Companion.ANILIST_CACHED_LIST
+import com.lagradost.cloudstream3.shared.syncproviders.providers.MALApi.Companion.MAL_CACHED_LIST
+import com.lagradost.cloudstream3.shared.syncproviders.providers.KitsuApi.Companion.KITSU_CACHED_LIST
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.Coroutines.main
-import com.lagradost.cloudstream3.utils.DataStore.getDefaultSharedPrefs
-import com.lagradost.cloudstream3.utils.DataStore.getSharedPrefs
+import kotlinx.coroutines.runBlocking
+import org.jetbrains.compose.resources.getString
+import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager
 import com.lagradost.cloudstream3.utils.UIHelper.checkWrite
 import com.lagradost.cloudstream3.utils.UIHelper.requestRW
-import com.lagradost.cloudstream3.utils.downloader.VideoDownloadManager.setupStream
-import com.lagradost.cloudstream3.utils.downloader.DownloadObjects
-import com.lagradost.cloudstream3.utils.downloader.DownloadQueueManager.QUEUE_KEY
-import com.lagradost.cloudstream3.utils.downloader.VideoDownloadManager.KEY_DOWNLOAD_INFO
-import com.lagradost.cloudstream3.utils.downloader.VideoDownloadManager.KEY_RESUME_IN_QUEUE
-import com.lagradost.cloudstream3.utils.downloader.VideoDownloadManager.KEY_RESUME_PACKAGES
 import com.lagradost.safefile.MediaFileContentType
 import com.lagradost.safefile.SafeFile
 import kotlinx.serialization.SerialName
@@ -46,6 +40,11 @@ import java.lang.System.currentTimeMillis
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+private const val DOWNLOAD_HEADER_CACHE = "download_header_cache"
+private const val DOWNLOAD_HEADER_CACHE_BACKUP = "BACKUP_download_header_cache"
+private const val DOWNLOAD_EPISODE_CACHE = "download_episode_cache"
+private const val DOWNLOAD_EPISODE_CACHE_BACKUP = "BACKUP_download_episode_cache"
 
 object BackupUtils {
 
@@ -101,12 +100,12 @@ object BackupUtils {
         
 
         // This may overwrite valid local data with invalid data
-        KEY_DOWNLOAD_INFO,
+        "download_info",
 
         // Prevent backups from automatically starting downloads
-        KEY_RESUME_IN_QUEUE,
-        KEY_RESUME_PACKAGES,
-        QUEUE_KEY,
+        "download_resume_queue_key",
+        "download_resume_2",
+        "download_queue_key",
 
         // Prevent automatic plugin download after restoring backup
         "auto_download_plugins_key2"
@@ -122,12 +121,12 @@ object BackupUtils {
     // Kinda hack, but I couldn't think of a better way
     @Serializable
     data class BackupVars(
-        @JsonProperty("_Bool") @SerialName("_Bool") val bool: Map<String, Boolean>?,
-        @JsonProperty("_Int") @SerialName("_Int") val int: Map<String, Int>?,
-        @JsonProperty("_String") @SerialName("_String") val string: Map<String, String>?,
-        @JsonProperty("_Float") @SerialName("_Float") val float: Map<String, Float>?,
-        @JsonProperty("_Long") @SerialName("_Long") val long: Map<String, Long>?,
-        @JsonProperty("_StringSet") @SerialName("_StringSet") val stringSet: Map<String, Set<String>?>?,
+        @SerialName("_Bool") val bool: Map<String, Boolean>? = null,
+        @SerialName("_Int") val int: Map<String, Int>? = null,
+        @SerialName("_String") val string: Map<String, String>? = null,
+        @SerialName("_Float") val float: Map<String, Float>? = null,
+        @SerialName("_Long") val long: Map<String, Long>? = null,
+        @SerialName("_StringSet") val stringSet: Map<String, Set<String>?>? = null,
     )
 
     @Serializable
@@ -138,26 +137,13 @@ object BackupUtils {
 
     @Suppress("UNCHECKED_CAST")
     private fun getBackup(context: Context): BackupFile {
-        val allData = context.getSharedPrefs().all.filter { it.key.isTransferable() }
-        val allSettings = context.getDefaultSharedPrefs().all.filter { it.key.isTransferable() }
+        val allData = AppPreferenceManager.getAllSync().filter { it.key.isTransferable() }
 
         val allDataSorted = BackupVars(
-            allData.filter { it.value is Boolean } as? Map<String, Boolean>,
-            allData.filter { it.value is Int } as? Map<String, Int>,
-            allData.filter { it.value is String } as? Map<String, String>,
-            allData.filter { it.value is Float } as? Map<String, Float>,
-            allData.filter { it.value is Long } as? Map<String, Long>,
-            allData.filter { it.value as? Set<String> != null } as? Map<String, Set<String>>,
+            string = allData
         )
 
-        val allSettingsSorted = BackupVars(
-            allSettings.filter { it.value is Boolean } as? Map<String, Boolean>,
-            allSettings.filter { it.value is Int } as? Map<String, Int>,
-            allSettings.filter { it.value is String } as? Map<String, String>,
-            allSettings.filter { it.value is Float } as? Map<String, Float>,
-            allSettings.filter { it.value is Long } as? Map<String, Long>,
-            allSettings.filter { it.value as? Set<String> != null } as? Map<String, Set<String>>,
-        )
+        val allSettingsSorted = BackupVars()
 
         return BackupFile(
             allDataSorted,
@@ -170,7 +156,7 @@ object BackupUtils {
         context: Context?,
         backupFile: BackupFile,
         restoreSettings: Boolean,
-        restoreDataStore: Boolean,
+        restoreData: Boolean,
     ) {
         if (context == null) return
         if (restoreSettings) {
@@ -182,7 +168,7 @@ object BackupUtils {
             context.restoreMap(backupFile.settings.stringSet, true)
         }
 
-        if (restoreDataStore) {
+        if (restoreData) {
             context.restoreMap(backupFile.datastore.bool)
             context.restoreMap(backupFile.datastore.int)
             context.restoreMap(backupFile.datastore.string)
@@ -204,25 +190,26 @@ object BackupUtils {
 
         try {
             if (!context.checkWrite()) {
-                showToast(R.string.backup_failed, Toast.LENGTH_LONG)
+                showToast(Res.string.backup_failed, Toast.LENGTH_LONG)
                 context.getActivity()?.requestRW()
                 return@ioSafe
             }
 
             val date = SimpleDateFormat("yyyy_MM_dd_HH_mm", Locale.getDefault()).format(Date(currentTimeMillis()))
-            val displayName = "CS3_Backup_${date}"
+            val displayName = "CS3_Backup_${date}.txt"
             val backupFile = getBackup(context)
-            val stream = setupBackupStream(context, displayName)
+            val baseDir = getCurrentBackupDir(context).first ?: getDefaultBackupDir(context) ?: throw IOException("Bad config")
+            val targetFile = baseDir.findFile(displayName) ?: baseDir.createFileOrThrow(displayName)
 
-            fileStream = stream.openNew()
+            fileStream = targetFile.openOutputStreamOrThrow(false)
             printStream = PrintWriter(fileStream)
             printStream.print(backupFile.toJson())
-            showToast(R.string.backup_success, Toast.LENGTH_LONG)
+            showToast(Res.string.backup_success, Toast.LENGTH_LONG)
         } catch (e: Exception) {
             logError(e)
             try {
                 showToast(
-                    txt(R.string.backup_failed_error_format, e.toString()),
+                    txt(Res.string.backup_failed_error_format, e.toString()),
                     Toast.LENGTH_LONG,
                 )
             } catch (e: Exception) {
@@ -232,18 +219,6 @@ object BackupUtils {
             printStream?.closeQuietly()
             fileStream?.closeQuietly()
         }
-    }
-
-    @Throws(IOException::class)
-    private fun setupBackupStream(context: Context, name: String, ext: String = "txt"): DownloadObjects.StreamData {
-        return setupStream(
-            baseFile = getCurrentBackupDir(context).first ?: getDefaultBackupDir(context)
-            ?: throw IOException("Bad config"),
-            name,
-            folder = null,
-            extension = ext,
-            tryResume = false,
-        )
     }
 
     fun FragmentActivity.setUpBackup() {
@@ -264,14 +239,14 @@ object BackupUtils {
                                 activity,
                                 restoredValue,
                                 restoreSettings = true,
-                                restoreDataStore = true,
+                                restoreData = true,
                             )
                             activity.runOnUiThread { activity.recreate() }
                         } catch (e: Exception) {
                             logError(e)
                             main { // smth can fail in .format
                                 showToast(
-                                    getString(R.string.restore_failed_format).format(e.toString())
+                                    txt(Res.string.restore_failed_format, e.toString())
                                 )
                             }
                         }
@@ -307,36 +282,36 @@ object BackupUtils {
         map: Map<String, T>?,
         isEditingAppSettings: Boolean = false,
     ) {
-        val editor = DataStore.editor(this, isEditingAppSettings)
-        map?.forEach {
-            if (it.key.isTransferable()) {
-                editor.setKeyRaw(it.key, it.value)
+        map?.forEach { (key, value) ->
+            if (key.isTransferable() && value != null) {
+                when (value) {
+                    is String -> AppPreferenceManager.setStringSync(key, value)
+                    is Boolean -> AppPreferenceManager.setBooleanSync(key, value)
+                    is Int -> AppPreferenceManager.setIntSync(key, value)
+                    is Set<*> -> AppPreferenceManager.setStringSetSync(key, value.filterIsInstance<String>().toSet())
+                    else -> AppPreferenceManager.setStringSync(key, value.toString())
+                }
             }
         }
-        editor.apply()
     }
 
     /**
-     * Copy of [com.lagradost.cloudstream3.utils.downloader.DownloadFileManagement.getDefaultDir],
-     * modified for backup-specific paths.
+     * Gets the default backup directory.
      */
     fun getDefaultBackupDir(context: Context): SafeFile? {
         return SafeFile.fromMedia(context, MediaFileContentType.Downloads)
     }
 
     /**
-     * Copy of [com.lagradost.cloudstream3.utils.downloader.DownloadFileManagement.getBasePath],
-     * modified for backup-specific paths.
+     * Gets current backup directory based on settings.
      */
     fun getCurrentBackupDir(context: Context): Pair<SafeFile?, String?> {
-        val settingsManager = PreferenceManager.getDefaultSharedPreferences(context)
-        val basePathSetting = settingsManager.getString(context.getString(R.string.backup_path_key), null)
+        val basePathSetting = AppPreferenceManager.getStringSync("backup_path_key", null)
         return baseBackupPathToFile(context, basePathSetting) to basePathSetting
     }
 
     /**
-     * Copy of [com.lagradost.cloudstream3.utils.downloader.DownloadFileManagement.basePathToFile],
-     * modified for backup-specific paths.
+     * Resolves a string path to SafeFile for backup storage.
      */
     private fun baseBackupPathToFile(context: Context, path: String?): SafeFile? {
         return when {

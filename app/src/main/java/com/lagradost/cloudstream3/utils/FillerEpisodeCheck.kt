@@ -9,7 +9,7 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.getKitsuId
 import com.lagradost.cloudstream3.LoadResponse.Companion.getMalId
 import com.lagradost.cloudstream3.LoadResponse.Companion.getTMDbId
 import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.ui.result.getId
+import com.lagradost.cloudstream3.models.getId
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.Coroutines.main
 import kotlinx.serialization.SerialName

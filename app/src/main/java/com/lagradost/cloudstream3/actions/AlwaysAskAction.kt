@@ -1,13 +1,13 @@
 package com.lagradost.cloudstream3.actions
 
 import android.content.Context
-import com.lagradost.cloudstream3.R
-import com.lagradost.cloudstream3.ui.result.LinkLoadingResult
-import com.lagradost.cloudstream3.ui.result.ResultEpisode
+import cloudstream.shared_ui.generated.resources.*
+import com.lagradost.cloudstream3.models.LinkLoadingResult
+import com.lagradost.cloudstream3.models.ResultEpisode
 import com.lagradost.cloudstream3.utils.txt
 
 class AlwaysAskAction : VideoClickAction() {
-    override val name = txt(R.string.player_settings_always_ask)
+    override val name = txt(Res.string.player_settings_always_ask)
     override val isPlayer = true
 
     // Only show in settings, not on a video

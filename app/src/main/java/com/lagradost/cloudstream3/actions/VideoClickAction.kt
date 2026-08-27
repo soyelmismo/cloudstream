@@ -11,7 +11,7 @@ import com.lagradost.api.Log
 import com.lagradost.cloudstream3.CommonActivity
 import com.lagradost.cloudstream3.ErrorLoadingException
 import com.lagradost.cloudstream3.MainActivity
-import com.lagradost.cloudstream3.R
+import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.actions.temp.BiglyBTPackage
 import com.lagradost.cloudstream3.actions.temp.CopyClipboardAction
 import com.lagradost.cloudstream3.actions.temp.JustPlayerPackage
@@ -25,15 +25,14 @@ import com.lagradost.cloudstream3.actions.temp.MpvYTDLPackage
 import com.lagradost.cloudstream3.actions.temp.NextPlayerPackage
 import com.lagradost.cloudstream3.actions.temp.OnlyPlayer
 import com.lagradost.cloudstream3.actions.temp.PlayInBrowserAction
-import com.lagradost.cloudstream3.actions.temp.PlayMirrorAction
 import com.lagradost.cloudstream3.actions.temp.ViewM3U8Action
 import com.lagradost.cloudstream3.actions.temp.VlcNightlyPackage
 import com.lagradost.cloudstream3.actions.temp.VlcPackage
 import com.lagradost.cloudstream3.actions.temp.WebVideoCastPackage
 import com.lagradost.cloudstream3.actions.temp.fcast.FcastAction
+import com.lagradost.cloudstream3.models.LinkLoadingResult
+import com.lagradost.cloudstream3.models.ResultEpisode
 import com.lagradost.cloudstream3.mvvm.logError
-import com.lagradost.cloudstream3.ui.result.LinkLoadingResult
-import com.lagradost.cloudstream3.ui.result.ResultEpisode
 import com.lagradost.cloudstream3.utils.Coroutines.atomicListOf
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
@@ -49,7 +48,6 @@ object VideoClickActionHolder {
         PlayInBrowserAction(),
         CopyClipboardAction(),
         ViewM3U8Action(),
-        PlayMirrorAction(),
         // main support external apps
         VlcPackage(),
         MpvPackage(),
@@ -101,17 +99,20 @@ object VideoClickActionHolder {
     fun getPlayers(activity: Activity? = null) = allVideoClickActions.filter { it.isPlayer && it.shouldShowSafe(activity, null) }
 }
 
-abstract class VideoClickAction {
-    abstract val name: UiText
+abstract class VideoClickAction : ExternalPlayerAction {
+    override val id: String
+        get() = uniqueId()
+
+    abstract override val name: UiText
 
     /** if true, the app will show dialog to select source - result.links[index] */
     open val oneSource : Boolean = false
 
     /** if true, this action could be selected as default player (one press action) in settings */
-    open val isPlayer: Boolean = false
+    override val isPlayer: Boolean = false
 
     /** Which type of sources this action can handle. */
-    open val sourceTypes: Set<ExtractorLinkType> = ExtractorLinkType.entries.toSet()
+    override val sourceTypes: Set<ExtractorLinkType> = ExtractorLinkType.entries.toSet()
 
     /** Determines which plugin a given provider is from. This is the full path to the plugin. */
     var sourcePlugin: String? = null
@@ -195,7 +196,7 @@ abstract class VideoClickAction {
         } catch (error : ErrorLoadingException) {
             CommonActivity.showToast(error.message, Toast.LENGTH_LONG)
         } catch (_: ActivityNotFoundException) {
-            CommonActivity.showToast(R.string.app_not_found_error, Toast.LENGTH_LONG)
+            CommonActivity.showToast(Res.string.app_not_found_error, Toast.LENGTH_LONG)
         } catch (t : Throwable) {
             logError(t)
             CommonActivity.showToast(t.toString(), Toast.LENGTH_LONG)

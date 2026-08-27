@@ -8,6 +8,7 @@ annotation = "1.10.0"
 appcompat = "1.7.1"
 biometric = "1.4.0-alpha07"
 buildkonfigGradlePlugin = "0.21.2"
+composeMultiplatform = "1.7.0"
 coil = { strictly = "3.3.0" } # Later versions require jvmTarget 11 or later
 colorpicker = "6b46b49"
 conscryptAndroid = { strictly = "2.5.2" } # 2.5.3 crashes everything
@@ -48,16 +49,19 @@ preferenceKtx = "1.2.1"
 previewseekbarMedia3 = "1.1.1.0"
 qrcodeKotlin = "4.5.0"
 rhino = { strictly = "1.8.1" } # Requires minSdk 26 or later beginning at version 1.9.0
+room = "2.7.0-alpha13"
 safefile = "0.0.8"
 shimmer = "0.5.0"
+sqlite = "2.5.0-alpha13"
 torrentserver = "7861970"
 tvprovider = "1.1.0"
 video = "1.0.0"
+vlcj = "4.8.3"
 workRuntimeKtx = "2.11.2"
 zipline = "1.27.0"
 
 jvmTarget = "1.8"
-jdkToolchain = "17"
+jdkToolchain = "26"
 minSdk = "23"
 compileSdk = "37"
 targetSdk = "36"
@@ -66,6 +70,7 @@ versionCode = "68"
 versionName = "4.8.0"
 
 [libraries]
+activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityKtx" }
 activity-ktx = { module = "androidx.activity:activity-ktx", version.ref = "activityKtx" }
 anime-db = { module = "com.github.recloudstream:anime-db", version.ref = "animeDb" }
 annotation = { module = "androidx.annotation:annotation", version.ref = "annotation" }
@@ -97,6 +102,7 @@ kotlin-test = { group = "org.jetbrains.kotlin", name = "kotlin-test", version.re
 kotlinx-atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version.ref = "kotlinxAtomicfu" }
 kotlinx-collections-immutable = { module = "org.jetbrains.kotlinx:kotlinx-collections-immutable", version.ref = "kotlinxCollectionsImmutable" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
+kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinxCoroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinxDatetime" }
 kotlinx-io-core = { module = "org.jetbrains.kotlinx:kotlinx-io-core", version.ref = "kotlinxIOCore" }
@@ -128,11 +134,16 @@ preference-ktx = { module = "androidx.preference:preference-ktx", version.ref = 
 previewseekbar-media3 = { module = "com.github.rubensousa:previewseekbar-media3", version.ref = "previewseekbarMedia3" }
 qrcode-kotlin = { module = "io.github.g0dkar:qrcode-kotlin", version.ref = "qrcodeKotlin" }
 rhino = { module = "org.mozilla:rhino", version.ref = "rhino" }
+room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
+room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 safefile = { module = "com.github.LagradOst:SafeFile", version.ref = "safefile" }
 shimmer = { module = "com.facebook.shimmer:shimmer", version.ref = "shimmer" }
+sqlite = { module = "androidx.sqlite:sqlite", version.ref = "sqlite" }
+sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
 torrentserver = { module = "com.github.recloudstream:torrentserver", version.ref = "torrentserver" }
 tvprovider = { module = "androidx.tvprovider:tvprovider", version.ref = "tvprovider" }
 video = { module = "com.google.android.mediahome:video", version.ref = "video" }
+vlcj = { module = "uk.co.caprica:vlcj", version.ref = "vlcj" }
 work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workRuntimeKtx" }
 zipline = { module = "app.cash.zipline:zipline-android", version.ref = "zipline" }
 
@@ -141,10 +152,13 @@ android-application = { id = "com.android.application", version.ref = "androidGr
 android-lint = { id = "com.android.lint", version.ref = "androidGradlePlugin" }
 android-multiplatform-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "androidGradlePlugin" }
 buildkonfig = { id = "com.codingfeline.buildkonfig", version.ref = "buildkonfigGradlePlugin" }
+compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlinGradlePlugin" }
 dokka = { id = "org.jetbrains.dokka", version.ref = "dokkaGradlePlugin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm" , version.ref = "kotlinGradlePlugin" }
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlinGradlePlugin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlinGradlePlugin" }
+room = { id = "androidx.room", version.ref = "room" }
 
 [bundles]
 coil = ["coil", "coil-network-okhttp"]

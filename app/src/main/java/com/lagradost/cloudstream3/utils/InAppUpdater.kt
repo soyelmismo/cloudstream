@@ -11,8 +11,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.content.edit
-import androidx.preference.PreferenceManager
 import com.fasterxml.jackson.annotation.JsonProperty
+import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.BuildConfig
 import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.MainActivity.Companion.deleteFileOnExit
@@ -21,10 +21,12 @@ import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.mvvm.safe
 import com.lagradost.cloudstream3.services.PackageInstallerService
+import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager
 import com.lagradost.cloudstream3.utils.AppContextUtils.setDefaultFocus
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.GitInfo.currentCommitHash
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
@@ -32,6 +34,7 @@ import kotlinx.serialization.Serializable
 import okio.BufferedSink
 import okio.buffer
 import okio.sink
+import org.jetbrains.compose.resources.getString
 import java.io.BufferedReader
 import java.io.File
 import java.io.IOException
@@ -236,9 +239,9 @@ object InAppUpdater {
         }
 
         if (isInstalled) {
-            showToast(R.string.prerelease_already_installed)
+            showToast(Res.string.prerelease_already_installed)
         } else if (!runAutoUpdate(checkAutoUpdate = false, installPrerelease = true)) {
-            showToast(R.string.prerelease_install_failed)
+            showToast(Res.string.prerelease_install_failed)
         }
     }
 
@@ -250,9 +253,11 @@ object InAppUpdater {
     suspend fun Activity.runAutoUpdate(
         checkAutoUpdate: Boolean = true, installPrerelease: Boolean = false
     ): Boolean {
-        val settingsManager = PreferenceManager.getDefaultSharedPreferences(this)
         val autoUpdateEnabled =
-            settingsManager.getBoolean(getString(R.string.auto_update_key), true)
+            com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager.getBooleanSync(
+                com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager.KEY_AUTO_UPDATE,
+                true
+            )
         if (checkAutoUpdate && !autoUpdateEnabled) {
             return false
         }
@@ -263,8 +268,9 @@ object InAppUpdater {
         }
 
         // Check if update should be skipped
-        val updateNodeId = settingsManager.getString(
-            getString(R.string.skip_update_key), ""
+        val updateNodeId = com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager.getStringSync(
+            com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager.KEY_SKIP_UPDATE,
+            ""
         )
 
         // Skips the update if its an automatic update and the update is skipped
@@ -281,9 +287,11 @@ object InAppUpdater {
 
                 val builder = AlertDialog.Builder(this, R.style.AlertDialogCustom)
                 builder.setTitle(
-                    getString(R.string.new_update_format).format(
-                        currentVersion?.versionName, update.updateVersion
-                    )
+                    txt(
+                        Res.string.new_update_format,
+                        currentVersion?.versionName ?: "",
+                        update.updateVersion ?: ""
+                    ).asString(this)
                 )
 
                 val logRegex = Regex("\\[(.*?)]\\((.*?)\\)")
@@ -293,27 +301,25 @@ object InAppUpdater {
 
                 builder.setMessage(sanitizedChangelog)
                 builder.apply {
-                    setPositiveButton(R.string.update) { _, _ ->
+                    setPositiveButton(txt(Res.string.update).asString(this@runAutoUpdate)) { _, _ ->
                         // Forcefully start any delayed installations
                         if (ApkInstaller.delayedInstaller?.startInstallation() == true) return@setPositiveButton
 
-                        showToast(R.string.download_started, Toast.LENGTH_LONG)
+                        showToast(Res.string.download_started, Toast.LENGTH_LONG)
 
                         // Check if the setting hasn't been changed
-                        if (settingsManager.getInt(
-                                getString(R.string.apk_installer_key), -1
+                        if (AppPreferenceManager.getIntSync(
+                                "apk_installer_key", -1
                             ) == -1
                         ) {
                             // Set to legacy installer if using MIUI
                             if (isMiUi()) {
-                                settingsManager.edit {
-                                    putInt(getString(R.string.apk_installer_key), 1)
-                                }
+                                AppPreferenceManager.setIntSync("apk_installer_key", 1)
                             }
                         }
 
-                        val currentInstaller = settingsManager.getInt(
-                            getString(R.string.apk_installer_key), 1
+                        val currentInstaller = AppPreferenceManager.getIntSync(
+                            "apk_installer_key", 1
                         )
 
                         when (currentInstaller) {
@@ -332,7 +338,7 @@ object InAppUpdater {
                                     if (!downloadUpdate(update.updateURL)) {
                                         runOnUiThread {
                                             showToast(
-                                                R.string.download_failed, Toast.LENGTH_LONG
+                                                Res.string.download_failed, Toast.LENGTH_LONG
                                             )
                                         }
                                     }
@@ -341,15 +347,14 @@ object InAppUpdater {
                         }
                     }
 
-                    setNegativeButton(R.string.cancel) { _, _ -> }
+                    setNegativeButton(txt(Res.string.cancel).asString(this@runAutoUpdate)) { _, _ -> }
 
                     if (checkAutoUpdate) {
-                        setNeutralButton(R.string.skip_update) { _, _ ->
-                            settingsManager.edit {
-                                putString(
-                                    getString(R.string.skip_update_key), update.updateNodeId ?: ""
-                                )
-                            }
+                        setNeutralButton(txt(Res.string.skip_update).asString(this@runAutoUpdate)) { _, _ ->
+                            com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager.setStringSync(
+                                com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager.KEY_SKIP_UPDATE,
+                                update.updateNodeId ?: ""
+                            )
                         }
                     }
                 }

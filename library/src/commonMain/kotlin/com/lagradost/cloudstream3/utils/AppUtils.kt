@@ -21,6 +21,9 @@ object AppUtils {
         return toJsonLiteral()
     }
 
+    @kotlin.jvm.JvmName("toJsonFunction")
+    fun toJson(value: Any): String = value.toJson()
+
     /** Sometimes we want to encode as JSON even if it is already a String. */
     @InternalAPI
     fun Any.toJsonLiteral(): String {

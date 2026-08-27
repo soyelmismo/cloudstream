@@ -10,12 +10,14 @@ import android.util.Log
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.edit
 import androidx.core.net.toUri
-import androidx.preference.PreferenceManager
+import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.BuildConfig
 import com.lagradost.cloudstream3.CommonActivity.showToast
 import com.lagradost.cloudstream3.R
-import com.lagradost.cloudstream3.ui.settings.Globals.PHONE
-import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
+import com.lagradost.cloudstream3.utils.Globals.PHONE
+import com.lagradost.cloudstream3.utils.Globals.isLayout
+import kotlinx.coroutines.runBlocking
+import org.jetbrains.compose.resources.getString
 
 private const val PACKAGE_NAME = BuildConfig.APPLICATION_ID
 private const val TAG = "PowerManagerAPI"
@@ -38,17 +40,17 @@ object BatteryOptimizationChecker {
     }
 
     fun Context.showBatteryOptimizationDialog() {
-        val settingsManager = PreferenceManager.getDefaultSharedPreferences(this)
         try {
             AlertDialog.Builder(this)
-                .setTitle(R.string.battery_dialog_title)
+                .setTitle(txt(Res.string.battery_dialog_title).asString(this))
                 .setIcon(R.drawable.ic_battery)
-                .setMessage(R.string.battery_dialog_message)
-                .setPositiveButton(R.string.ok) { _, _ -> showRequestIgnoreBatteryOptDialog() }
-                .setNegativeButton(R.string.cancel) { _, _ ->
-                    settingsManager.edit {
-                        putBoolean(getString(R.string.battery_optimisation_key), false)
-                    }
+                .setMessage(txt(Res.string.battery_dialog_message).asString(this))
+                .setPositiveButton(txt(Res.string.ok).asString(this)) { _, _ -> showRequestIgnoreBatteryOptDialog() }
+                .setNegativeButton(txt(Res.string.cancel).asString(this)) { _, _ ->
+                    com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager.setBooleanSync(
+                        com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager.KEY_BATTERY_OPTIMISATION,
+                        false
+                    )
                 }
                 .show()
         } catch (t: Throwable) {
@@ -58,8 +60,10 @@ object BatteryOptimizationChecker {
 
     private fun shouldShowBatteryOptimizationDialog(context: Context): Boolean {
         val isRestricted = isAppRestricted(context)
-        val isOptimizedNotShown = PreferenceManager.getDefaultSharedPreferences(context)
-            .getBoolean(context.getString(R.string.battery_optimisation_key), true)
+        val isOptimizedNotShown = com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager.getBooleanSync(
+            com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager.KEY_BATTERY_OPTIMISATION,
+            true
+        )
         return isRestricted && isOptimizedNotShown && isLayout(PHONE)
     }
 
@@ -75,7 +79,7 @@ object BatteryOptimizationChecker {
             if (t is ActivityNotFoundException) {
                 showToast("Exception: Activity Not Found")
             } else {
-                showToast(R.string.app_info_intent_error)
+                showToast(Res.string.app_info_intent_error)
             }
         }
     }

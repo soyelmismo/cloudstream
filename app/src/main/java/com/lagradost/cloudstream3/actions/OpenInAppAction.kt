@@ -6,24 +6,23 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.setKey
-import com.lagradost.cloudstream3.R
+import cloudstream.shared_ui.generated.resources.*
+import com.lagradost.cloudstream3.models.LinkLoadingResult
+import com.lagradost.cloudstream3.models.ResultEpisode
 import com.lagradost.cloudstream3.mvvm.logError
-import com.lagradost.cloudstream3.ui.result.LinkLoadingResult
-import com.lagradost.cloudstream3.ui.result.ResultEpisode
-import com.lagradost.cloudstream3.ui.result.ResultFragment
+import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager
+import com.lagradost.cloudstream3.utils.AppUtils.toJson
+import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.lagradost.cloudstream3.utils.UiText
 import com.lagradost.cloudstream3.utils.txt
 import com.lagradost.cloudstream3.utils.AppContextUtils.isAppInstalled
-import com.lagradost.cloudstream3.utils.DataStoreHelper
+import com.lagradost.cloudstream3.utils.setViewPosAndResume
 import java.io.File
 
 fun updateDurationAndPosition(position: Long, duration: Long) {
     if (position <= 0 || duration <= 0) return
-    val episode = getKey<ResultEpisode>("last_opened") ?: return
-    DataStoreHelper.setViewPosAndResume(episode.id, position, duration, episode, null)
-    ResultFragment.updateUI()
+    val episode = AppPreferenceManager.getStringSync("last_opened")?.let { tryParseJson<ResultEpisode>(it) } ?: return
+    setViewPosAndResume(episode.id, position, duration, episode, null)
 }
 
 /**
@@ -79,7 +78,7 @@ abstract class OpenInAppAction(
     private val action: String = Intent.ACTION_VIEW
 ) : VideoClickAction() {
     override val name: UiText
-        get() = txt(R.string.episode_action_play_in_format, appName)
+        get() = txt(Res.string.episode_action_play_in_format, appName)
 
     override val isPlayer = true
 
@@ -99,7 +98,7 @@ abstract class OpenInAppAction(
             intent.component = ComponentName(packageName, intentClass)
         }
         putExtra(context, intent, video, result, index)
-        setKey("last_opened", video)
+        AppPreferenceManager.setStringSync("last_opened", toJson(video))
         launchResult(intent)
     }
 

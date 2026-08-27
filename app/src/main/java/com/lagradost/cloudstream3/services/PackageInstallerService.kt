@@ -10,6 +10,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.PendingIntentCompat
+import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.MainActivity
 import com.lagradost.cloudstream3.MainActivity.Companion.deleteFileOnExit
 import com.lagradost.cloudstream3.R
@@ -19,6 +20,7 @@ import com.lagradost.cloudstream3.utils.ApkInstaller
 import com.lagradost.cloudstream3.utils.AppContextUtils.createNotificationChannel
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.UIHelper.colorFromAttribute
+import com.lagradost.cloudstream3.utils.txt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -40,7 +42,7 @@ class PackageInstallerService : Service() {
             // If low priority then the notification might not show :(
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setColor(this.colorFromAttribute(R.attr.colorPrimary))
-            .setContentTitle(getString(R.string.update_notification_downloading))
+            .setContentTitle(txt(Res.string.update_notification_downloading).asString(this))
             .setContentIntent(pendingIntent)
             .setSmallIcon(R.drawable.rdload)
     }
@@ -114,13 +116,13 @@ class PackageInstallerService : Service() {
     ) {
 //        Log.d(LOG_TAG, "Downloading app update progress $percentage | $state")
         val text = when (state) {
-            ApkInstaller.InstallProgressStatus.Installing -> R.string.update_notification_installing
-            ApkInstaller.InstallProgressStatus.Preparing, ApkInstaller.InstallProgressStatus.Downloading -> R.string.update_notification_downloading
-            ApkInstaller.InstallProgressStatus.Failed -> R.string.update_notification_failed
+            ApkInstaller.InstallProgressStatus.Installing -> Res.string.update_notification_installing
+            ApkInstaller.InstallProgressStatus.Preparing, ApkInstaller.InstallProgressStatus.Downloading -> Res.string.update_notification_downloading
+            ApkInstaller.InstallProgressStatus.Failed -> Res.string.update_notification_failed
         }
 
         val newNotification = baseNotification
-            .setContentTitle(getString(text))
+            .setContentTitle(txt(text).asString(this))
             .apply {
                 if (state == ApkInstaller.InstallProgressStatus.Failed) {
                     setSmallIcon(R.drawable.rderror)

@@ -9,8 +9,8 @@ import com.lagradost.cloudstream3.utils.newExtractorLink
 
 class GoodstreamExtractor : ExtractorApi() {
     override var name = "Goodstream"
-    override val mainUrl = "https://goodstream.uno"
-    override val requiresReferer = false
+    override val mainUrl = "https://goodstream.one"
+    override val requiresReferer = true
 
     override suspend fun getUrl(
         url: String,
@@ -28,7 +28,7 @@ class GoodstreamExtractor : ExtractorApi() {
                             name,
                             link!!,
                         ) {
-                            this.referer = mainUrl
+                            this.referer = referer ?: url
                         }
                     )
                 }

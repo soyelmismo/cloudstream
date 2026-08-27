@@ -23,40 +23,37 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.MainThread
 import androidx.annotation.StringRes
+import cloudstream.shared_ui.generated.resources.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SearchView
 import androidx.core.content.ContextCompat
 import androidx.core.view.children
 import androidx.core.view.isNotEmpty
-import androidx.preference.PreferenceManager
 import com.google.android.gms.cast.framework.CastSession
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigationrail.NavigationRailView
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.getKey
-import com.lagradost.cloudstream3.CloudStreamApp.Companion.removeKey
+import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager
 import com.lagradost.cloudstream3.actions.OpenInAppAction
 import com.lagradost.cloudstream3.actions.VideoClickActionHolder
-import com.lagradost.cloudstream3.databinding.ToastBinding
 import com.lagradost.cloudstream3.mvvm.logError
-import com.lagradost.cloudstream3.syncproviders.AccountManager
-import com.lagradost.cloudstream3.ui.home.HomeChildItemAdapter
-import com.lagradost.cloudstream3.ui.home.ParentItemAdapter
-import com.lagradost.cloudstream3.ui.player.PlayerPipHelper.isPIPPossible
-import com.lagradost.cloudstream3.ui.player.Torrent
-import com.lagradost.cloudstream3.ui.result.ActorAdaptor
-import com.lagradost.cloudstream3.ui.result.EpisodeAdapter
-import com.lagradost.cloudstream3.ui.result.ImageAdapter
-import com.lagradost.cloudstream3.ui.search.SearchAdapter
-import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
-import com.lagradost.cloudstream3.ui.settings.Globals.TV
-import com.lagradost.cloudstream3.ui.settings.Globals.updateTv
-import com.lagradost.cloudstream3.ui.settings.extensions.PluginAdapter
+import com.lagradost.cloudstream3.shared.syncproviders.AccountManager
+import com.lagradost.cloudstream3.shared.syncproviders.AuthRepo
+import com.lagradost.cloudstream3.shared.syncproviders.SyncConfig
+import com.lagradost.cloudstream3.shared.player.native.PlayerPipHelper.isPIPPossible
+import com.lagradost.cloudstream3.shared.player.native.Torrent
+import com.lagradost.cloudstream3.utils.AppContextUtils
+import com.lagradost.cloudstream3.utils.Globals.isLayout
+import com.lagradost.cloudstream3.utils.Globals.TV
+import com.lagradost.cloudstream3.utils.Globals.updateTv
+import com.lagradost.cloudstream3.plugins.PluginManager
+import com.lagradost.cloudstream3.plugins.VotingApi
 import com.lagradost.cloudstream3.utils.AppContextUtils.isRtl
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.Event
 import com.lagradost.cloudstream3.utils.UIHelper.showInputMethod
 import com.lagradost.cloudstream3.utils.UIHelper.toPx
 import com.lagradost.cloudstream3.utils.UiText
+import com.lagradost.cloudstream3.utils.txt
 import java.lang.ref.WeakReference
 import java.util.Locale
 import kotlin.math.max
@@ -86,7 +83,11 @@ object CommonActivity {
 
     @MainThread
     fun Activity?.getCastSession(): CastSession? {
-        return (this as MainActivity?)?.mSessionManager?.currentCastSession
+        return try {
+            this?.let { com.google.android.gms.cast.framework.CastContext.getSharedInstance(it).sessionManager.currentCastSession }
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     val displayMetrics: DisplayMetrics = Resources.getSystem().displayMetrics
@@ -129,6 +130,13 @@ object CommonActivity {
         }
     }
 
+    fun showToast(resource: org.jetbrains.compose.resources.StringResource, duration: Int? = null) {
+        val act = activity ?: return
+        act.runOnUiThread {
+            showToast(act, txt(resource), duration ?: Toast.LENGTH_SHORT)
+        }
+    }
+
     fun showToast(message: String?, duration: Int? = null) {
         val act = activity ?: return
         act.runOnUiThread {
@@ -144,7 +152,6 @@ object CommonActivity {
         }
     }
 
-
     @MainThread
     fun showToast(act: Activity?, text: UiText, duration: Int) {
         if (act == null) return
@@ -158,6 +165,13 @@ object CommonActivity {
     fun showToast(act: Activity?, @StringRes message: Int, duration: Int? = null) {
         if (act == null) return
         showToast(act, act.getString(message), duration)
+    }
+
+    /** duration is Toast.LENGTH_SHORT if null*/
+    @MainThread
+    fun showToast(act: Activity?, resource: org.jetbrains.compose.resources.StringResource, duration: Int? = null) {
+        if (act == null) return
+        showToast(act, txt(resource), duration ?: Toast.LENGTH_SHORT)
     }
 
     const val TAG = "COMPACT"
@@ -178,29 +192,9 @@ object CommonActivity {
         }
 
         try {
-            val binding = ToastBinding.inflate(act.layoutInflater)
-            binding.text.text = message.trim()
-
-            // custom toasts are deprecated and won't appear when cs3 sets minSDK to api30 (A11)
-            val toast = Toast(act)
-            toast.duration = duration ?: Toast.LENGTH_SHORT
-            toast.setGravity(Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM, 0, 5.toPx)
-            @Suppress("DEPRECATION")
-            toast.view =
-                binding.root // FIXME Find an alternative using default Toasts since custom toasts are deprecated and won't appear with api30 set as minSDK version.
+            val toast = Toast.makeText(act, message.trim(), duration ?: Toast.LENGTH_SHORT)
             currentToast = toast
             toast.show()
-
-            val handler = Handler(Looper.getMainLooper())
-            val ref = WeakReference(toast)
-
-            /* Clean up activity leak */
-            handler.postDelayed({
-                if (ref.get() == currentToast) {
-                    currentToast = null
-                }
-            }, 10_000)
-
         } catch (e: Exception) {
             logError(e)
         }
@@ -219,25 +213,12 @@ object CommonActivity {
      */
     fun setLocale(context: Context?, languageTag: String?) {
         if (context == null || languageTag == null) return
-        val locale = Locale.forLanguageTag(languageTag)
-        val resources: Resources = context.resources
-        val config = resources.configuration
+        val locale = Locale.forLanguageTag(languageTag.replace('_', '-'))
         Locale.setDefault(locale)
-        config.setLocale(locale)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N)
-            context.createConfigurationContext(config)
-
-        @Suppress("DEPRECATION")
-        resources.updateConfiguration(
-            config,
-            resources.displayMetrics
-        ) // FIXME this should be replaced
     }
 
     fun Context.updateLocale() {
-        val settingsManager = PreferenceManager.getDefaultSharedPreferences(this)
-        val localeCode = settingsManager.getString(getString(R.string.locale_key), null)
+        val localeCode = AppPreferenceManager.getStringSync(AppPreferenceManager.KEY_APP_LOCALE, null)
         setLocale(this, localeCode)
     }
 
@@ -248,6 +229,16 @@ object CommonActivity {
 
         componentActivity.updateLocale()
         componentActivity.updateTv()
+        SyncConfig.init(
+            anilistKey = BuildConfig.ANILIST_KEY,
+            malKey = BuildConfig.MAL_KEY,
+            simklClientId = BuildConfig.SIMKL_CLIENT_ID,
+            simklClientSecret = BuildConfig.SIMKL_CLIENT_SECRET
+        )
+        AuthRepo.openBrowserHandler = { url -> AppContextUtils.openBrowser(url) }
+        AuthRepo.showToastHandler = { text -> showToast(text) }
+        VotingApi.showToastHandler = { text -> showToast(text) }
+        VotingApi.canVoteHandler = { pluginUrl -> PluginManager.urlPlugins.contains(pluginUrl) }
         AccountManager.initMainAPI()
         NewPipe.init(DownloaderTestImpl.getInstance())
 
@@ -255,13 +246,13 @@ object CommonActivity {
             componentActivity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
                 if (result.resultCode == AppCompatActivity.RESULT_OK) {
                     val actionUid =
-                        getKey<String>("last_click_action") ?: return@registerForActivityResult
+                        AppPreferenceManager.getStringSync("last_click_action") ?: return@registerForActivityResult
                     Log.d(TAG, "Loading action $actionUid result handler")
                     val action = VideoClickActionHolder.getByUniqueId(actionUid) as? OpenInAppAction
                         ?: return@registerForActivityResult
                     action.onResultSafe(act, result.data)
-                    removeKey("last_click_action")
-                    removeKey("last_opened")
+                    AppPreferenceManager.deletePreferenceSync("last_click_action")
+                    AppPreferenceManager.deletePreferenceSync("last_opened")
                 }
             }
 
@@ -314,9 +305,7 @@ object CommonActivity {
     }
 
     fun updateTheme(act: Activity) {
-        val settingsManager = PreferenceManager.getDefaultSharedPreferences(act)
-        if (settingsManager
-                .getString(act.getString(R.string.app_theme_key), "AmoledLight") == "System"
+        if (AppPreferenceManager.getStringSync(AppPreferenceManager.KEY_APP_THEME, "AmoledLight") == "System"
             && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
         ) {
             loadThemes(act)
@@ -338,10 +327,8 @@ object CommonActivity {
 
     fun loadThemes(act: Activity?) {
         if (act == null) return
-        val settingsManager = PreferenceManager.getDefaultSharedPreferences(act)
-
         val currentTheme =
-            when (settingsManager.getString(act.getString(R.string.app_theme_key), "AmoledLight")) {
+            when (AppPreferenceManager.getStringSync(AppPreferenceManager.KEY_APP_THEME, "AmoledLight")) {
                 "System" -> mapSystemTheme(act)
                 "Black" -> R.style.AppTheme
                 "Light" -> R.style.LightMode
@@ -358,7 +345,7 @@ object CommonActivity {
             }
 
         val currentOverlayTheme =
-            when (settingsManager.getString(act.getString(R.string.primary_color_key), "Normal")) {
+            when (AppPreferenceManager.getStringSync("primary_color_key", "Normal")) {
                 "Normal" -> R.style.OverlayPrimaryColorNormal
                 "DandelionYellow" -> R.style.OverlayPrimaryColorDandelionYellow
                 "CarnationPink" -> R.style.OverlayPrimaryColorCarnationPink
@@ -470,7 +457,7 @@ object CommonActivity {
             }
 
             is NavigationRailView -> {
-                next.findViewById(next.selectedItemId) ?: next.findViewById(R.id.navigation_home)
+                next.findViewById(next.selectedItemId)
             }
 
             else -> null
