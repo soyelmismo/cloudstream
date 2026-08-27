@@ -1,5 +1,11 @@
 package com.lagradost.cloudstream3.shared.ui.settings
 
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
+import com.lagradost.cloudstream3.shared.viewmodels.settings.AppTheme
+import com.lagradost.cloudstream3.shared.viewmodels.settings.SubtitleStyle
+import com.lagradost.cloudstream3.shared.viewmodels.settings.DohProvider
+import com.lagradost.cloudstream3.shared.syncproviders.AuthUser
+import com.lagradost.cloudstream3.shared.syncproviders.AuthLoginResponse
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -105,10 +111,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import com.lagradost.cloudstream3.shared.backup.BackupCategory
 import com.lagradost.cloudstream3.shared.ui.theme.CloudstreamTheme
-import com.lagradost.cloudstream3.shared.viewmodels.settings.AppSettingsEvent
 import com.lagradost.cloudstream3.shared.viewmodels.settings.AppSettingsState
 import com.lagradost.cloudstream3.shared.viewmodels.settings.AppSettingsViewModel
 import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginsSettingsViewModel
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 /**
  * Main Settings Screen connecting AppSettingsViewModel and PluginsSettingsViewModel.
@@ -151,7 +160,7 @@ fun SettingsScreen(
         titlePlugins, descPlugins,
         titleGeneral, descGeneral
     ) {
-        listOf(
+        persistentListOf(
             SettingsCategory(
                 id = "appearance",
                 title = titleAppearance,
@@ -208,26 +217,40 @@ fun SettingsScreen(
         when (currentCategory.id) {
             "appearance" -> AppearanceSettingsSection(
                 state = appState,
-                onEvent = appSettingsViewModel::handleEvent,
+                onThemeSelected = appSettingsViewModel::setTheme,
+                onDarkModeChanged = appSettingsViewModel::setDarkMode,
                 onOpenLanguageDialog = { showLanguageDialog = true }
             )
             "player_subtitles" -> PlayerSubtitlesSettingsSection(
                 state = appState,
-                onEvent = appSettingsViewModel::handleEvent
+                onQualityWifiChanged = appSettingsViewModel::setQualityWifi,
+                onQualityMobileChanged = appSettingsViewModel::setQualityMobile,
+                onSoftwareDecodingChanged = appSettingsViewModel::setSoftwareDecoding,
+                onSubtitleEncodingChanged = appSettingsViewModel::setSubtitleEncoding,
+                onShowSourcesOnPlayChanged = appSettingsViewModel::setShowSourcesOnPlay,
+                onDefaultSubtitleStyleChanged = appSettingsViewModel::setDefaultSubtitleStyle
             )
             "sync_accounts" -> SyncAccountsSettingsSection(
                 state = appState,
-                onEvent = appSettingsViewModel::handleEvent,
+                onStartOAuthLogin = appSettingsViewModel::startOAuthLogin,
+                onSwitchActiveAccount = appSettingsViewModel::switchActiveAccount,
+                onLogoutAccount = appSettingsViewModel::logoutAccount,
+                onSyncWatchProgressChanged = appSettingsViewModel::setSyncWatchProgress,
+                onSyncScoresChanged = appSettingsViewModel::setSyncScores,
+                onSyncWifiOnlyChanged = appSettingsViewModel::setSyncWifiOnly,
+                onSkipStartupAccountSelectChanged = appSettingsViewModel::setSkipStartupAccountSelect,
                 onNavigateToAccountSelect = onNavigateToAccountSelect
             )
             "backup_restore" -> BackupRestoreSettingsSection(
                 state = appState,
-                onEvent = appSettingsViewModel::handleEvent,
+                onExportBackup = appSettingsViewModel::exportBackupWithPicker,
+                onImportBackup = appSettingsViewModel::importBackupWithPicker,
+                onClearBackupMessage = appSettingsViewModel::clearBackupMessage,
                 onRequestReset = { showResetDialog = true }
             )
             "network_dns" -> NetworkDnsSettingsSection(
                 state = appState,
-                onEvent = appSettingsViewModel::handleEvent
+                onDohProviderSelected = appSettingsViewModel::setDohProvider
             )
             "plugins" -> {
                 if (pluginsViewModel != null) {
@@ -240,18 +263,20 @@ fun SettingsScreen(
             }
             "general" -> GeneralSettingsSection(
                 state = appState,
-                onEvent = appSettingsViewModel::handleEvent,
+                onSyncWatchProgressChanged = appSettingsViewModel::setSyncWatchProgress,
+                onSyncScoresChanged = appSettingsViewModel::setSyncScores,
+                onSyncWifiOnlyChanged = appSettingsViewModel::setSyncWifiOnly,
+                onSkipStartupAccountSelectChanged = appSettingsViewModel::setSkipStartupAccountSelect,
                 onRequestReset = { showResetDialog = true },
                 onNavigateToAccountSelect = onNavigateToAccountSelect
             )
         }
     }
 
-    // Modal: Reset Preferences Confirmation
     if (showResetDialog) {
         ConfirmDeleteDialog(
             onConfirm = {
-                appSettingsViewModel.handleEvent(AppSettingsEvent.ResetToDefaults)
+                appSettingsViewModel.resetToDefaults()
                 showResetDialog = false
             },
             onDismiss = { showResetDialog = false },
@@ -261,7 +286,6 @@ fun SettingsScreen(
         )
     }
 
-    // Modal: App Language Dialog
     if (showLanguageDialog) {
         val formatPattern = stringResource(Res.string.lang_code_format)
         val supportedLanguages = listOf(
@@ -284,7 +308,7 @@ fun SettingsScreen(
             itemLabel = { it.second },
             itemSubtitle = { formatPattern.replace("%s", it.first) },
             onItemSelected = {
-                appSettingsViewModel.handleEvent(AppSettingsEvent.SetAppLanguage(it.first))
+                appSettingsViewModel.setAppLanguage(it.first)
                 showLanguageDialog = false
             },
             onDismissRequest = { showLanguageDialog = false }
@@ -292,13 +316,11 @@ fun SettingsScreen(
     }
 }
 
-/**
- * 1. Appearance Section
- */
 @Composable
 fun AppearanceSettingsSection(
     state: AppSettingsState,
-    onEvent: (AppSettingsEvent) -> Unit,
+    onThemeSelected: (AppTheme) -> Unit,
+    onDarkModeChanged: (Boolean) -> Unit,
     onOpenLanguageDialog: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -308,7 +330,6 @@ fun AppearanceSettingsSection(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Visual Theme Selector
         SettingsCard {
             SettingsSectionHeader(
                 title = stringResource(Res.string.theme),
@@ -319,12 +340,11 @@ fun AppearanceSettingsSection(
 
             ThemeSelector(
                 selectedTheme = state.theme,
-                onThemeSelected = { onEvent(AppSettingsEvent.SetTheme(it)) },
+                onThemeSelected = onThemeSelected,
                 isDarkMode = state.isDarkMode
             )
         }
 
-        // Dark Mode & System Preferences
         SettingsCard {
             SettingsSectionHeader(
                 title = stringResource(Res.string.sectionAppearance),
@@ -335,7 +355,7 @@ fun AppearanceSettingsSection(
                 title = stringResource(Res.string.darkMode),
                 subtitle = stringResource(Res.string.darkModeDesc),
                 checked = state.isDarkMode,
-                onCheckedChange = { onEvent(AppSettingsEvent.SetDarkMode(it)) }
+                onCheckedChange = onDarkModeChanged
             )
 
             Divider(color = CloudstreamTheme.extendedColors.divider)
@@ -351,13 +371,15 @@ fun AppearanceSettingsSection(
     }
 }
 
-/**
- * 2. Player & Subtitles Section
- */
 @Composable
 fun PlayerSubtitlesSettingsSection(
     state: AppSettingsState,
-    onEvent: (AppSettingsEvent) -> Unit,
+    onQualityWifiChanged: (Int) -> Unit,
+    onQualityMobileChanged: (Int) -> Unit,
+    onSoftwareDecodingChanged: (Int) -> Unit,
+    onSubtitleEncodingChanged: (String) -> Unit,
+    onShowSourcesOnPlayChanged: (Boolean) -> Unit,
+    onDefaultSubtitleStyleChanged: (SubtitleStyle) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showWifiQualityDialog by remember { mutableStateOf(false) }
@@ -366,33 +388,27 @@ fun PlayerSubtitlesSettingsSection(
     var showSubtitleEncodingDialog by remember { mutableStateOf(false) }
 
     val autoText = stringResource(Res.string.quality_auto)
-    val fourKText = stringResource(Res.string.quality_4k)
-    val hdText = stringResource(Res.string.quality_hd)
-    val sdText = stringResource(Res.string.quality_sd)
+    val autoDecodingText = stringResource(Res.string.automatic)
 
-    val qualityOptions = remember(autoText, fourKText, hdText, sdText) {
+    val qualityOptions = remember(autoText) {
         listOf(
             0 to autoText,
-            2160 to "2160p ($fourKText)",
-            1440 to "1440p ($hdText)",
-            1080 to "1080p ($hdText)",
-            720 to "720p ($hdText)",
-            480 to "480p ($sdText)",
-            360 to "360p ($sdText)",
-            240 to "240p ($sdText)"
+            2160 to "2160p (4K)",
+            1440 to "1440p (HD)",
+            1080 to "1080p (HD)",
+            720 to "720p (HD)",
+            480 to "480p (SD)",
+            360 to "360p (SD)",
+            240 to "240p (SD)"
         )
     }
 
-    val autoDecodingText = stringResource(Res.string.automatic)
-    val hwSwText = stringResource(Res.string.decoding_hw_sw)
-    val hwOnlyText = stringResource(Res.string.decoding_hw_only)
-    val swPreferredText = stringResource(Res.string.decoding_sw_preferred)
-    val softwareDecodingOptions = remember(autoDecodingText, hwSwText, hwOnlyText, swPreferredText) {
+    val softwareDecodingOptions = remember(autoDecodingText) {
         listOf(
             -1 to autoDecodingText,
-            0 to hwSwText,
-            1 to hwOnlyText,
-            2 to swPreferredText
+            0 to "Hardware & Software",
+            1 to "Hardware Only",
+            2 to "Software Preferred"
         )
     }
 
@@ -416,14 +432,12 @@ fun PlayerSubtitlesSettingsSection(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Video Quality & Playback Preferences
         SettingsCard {
             SettingsSectionHeader(
                 title = stringResource(Res.string.video_quality),
                 icon = Icons.Default.Tune
             )
 
-            // Preferred Video Quality (WiFi)
             SettingsItemRow(
                 title = stringResource(Res.string.watch_quality_pref),
                 subtitle = stringResource(Res.string.video_quality),
@@ -433,7 +447,6 @@ fun PlayerSubtitlesSettingsSection(
 
             Divider(color = CloudstreamTheme.extendedColors.divider)
 
-            // Preferred Video Quality (Mobile Data)
             SettingsItemRow(
                 title = stringResource(Res.string.watch_quality_pref_data),
                 subtitle = stringResource(Res.string.video_quality),
@@ -443,7 +456,6 @@ fun PlayerSubtitlesSettingsSection(
 
             Divider(color = CloudstreamTheme.extendedColors.divider)
 
-            // Software Decoding Option
             SettingsItemRow(
                 title = stringResource(Res.string.software_decoding),
                 subtitle = stringResource(Res.string.software_decoding_desc),
@@ -457,17 +469,15 @@ fun PlayerSubtitlesSettingsSection(
                 title = stringResource(Res.string.view_sources_on_play),
                 subtitle = stringResource(Res.string.view_sources_on_play_summary),
                 checked = state.showSourcesOnPlay,
-                onCheckedChange = { onEvent(AppSettingsEvent.SetShowSourcesOnPlay(it)) }
+                onCheckedChange = onShowSourcesOnPlayChanged
             )
         }
 
-        // Subtitle Live Customizer
         SubtitleCustomizer(
             style = state.subtitleStyle,
-            onStyleChanged = { onEvent(AppSettingsEvent.SetDefaultSubtitleStyle(it)) }
+            onStyleChanged = onDefaultSubtitleStyleChanged
         )
 
-        // Subtitle Character Encoding Card
         SettingsCard {
             SettingsSectionHeader(
                 title = stringResource(Res.string.pref_category_subtitles),
@@ -483,7 +493,6 @@ fun PlayerSubtitlesSettingsSection(
         }
     }
 
-    // Modal: Preferred WiFi Quality Dialog
     if (showWifiQualityDialog) {
         SettingsChoiceDialog(
             title = stringResource(Res.string.watch_quality_pref),
@@ -491,14 +500,13 @@ fun PlayerSubtitlesSettingsSection(
             selectedItem = qualityOptions.firstOrNull { it.first == state.qualityWifi } ?: qualityOptions.first(),
             itemLabel = { it.second },
             onItemSelected = {
-                onEvent(AppSettingsEvent.SetQualityWifi(it.first))
+                onQualityWifiChanged(it.first)
                 showWifiQualityDialog = false
             },
             onDismissRequest = { showWifiQualityDialog = false }
         )
     }
 
-    // Modal: Preferred Mobile Quality Dialog
     if (showMobileQualityDialog) {
         SettingsChoiceDialog(
             title = stringResource(Res.string.watch_quality_pref_data),
@@ -506,14 +514,13 @@ fun PlayerSubtitlesSettingsSection(
             selectedItem = qualityOptions.firstOrNull { it.first == state.qualityMobile } ?: qualityOptions.first(),
             itemLabel = { it.second },
             onItemSelected = {
-                onEvent(AppSettingsEvent.SetQualityMobile(it.first))
+                onQualityMobileChanged(it.first)
                 showMobileQualityDialog = false
             },
             onDismissRequest = { showMobileQualityDialog = false }
         )
     }
 
-    // Modal: Software Decoding Mode Dialog
     if (showSoftwareDecodingDialog) {
         SettingsChoiceDialog(
             title = stringResource(Res.string.software_decoding),
@@ -521,14 +528,13 @@ fun PlayerSubtitlesSettingsSection(
             selectedItem = softwareDecodingOptions.firstOrNull { it.first == state.softwareDecoding } ?: softwareDecodingOptions.first(),
             itemLabel = { it.second },
             onItemSelected = {
-                onEvent(AppSettingsEvent.SetSoftwareDecoding(it.first))
+                onSoftwareDecodingChanged(it.first)
                 showSoftwareDecodingDialog = false
             },
             onDismissRequest = { showSoftwareDecodingDialog = false }
         )
     }
 
-    // Modal: Subtitle Character Encoding Dialog
     if (showSubtitleEncodingDialog) {
         SettingsChoiceDialog(
             title = stringResource(Res.string.subtitles_encoding),
@@ -536,7 +542,7 @@ fun PlayerSubtitlesSettingsSection(
             selectedItem = subtitleEncodings.firstOrNull { it.equals(state.subtitleEncoding, ignoreCase = true) } ?: subtitleEncodings.first(),
             itemLabel = { it },
             onItemSelected = {
-                onEvent(AppSettingsEvent.SetSubtitleEncoding(it))
+                onSubtitleEncodingChanged(it)
                 showSubtitleEncodingDialog = false
             },
             onDismissRequest = { showSubtitleEncodingDialog = false }
@@ -544,23 +550,25 @@ fun PlayerSubtitlesSettingsSection(
     }
 }
 
-/**
- * 3. Sync & Accounts Section (AniList, MAL, Simkl, Kitsu, OpenSubtitles, Subdl, Addic7ed, SubSource, and Sync Preferences)
- */
 @Composable
 fun SyncAccountsSettingsSection(
     state: AppSettingsState,
-    onEvent: (AppSettingsEvent) -> Unit,
+    onStartOAuthLogin: (AuthRepo) -> Unit,
+    onSwitchActiveAccount: (AuthRepo, Int) -> Unit,
+    onLogoutAccount: (AuthRepo, AuthUser) -> Unit,
+    onSyncWatchProgressChanged: (Boolean) -> Unit,
+    onSyncScoresChanged: (Boolean) -> Unit,
+    onSyncWifiOnlyChanged: (Boolean) -> Unit,
+    onSkipStartupAccountSelectChanged: (Boolean) -> Unit,
     onNavigateToAccountSelect: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
 
-    val syncProviders = remember { AccountManager.syncApis.filter { it.requiresLogin } }
-    val subtitleProviders = remember { AccountManager.subtitleProviders.toList() }
+    val syncProviders = remember { AccountManager.syncApis.filter { it.requiresLogin }.toImmutableList() }
+    val subtitleProviders = remember { AccountManager.subtitleProviders.toImmutableList() }
 
-    // Active Dialog States
     var activeAccountDialogRepo by remember { mutableStateOf<AuthRepo?>(null) }
     var activeLoginDialogRepo by remember { mutableStateOf<AuthRepo?>(null) }
     var activePinDialogRepo by remember { mutableStateOf<AuthRepo?>(null) }
@@ -576,7 +584,6 @@ fun SyncAccountsSettingsSection(
     var pinErrorMessage by remember { mutableStateOf<String?>(null) }
     var oauthErrorMessage by remember { mutableStateOf<String?>(null) }
 
-    // Simkl PIN verification polling
     LaunchedEffect(activePinData) {
         val pinData = activePinData ?: return@LaunchedEffect
         val repo = activePinDialogRepo ?: return@LaunchedEffect
@@ -599,347 +606,384 @@ fun SyncAccountsSettingsSection(
         }
     }
 
+    val onProviderClick: (AuthRepo) -> Unit = { repo ->
+        val authUser = state.activeAuthAccounts[repo.idPrefix]?.user
+        if (authUser != null) {
+            activeAccountDialogRepo = repo
+        } else if (repo.hasPin) {
+            pinErrorMessage = null
+            isPinLoading = true
+            activePinDialogRepo = repo
+            coroutineScope.launch {
+                try {
+                    activePinData = repo.pinRequest()
+                } catch (t: Throwable) {
+                    pinErrorMessage = t.message
+                } finally {
+                    isPinLoading = false
+                }
+            }
+        } else if (repo.hasOAuth2) {
+            val page = repo.api.loginRequest()
+            if (page != null) {
+                activeOAuthDialogRepo = repo
+                activeOAuthUrl = page.url
+                oauthErrorMessage = null
+                isOAuthLoading = false
+                try {
+                    uriHandler.openUri(page.url)
+                } catch (_: Throwable) {
+                    repo.openOAuth2Page()
+                }
+            } else {
+                onStartOAuthLogin(repo)
+            }
+        } else if (repo.hasInApp) {
+            loginErrorMessage = null
+            isLoginLoading = false
+            activeLoginDialogRepo = repo
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Tracking & Scrobbling Card (AniList, MAL, Simkl, Kitsu)
-        SettingsCard {
-            SettingsSectionHeader(
-                title = stringResource(Res.string.sync_category_tracking),
-                description = stringResource(Res.string.sync_category_tracking_desc),
-                icon = Icons.Default.Person,
-                iconTint = MaterialTheme.colors.primary
-            )
+        SyncTrackingProvidersCard(
+            providers = syncProviders,
+            state = state,
+            onProviderClick = onProviderClick
+        )
 
-            syncProviders.forEachIndexed { index, repo ->
-                val authUser = state.activeAuthAccounts[repo.idPrefix]?.user
-                SettingsItemRow(
-                    title = repo.name,
-                    subtitle = if (authUser != null) {
-                        stringResource(Res.string.sync_logged_in_as, authUser.name ?: "")
-                    } else {
-                        stringResource(Res.string.sync_not_connected)
-                    },
-                    onClick = {
-                        if (authUser != null) {
-                            activeAccountDialogRepo = repo
-                        } else if (repo.hasPin) {
-                            pinErrorMessage = null
-                            isPinLoading = true
-                            activePinDialogRepo = repo
-                            coroutineScope.launch {
-                                try {
-                                    activePinData = repo.pinRequest()
-                                } catch (t: Throwable) {
-                                    pinErrorMessage = t.message
-                                } finally {
-                                    isPinLoading = false
-                                }
-                            }
-                        } else if (repo.hasOAuth2) {
-                            val page = repo.api.loginRequest()
-                            if (page != null) {
-                                activeOAuthDialogRepo = repo
-                                activeOAuthUrl = page.url
-                                oauthErrorMessage = null
-                                isOAuthLoading = false
-                                try {
-                                    uriHandler.openUri(page.url)
-                                } catch (_: Throwable) {
-                                    repo.openOAuth2Page()
-                                }
-                            } else {
-                                onEvent(AppSettingsEvent.StartOAuthLogin(repo))
-                            }
-                        } else if (repo.hasInApp) {
-                            loginErrorMessage = null
-                            isLoginLoading = false
-                            activeLoginDialogRepo = repo
-                        }
-                    }
-                )
+        SyncSubtitleProvidersCard(
+            providers = subtitleProviders,
+            state = state,
+            onProviderClick = onProviderClick,
+            onOpenInfo = { activeInfoDialogRepo = it }
+        )
 
-                if (index < syncProviders.lastIndex) {
-                    Divider(color = CloudstreamTheme.extendedColors.divider)
-                }
-            }
-        }
-
-        // 2. Subtitle Accounts Card (OpenSubtitles, Subdl, Addic7ed, SubSource)
-        SettingsCard {
-            SettingsSectionHeader(
-                title = stringResource(Res.string.sync_category_subtitles),
-                description = stringResource(Res.string.sync_category_subtitles_desc),
-                icon = Icons.Default.Subtitles,
-                iconTint = MaterialTheme.colors.secondary
-            )
-
-            subtitleProviders.forEachIndexed { index, repo ->
-                val authUser = state.activeAuthAccounts[repo.idPrefix]?.user
-                SettingsItemRow(
-                    title = repo.name,
-                    subtitle = if (repo.requiresLogin) {
-                        if (authUser != null) {
-                            stringResource(Res.string.sync_logged_in_as, authUser.name ?: "")
-                        } else {
-                            stringResource(Res.string.sync_not_connected)
-                        }
-                    } else {
-                        stringResource(Res.string.sync_no_account_needed)
-                    },
-                    onClick = {
-                        if (repo.requiresLogin) {
-                            if (authUser != null) {
-                                activeAccountDialogRepo = repo
-                            } else if (repo.hasInApp) {
-                                loginErrorMessage = null
-                                isLoginLoading = false
-                                activeLoginDialogRepo = repo
-                            } else if (repo.hasOAuth2) {
-                                onEvent(AppSettingsEvent.StartOAuthLogin(repo))
-                            } else if (repo.hasPin) {
-                                pinErrorMessage = null
-                                isPinLoading = true
-                                activePinDialogRepo = repo
-                                coroutineScope.launch {
-                                    try {
-                                        activePinData = repo.pinRequest()
-                                    } catch (t: Throwable) {
-                                        pinErrorMessage = t.message
-                                    } finally {
-                                        isPinLoading = false
-                                    }
-                                }
-                            }
-                        } else {
-                            activeInfoDialogRepo = repo
-                        }
-                    }
-                )
-
-                if (index < subtitleProviders.lastIndex) {
-                    Divider(color = CloudstreamTheme.extendedColors.divider)
-                }
-            }
-        }
-
-        // 3. Sync Preferences Card
-        SettingsCard {
-            SettingsSectionHeader(
-                title = stringResource(Res.string.sync_category_preferences),
-                icon = Icons.Default.Tune,
-                iconTint = MaterialTheme.colors.primary
-            )
-
-            // Watch Progress
-            SettingsSwitchItem(
-                title = stringResource(Res.string.sync_watch_progress),
-                subtitle = stringResource(Res.string.sync_watch_progress_desc),
-                checked = state.syncWatchProgress,
-                onCheckedChange = { onEvent(AppSettingsEvent.SetSyncWatchProgress(it)) }
-            )
-
-            Divider(color = CloudstreamTheme.extendedColors.divider)
-
-            // Scores & Ratings
-            SettingsSwitchItem(
-                title = stringResource(Res.string.sync_scores),
-                subtitle = stringResource(Res.string.sync_scores_desc),
-                checked = state.syncScores,
-                onCheckedChange = { onEvent(AppSettingsEvent.SetSyncScores(it)) }
-            )
-
-            Divider(color = CloudstreamTheme.extendedColors.divider)
-
-            // Wi-Fi Only
-            SettingsSwitchItem(
-                title = stringResource(Res.string.sync_wifi_only),
-                subtitle = stringResource(Res.string.sync_wifi_only_desc),
-                checked = state.syncWifiOnly,
-                onCheckedChange = { onEvent(AppSettingsEvent.SetSyncWifiOnly(it)) }
-            )
-
-            Divider(color = CloudstreamTheme.extendedColors.divider)
-
-            // Skip profile select on startup
-            SettingsSwitchItem(
-                title = stringResource(Res.string.skip_startup_account_select_pref),
-                subtitle = stringResource(Res.string.skip_startup_account_select_desc),
-                checked = state.skipStartupAccountSelect,
-                onCheckedChange = { onEvent(AppSettingsEvent.SetSkipStartupAccountSelect(it)) }
-            )
-        }
-    }
-
-    // Modal Dialog: Connected Account Management (Switch, Add, Logout, Open in Browser)
-    val currentAccountRepo = activeAccountDialogRepo
-    if (currentAccountRepo != null) {
-        val currentAuth = state.activeAuthAccounts[currentAccountRepo.idPrefix]
-        ProviderAccountDialog(
-            providerName = currentAccountRepo.name,
-            providerIcon = currentAccountRepo.icon,
-            currentUser = currentAuth?.user,
-            accounts = currentAccountRepo.accounts.toList(),
-            onSelectAccount = { data ->
-                onEvent(AppSettingsEvent.SwitchActiveAccount(currentAccountRepo, data.user.id))
-            },
-            onAddAccount = {
-                val targetRepo = currentAccountRepo
-                activeAccountDialogRepo = null
-                if (targetRepo.hasInApp) {
-                    loginErrorMessage = null
-                    isLoginLoading = false
-                    activeLoginDialogRepo = targetRepo
-                } else if (targetRepo.hasPin) {
-                    pinErrorMessage = null
-                    isPinLoading = true
-                    activePinDialogRepo = targetRepo
-                    coroutineScope.launch {
-                        try {
-                            activePinData = targetRepo.pinRequest()
-                        } catch (t: Throwable) {
-                            pinErrorMessage = t.message
-                        } finally {
-                            isPinLoading = false
-                        }
-                    }
-                } else if (targetRepo.hasOAuth2) {
-                    onEvent(AppSettingsEvent.StartOAuthLogin(targetRepo))
-                }
-            },
-            onLogout = { user ->
-                onEvent(AppSettingsEvent.LogoutAccount(currentAccountRepo, user))
-                activeAccountDialogRepo = null
-            },
-            onDismiss = {
-                activeAccountDialogRepo = null
-            }
+        SyncPreferencesCard(
+            state = state,
+            onSyncWatchProgressChanged = onSyncWatchProgressChanged,
+            onSyncScoresChanged = onSyncScoresChanged,
+            onSyncWifiOnlyChanged = onSyncWifiOnlyChanged,
+            onSkipStartupAccountSelectChanged = onSkipStartupAccountSelectChanged
         )
     }
 
-    // Modal Dialog: In-App Credentials Login (Kitsu, OpenSubtitles, Subdl)
-    val currentLoginRepo = activeLoginDialogRepo
-    if (currentLoginRepo != null) {
-        ProviderLoginDialog(
-            api = currentLoginRepo.api,
-            isLoading = isLoginLoading,
-            errorMessage = loginErrorMessage,
-            onLogin = { formResponse ->
-                coroutineScope.launch {
-                    isLoginLoading = true
-                    loginErrorMessage = null
-                    try {
-                        val success = currentLoginRepo.login(formResponse)
-                        if (success) {
-                            activeLoginDialogRepo = null
-                        } else {
-                            loginErrorMessage = "Authentication failed"
-                        }
-                    } catch (t: Throwable) {
-                        loginErrorMessage = t.message ?: "Authentication failed"
-                    } finally {
-                        isLoginLoading = false
+    SyncAuthDialogsHost(
+        state = state,
+        onSwitchActiveAccount = onSwitchActiveAccount,
+        onLogoutAccount = onLogoutAccount,
+        activeAccountDialogRepo = activeAccountDialogRepo,
+        onDismissAccountDialog = { activeAccountDialogRepo = null },
+        onOpenAddAccountFlow = { targetRepo ->
+            activeAccountDialogRepo = null
+            onProviderClick(targetRepo)
+        },
+        activeLoginDialogRepo = activeLoginDialogRepo,
+        isLoginLoading = isLoginLoading,
+        loginErrorMessage = loginErrorMessage,
+        onDismissLoginDialog = {
+            activeLoginDialogRepo = null
+            loginErrorMessage = null
+            isLoginLoading = false
+        },
+        onSubmitLogin = { formResponse ->
+            val repo = activeLoginDialogRepo ?: return@SyncAuthDialogsHost
+            coroutineScope.launch {
+                isLoginLoading = true
+                loginErrorMessage = null
+                try {
+                    val success = repo.login(formResponse)
+                    if (success) {
+                        activeLoginDialogRepo = null
+                    } else {
+                        loginErrorMessage = "Authentication failed"
+                    }
+                } catch (t: Throwable) {
+                    loginErrorMessage = t.message ?: "Authentication failed"
+                } finally {
+                    isLoginLoading = false
+                }
+            }
+        },
+        activePinDialogRepo = activePinDialogRepo,
+        activePinData = activePinData,
+        isPinLoading = isPinLoading,
+        pinErrorMessage = pinErrorMessage,
+        onDismissPinDialog = {
+            activePinDialogRepo = null
+            activePinData = null
+            pinErrorMessage = null
+            isPinLoading = false
+        },
+        activeOAuthDialogRepo = activeOAuthDialogRepo,
+        activeOAuthUrl = activeOAuthUrl,
+        isOAuthLoading = isOAuthLoading,
+        oauthErrorMessage = oauthErrorMessage,
+        onDismissOAuthDialog = {
+            activeOAuthDialogRepo = null
+            activeOAuthUrl = null
+            oauthErrorMessage = null
+            isOAuthLoading = false
+        },
+        onSubmitOAuth = { redirectUrlOrToken ->
+            val repo = activeOAuthDialogRepo ?: return@SyncAuthDialogsHost
+            isOAuthLoading = true
+            oauthErrorMessage = null
+            coroutineScope.launch {
+                try {
+                    val success = repo.login(redirectUrlOrToken)
+                    if (success) {
+                        activeOAuthDialogRepo = null
+                        activeOAuthUrl = null
+                        oauthErrorMessage = null
+                    } else {
+                        oauthErrorMessage = "Failed to authenticate"
+                    }
+                } catch (t: Throwable) {
+                    oauthErrorMessage = t.message ?: "Authentication failed"
+                } finally {
+                    isOAuthLoading = false
+                }
+            }
+        },
+        activeInfoDialogRepo = activeInfoDialogRepo,
+        onDismissInfoDialog = { activeInfoDialogRepo = null }
+    )
+}
+
+@Composable
+private fun SyncTrackingProvidersCard(
+    providers: ImmutableList<AuthRepo>,
+    state: AppSettingsState,
+    onProviderClick: (AuthRepo) -> Unit
+) {
+    SettingsCard {
+        SettingsSectionHeader(
+            title = stringResource(Res.string.sync_category_tracking),
+            description = stringResource(Res.string.sync_category_tracking_desc),
+            icon = Icons.Default.Person,
+            iconTint = MaterialTheme.colors.primary
+        )
+
+        providers.forEachIndexed { index, repo ->
+            val authUser = state.activeAuthAccounts[repo.idPrefix]?.user
+            SettingsItemRow(
+                title = repo.name,
+                subtitle = if (authUser != null) {
+                    stringResource(Res.string.sync_logged_in_as, authUser.name ?: "")
+                } else {
+                    stringResource(Res.string.sync_not_connected)
+                },
+                onClick = { onProviderClick(repo) }
+            )
+
+            if (index < providers.lastIndex) {
+                Divider(color = CloudstreamTheme.extendedColors.divider)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SyncSubtitleProvidersCard(
+    providers: ImmutableList<SubtitleRepo>,
+    state: AppSettingsState,
+    onProviderClick: (AuthRepo) -> Unit,
+    onOpenInfo: (SubtitleRepo) -> Unit
+) {
+    SettingsCard {
+        SettingsSectionHeader(
+            title = stringResource(Res.string.sync_category_subtitles),
+            description = stringResource(Res.string.sync_category_subtitles_desc),
+            icon = Icons.Default.Subtitles,
+            iconTint = MaterialTheme.colors.secondary
+        )
+
+        providers.forEachIndexed { index, repo ->
+            val authUser = state.activeAuthAccounts[repo.idPrefix]?.user
+            SettingsItemRow(
+                title = repo.name,
+                subtitle = if (repo.requiresLogin) {
+                    if (authUser != null) {
+                        stringResource(Res.string.sync_logged_in_as, authUser.name ?: "")
+                    } else {
+                        stringResource(Res.string.sync_not_connected)
+                    }
+                } else {
+                    stringResource(Res.string.sync_no_account_needed)
+                },
+                onClick = {
+                    if (repo.requiresLogin) {
+                        onProviderClick(repo)
+                    } else {
+                        onOpenInfo(repo)
                     }
                 }
+            )
+
+            if (index < providers.lastIndex) {
+                Divider(color = CloudstreamTheme.extendedColors.divider)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SyncPreferencesCard(
+    state: AppSettingsState,
+    onSyncWatchProgressChanged: (Boolean) -> Unit,
+    onSyncScoresChanged: (Boolean) -> Unit,
+    onSyncWifiOnlyChanged: (Boolean) -> Unit,
+    onSkipStartupAccountSelectChanged: (Boolean) -> Unit
+) {
+    SettingsCard {
+        SettingsSectionHeader(
+            title = stringResource(Res.string.sync_category_preferences),
+            icon = Icons.Default.Tune,
+            iconTint = MaterialTheme.colors.primary
+        )
+
+        SettingsSwitchItem(
+            title = stringResource(Res.string.sync_watch_progress),
+            subtitle = stringResource(Res.string.sync_watch_progress_desc),
+            checked = state.syncWatchProgress,
+            onCheckedChange = onSyncWatchProgressChanged
+        )
+
+        Divider(color = CloudstreamTheme.extendedColors.divider)
+
+        SettingsSwitchItem(
+            title = stringResource(Res.string.sync_scores),
+            subtitle = stringResource(Res.string.sync_scores_desc),
+            checked = state.syncScores,
+            onCheckedChange = onSyncScoresChanged
+        )
+
+        Divider(color = CloudstreamTheme.extendedColors.divider)
+
+        SettingsSwitchItem(
+            title = stringResource(Res.string.sync_wifi_only),
+            subtitle = stringResource(Res.string.sync_wifi_only_desc),
+            checked = state.syncWifiOnly,
+            onCheckedChange = onSyncWifiOnlyChanged
+        )
+
+        Divider(color = CloudstreamTheme.extendedColors.divider)
+
+        SettingsSwitchItem(
+            title = stringResource(Res.string.skip_startup_account_select_pref),
+            subtitle = stringResource(Res.string.skip_startup_account_select_desc),
+            checked = state.skipStartupAccountSelect,
+            onCheckedChange = onSkipStartupAccountSelectChanged
+        )
+    }
+}
+
+@Composable
+private fun SyncAuthDialogsHost(
+    state: AppSettingsState,
+    onSwitchActiveAccount: (AuthRepo, Int) -> Unit,
+    onLogoutAccount: (AuthRepo, AuthUser) -> Unit,
+    activeAccountDialogRepo: AuthRepo?,
+    onDismissAccountDialog: () -> Unit,
+    onOpenAddAccountFlow: (AuthRepo) -> Unit,
+    activeLoginDialogRepo: AuthRepo?,
+    isLoginLoading: Boolean,
+    loginErrorMessage: String?,
+    onDismissLoginDialog: () -> Unit,
+    onSubmitLogin: (AuthLoginResponse) -> Unit,
+    activePinDialogRepo: AuthRepo?,
+    activePinData: AuthPinData?,
+    isPinLoading: Boolean,
+    pinErrorMessage: String?,
+    onDismissPinDialog: () -> Unit,
+    activeOAuthDialogRepo: AuthRepo?,
+    activeOAuthUrl: String?,
+    isOAuthLoading: Boolean,
+    oauthErrorMessage: String?,
+    onDismissOAuthDialog: () -> Unit,
+    onSubmitOAuth: (String) -> Unit,
+    activeInfoDialogRepo: AuthRepo?,
+    onDismissInfoDialog: () -> Unit
+) {
+    if (activeAccountDialogRepo != null) {
+        val currentAuth = state.activeAuthAccounts[activeAccountDialogRepo.idPrefix]
+        ProviderAccountDialog(
+            providerName = activeAccountDialogRepo.name,
+            providerIcon = activeAccountDialogRepo.icon,
+            currentUser = currentAuth?.user,
+            accounts = activeAccountDialogRepo.accounts.toList(),
+            onSelectAccount = { data ->
+                onSwitchActiveAccount(activeAccountDialogRepo, data.user.id)
             },
-            onDismiss = {
-                activeLoginDialogRepo = null
-                loginErrorMessage = null
-                isLoginLoading = false
+            onAddAccount = { onOpenAddAccountFlow(activeAccountDialogRepo) },
+            onLogout = { user ->
+                onLogoutAccount(activeAccountDialogRepo, user)
+                onDismissAccountDialog()
             },
+            onDismiss = onDismissAccountDialog
+        )
+    }
+
+    if (activeLoginDialogRepo != null) {
+        ProviderLoginDialog(
+            api = activeLoginDialogRepo.api,
+            isLoading = isLoginLoading,
+            errorMessage = loginErrorMessage,
+            onLogin = onSubmitLogin,
+            onDismiss = onDismissLoginDialog,
             onCreateAccount = { url ->
                 AuthRepo.openBrowserHandler?.invoke(url)
             }
         )
     }
 
-    // Modal Dialog: Device PIN Flow (Simkl)
-    val currentPinRepo = activePinDialogRepo
-    if (currentPinRepo != null) {
-        val pinData = activePinData
-        if (pinData != null) {
+    if (activePinDialogRepo != null) {
+        if (activePinData != null) {
             ProviderPinDialog(
-                api = currentPinRepo.api,
-                pinData = pinData,
+                api = activePinDialogRepo.api,
+                pinData = activePinData,
                 isVerifying = true,
                 errorMessage = pinErrorMessage,
-                onDismiss = {
-                    activePinDialogRepo = null
-                    activePinData = null
-                    pinErrorMessage = null
-                },
+                onDismiss = onDismissPinDialog,
                 onOpenUrl = { url ->
                     AuthRepo.openBrowserHandler?.invoke(url)
                 }
             )
         } else if (isPinLoading || pinErrorMessage != null) {
             ActionDialog(
-                onDismissRequest = {
-                    activePinDialogRepo = null
-                    isPinLoading = false
-                    pinErrorMessage = null
-                },
-                title = currentPinRepo.name,
+                onDismissRequest = onDismissPinDialog,
+                title = activePinDialogRepo.name,
                 iconVector = Icons.Default.Person,
-                iconTint = providerBrandColor(currentPinRepo.idPrefix),
+                iconTint = providerBrandColor(activePinDialogRepo.idPrefix),
                 message = pinErrorMessage ?: stringResource(Res.string.auth_waiting_for_pin),
                 cancelTextRes = Res.string.cancel,
-                onCancel = {
-                    activePinDialogRepo = null
-                    isPinLoading = false
-                    pinErrorMessage = null
-                }
+                onCancel = onDismissPinDialog
             )
         }
     }
 
-    // Modal Dialog: OAuth Authorization Flow with URL/Token paste
-    val currentOAuthRepo = activeOAuthDialogRepo
-    val currentOAuthUrl = activeOAuthUrl
-    if (currentOAuthRepo != null && currentOAuthUrl != null) {
+    if (activeOAuthDialogRepo != null && activeOAuthUrl != null) {
         ProviderOAuthDialog(
-            repo = currentOAuthRepo,
-            authUrl = currentOAuthUrl,
+            repo = activeOAuthDialogRepo,
+            authUrl = activeOAuthUrl,
             isLoading = isOAuthLoading,
             errorMessage = oauthErrorMessage,
-            onCompleteLogin = { redirectUrlOrToken ->
-                isOAuthLoading = true
-                oauthErrorMessage = null
-                coroutineScope.launch {
-                    try {
-                        val success = currentOAuthRepo.login(redirectUrlOrToken)
-                        if (success) {
-                            activeOAuthDialogRepo = null
-                            activeOAuthUrl = null
-                            oauthErrorMessage = null
-                        } else {
-                            oauthErrorMessage = "Failed to authenticate"
-                        }
-                    } catch (t: Throwable) {
-                        oauthErrorMessage = t.message ?: "Authentication failed"
-                    } finally {
-                        isOAuthLoading = false
-                    }
-                }
-            },
-            onDismiss = {
-                activeOAuthDialogRepo = null
-                activeOAuthUrl = null
-                oauthErrorMessage = null
-            }
+            onCompleteLogin = onSubmitOAuth,
+            onDismiss = onDismissOAuthDialog
         )
     }
 
-    // Modal Dialog: Informative dialog for no-login subtitle providers (Addic7ed, SubSource)
-    val currentInfoRepo = activeInfoDialogRepo
-    if (currentInfoRepo != null) {
-        val siteUrl = currentInfoRepo.createAccountUrl ?: currentInfoRepo.api.createAccountUrl
+    if (activeInfoDialogRepo != null) {
+        val siteUrl = activeInfoDialogRepo.createAccountUrl ?: activeInfoDialogRepo.api.createAccountUrl
         ActionDialog(
-            onDismissRequest = { activeInfoDialogRepo = null },
-            title = currentInfoRepo.name,
+            onDismissRequest = onDismissInfoDialog,
+            title = activeInfoDialogRepo.name,
             iconVector = Icons.Default.Subtitles,
             iconTint = MaterialTheme.colors.secondary,
             messageRes = Res.string.sync_no_account_needed,
@@ -947,11 +991,11 @@ fun SyncAccountsSettingsSection(
             onConfirm = if (siteUrl != null) {
                 {
                     AuthRepo.openBrowserHandler?.invoke(siteUrl)
-                    activeInfoDialogRepo = null
+                    onDismissInfoDialog()
                 }
             } else null,
             cancelTextRes = Res.string.close,
-            onCancel = { activeInfoDialogRepo = null }
+            onCancel = onDismissInfoDialog
         )
     }
 }
@@ -969,9 +1013,6 @@ private fun providerBrandColor(idPrefix: String): Color = when (idPrefix) {
     else -> CloudStreamColors.Primary
 }
 
-/**
- * Categories available for backup and restore operations.
- */
 private fun backupCategoryIcon(category: BackupCategory): ImageVector = when (category) {
     BackupCategory.SETTINGS -> Icons.Default.Settings
     BackupCategory.WATCH_PROGRESS -> Icons.Default.History
@@ -980,13 +1021,12 @@ private fun backupCategoryIcon(category: BackupCategory): ImageVector = when (ca
     BackupCategory.SYNC_ACCOUNTS -> Icons.Default.Person
 }
 
-/**
- * 4. Backup & Restore Section (Export, Import, Auto-backup)
- */
 @Composable
 fun BackupRestoreSettingsSection(
     state: AppSettingsState,
-    onEvent: (AppSettingsEvent) -> Unit,
+    onExportBackup: (Set<BackupCategory>) -> Unit,
+    onImportBackup: () -> Unit,
+    onClearBackupMessage: () -> Unit,
     modifier: Modifier = Modifier,
     onRequestReset: (() -> Unit)? = null
 ) {
@@ -1006,254 +1046,306 @@ fun BackupRestoreSettingsSection(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Tarjeta "Copia de Seguridad y Restauración"
-        SettingsCard {
-            SettingsSectionHeader(
-                title = stringResource(Res.string.sectionBackupRestore),
-                icon = Icons.Default.RestartAlt,
-                iconTint = MaterialTheme.colors.primary
-            )
-
-            // Fila "Crear copia de seguridad"
-            SettingsItemRow(
-                title = stringResource(Res.string.backup_export_title),
-                subtitle = if (state.isBackingUp) stringResource(Res.string.backup_in_progress) else stringResource(Res.string.backup_export_desc),
-                icon = Icons.Default.CloudUpload,
-                iconTint = MaterialTheme.colors.primary,
-                enabled = !state.isBackingUp && !state.isRestoring,
-                trailingContent = if (state.isBackingUp) {
-                    {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colors.primary
-                        )
-                    }
-                } else null,
-                onClick = {
-                    selectedBackupCategories = BackupCategory.entries.toSet()
-                    showBackupDialog = true
-                }
-            )
-
-            Divider(color = CloudstreamTheme.extendedColors.divider)
-
-            // Fila "Restaurar datos"
-            SettingsItemRow(
-                title = stringResource(Res.string.backup_restore_title),
-                subtitle = if (state.isRestoring) stringResource(Res.string.restore_in_progress) else stringResource(Res.string.backup_restore_desc),
-                icon = Icons.Default.CloudDownload,
-                iconTint = MaterialTheme.colors.secondary,
-                enabled = !state.isBackingUp && !state.isRestoring,
-                trailingContent = if (state.isRestoring) {
-                    {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colors.secondary
-                        )
-                    }
-                } else null,
-                onClick = {
-                    onEvent(AppSettingsEvent.ImportBackupWithPicker)
-                }
-            )
-        }
-
-        // 2. Tarjeta "Copia Automática"
-        SettingsCard {
-            SettingsSectionHeader(
-                title = stringResource(Res.string.backup_auto_title),
-                icon = Icons.Default.Schedule,
-                iconTint = MaterialTheme.colors.primary
-            )
-
-            SettingsSwitchItem(
-                title = stringResource(Res.string.backup_auto_title),
-                subtitle = stringResource(Res.string.backup_auto_desc),
-                icon = Icons.Default.Schedule,
-                checked = autoBackupEnabled,
-                onCheckedChange = { autoBackupEnabled = it }
-            )
-
-            if (autoBackupEnabled) {
-                Divider(color = CloudstreamTheme.extendedColors.divider)
-
-                SettingsItemRow(
-                    title = stringResource(Res.string.backup_frequency),
-                    subtitle = stringResource(Res.string.backup_frequency_desc),
-                    valueText = autoBackupFrequency,
-                    icon = Icons.Default.Tune,
-                    onClick = { showFrequencyDialog = true }
-                )
-            }
-        }
-    }
-
-    // Modal: Backup Category Selection Dialog
-    if (showBackupDialog) {
-        ActionDialog(
-            onDismissRequest = {
-                if (!state.isBackingUp) showBackupDialog = false
+        BackupActionsCard(
+            state = state,
+            onOpenBackupDialog = {
+                selectedBackupCategories = BackupCategory.entries.toSet()
+                showBackupDialog = true
             },
-            title = stringResource(Res.string.backup_select_categories_title),
-            subtitle = stringResource(Res.string.backup_export_desc),
-            iconVector = Icons.Default.CloudUpload,
-            iconTint = MaterialTheme.colors.primary,
-            confirmText = stringResource(Res.string.backup_export_button),
-            confirmEnabled = selectedBackupCategories.isNotEmpty() && !state.isBackingUp,
-            confirmLoading = state.isBackingUp,
-            onConfirm = {
-                onEvent(AppSettingsEvent.ExportBackupWithPicker(selectedBackupCategories))
-                showBackupDialog = false
-            },
-            cancelTextRes = Res.string.cancel,
-            onCancel = {
-                if (!state.isBackingUp) showBackupDialog = false
-            },
-            content = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    BackupCategory.entries.forEach { category ->
-                        val isSelected = selectedBackupCategories.contains(category)
-                        SelectableOptionCard(
-                            isSelected = isSelected,
-                            onClick = {
-                                selectedBackupCategories = if (isSelected) {
-                                    selectedBackupCategories - category
-                                } else {
-                                    selectedBackupCategories + category
-                                }
-                            }
-                        ) {
-                            Row(
-                                modifier = Modifier.weight(1f),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(
-                                            if (isSelected) MaterialTheme.colors.primary.copy(alpha = 0.15f)
-                                            else CloudstreamTheme.extendedColors.divider
-                                        ),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = backupCategoryIcon(category),
-                                        contentDescription = null,
-                                        tint = if (isSelected) MaterialTheme.colors.primary else CloudstreamTheme.extendedColors.textSecondary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
+            onRestoreClick = onImportBackup
+        )
 
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = stringResource(category.nameRes),
-                                        style = MaterialTheme.typography.body2.copy(
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            fontSize = 14.sp
-                                        ),
-                                        color = if (isSelected) CloudstreamTheme.extendedColors.textPrimary else CloudstreamTheme.extendedColors.textSecondary
-                                    )
-                                    Text(
-                                        text = stringResource(category.descriptionRes),
-                                        style = MaterialTheme.typography.caption.copy(fontSize = 11.sp),
-                                        color = CloudstreamTheme.extendedColors.textMuted,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-
-                            Checkbox(
-                                checked = isSelected,
-                                onCheckedChange = { checked ->
-                                    selectedBackupCategories = if (checked) {
-                                        selectedBackupCategories + category
-                                    } else {
-                                        selectedBackupCategories - category
-                                    }
-                                },
-                                colors = CheckboxDefaults.colors(
-                                    checkedColor = MaterialTheme.colors.primary,
-                                    uncheckedColor = CloudstreamTheme.extendedColors.textMuted,
-                                    checkmarkColor = MaterialTheme.colors.onPrimary
-                                )
-                            )
-                        }
-                    }
-                }
-            }
+        AutoBackupCard(
+            autoBackupEnabled = autoBackupEnabled,
+            onAutoBackupEnabledChange = { autoBackupEnabled = it },
+            autoBackupFrequency = autoBackupFrequency,
+            onOpenFrequencyDialog = { showFrequencyDialog = true }
         )
     }
 
-    // Modal: Backup Success Dialog
+    BackupCategorySelectionDialog(
+        show = showBackupDialog,
+        isBackingUp = state.isBackingUp,
+        selectedCategories = selectedBackupCategories,
+        onToggleCategory = { category ->
+            selectedBackupCategories = if (selectedBackupCategories.contains(category)) {
+                selectedBackupCategories - category
+            } else {
+                selectedBackupCategories + category
+            }
+        },
+        onConfirm = {
+            onExportBackup(selectedBackupCategories)
+            showBackupDialog = false
+        },
+        onDismiss = {
+            if (!state.isBackingUp) showBackupDialog = false
+        }
+    )
+
+    BackupStatusDialogs(
+        state = state,
+        onDismiss = onClearBackupMessage
+    )
+
+    BackupFrequencyDialog(
+        show = showFrequencyDialog,
+        selectedFrequency = autoBackupFrequency,
+        onSelectFrequency = {
+            autoBackupFrequency = it
+            showFrequencyDialog = false
+        },
+        onDismiss = { showFrequencyDialog = false }
+    )
+}
+
+@Composable
+private fun BackupActionsCard(
+    state: AppSettingsState,
+    onOpenBackupDialog: () -> Unit,
+    onRestoreClick: () -> Unit
+) {
+    SettingsCard {
+        SettingsSectionHeader(
+            title = stringResource(Res.string.sectionBackupRestore),
+            icon = Icons.Default.RestartAlt,
+            iconTint = MaterialTheme.colors.primary
+        )
+
+        SettingsItemRow(
+            title = stringResource(Res.string.backup_export_title),
+            subtitle = if (state.isBackingUp) stringResource(Res.string.backup_in_progress) else stringResource(Res.string.backup_export_desc),
+            icon = Icons.Default.CloudUpload,
+            iconTint = MaterialTheme.colors.primary,
+            enabled = !state.isBackingUp && !state.isRestoring,
+            trailingContent = if (state.isBackingUp) {
+                {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colors.primary
+                    )
+                }
+            } else null,
+            onClick = onOpenBackupDialog
+        )
+
+        Divider(color = CloudstreamTheme.extendedColors.divider)
+
+        SettingsItemRow(
+            title = stringResource(Res.string.backup_restore_title),
+            subtitle = if (state.isRestoring) stringResource(Res.string.restore_in_progress) else stringResource(Res.string.backup_restore_desc),
+            icon = Icons.Default.CloudDownload,
+            iconTint = MaterialTheme.colors.secondary,
+            enabled = !state.isBackingUp && !state.isRestoring,
+            trailingContent = if (state.isRestoring) {
+                {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colors.secondary
+                    )
+                }
+            } else null,
+            onClick = onRestoreClick
+        )
+    }
+}
+
+@Composable
+private fun AutoBackupCard(
+    autoBackupEnabled: Boolean,
+    onAutoBackupEnabledChange: (Boolean) -> Unit,
+    autoBackupFrequency: String,
+    onOpenFrequencyDialog: () -> Unit
+) {
+    SettingsCard {
+        SettingsSectionHeader(
+            title = stringResource(Res.string.backup_auto_title),
+            icon = Icons.Default.Schedule,
+            iconTint = MaterialTheme.colors.primary
+        )
+
+        SettingsSwitchItem(
+            title = stringResource(Res.string.backup_auto_title),
+            subtitle = stringResource(Res.string.backup_auto_desc),
+            icon = Icons.Default.Schedule,
+            checked = autoBackupEnabled,
+            onCheckedChange = onAutoBackupEnabledChange
+        )
+
+        if (autoBackupEnabled) {
+            Divider(color = CloudstreamTheme.extendedColors.divider)
+
+            SettingsItemRow(
+                title = stringResource(Res.string.backup_frequency),
+                subtitle = stringResource(Res.string.backup_frequency_desc),
+                valueText = autoBackupFrequency,
+                icon = Icons.Default.Tune,
+                onClick = onOpenFrequencyDialog
+            )
+        }
+    }
+}
+
+@Composable
+private fun BackupCategorySelectionDialog(
+    show: Boolean,
+    isBackingUp: Boolean,
+    selectedCategories: Set<BackupCategory>,
+    onToggleCategory: (BackupCategory) -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    if (!show) return
+
+    ActionDialog(
+        onDismissRequest = onDismiss,
+        title = stringResource(Res.string.backup_select_categories_title),
+        subtitle = stringResource(Res.string.backup_export_desc),
+        iconVector = Icons.Default.CloudUpload,
+        iconTint = MaterialTheme.colors.primary,
+        confirmText = stringResource(Res.string.backup_export_button),
+        confirmEnabled = selectedCategories.isNotEmpty() && !isBackingUp,
+        confirmLoading = isBackingUp,
+        onConfirm = onConfirm,
+        cancelTextRes = Res.string.cancel,
+        onCancel = onDismiss,
+        content = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                BackupCategory.entries.forEach { category ->
+                    val isSelected = selectedCategories.contains(category)
+                    SelectableOptionCard(
+                        isSelected = isSelected,
+                        onClick = { onToggleCategory(category) }
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        if (isSelected) MaterialTheme.colors.primary.copy(alpha = 0.15f)
+                                        else CloudstreamTheme.extendedColors.divider
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = backupCategoryIcon(category),
+                                    contentDescription = null,
+                                    tint = if (isSelected) MaterialTheme.colors.primary else CloudstreamTheme.extendedColors.textSecondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = stringResource(category.nameRes),
+                                    style = MaterialTheme.typography.body2.copy(
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = 14.sp
+                                    ),
+                                    color = if (isSelected) CloudstreamTheme.extendedColors.textPrimary else CloudstreamTheme.extendedColors.textSecondary
+                                )
+                                Text(
+                                    text = stringResource(category.descriptionRes),
+                                    style = MaterialTheme.typography.caption.copy(fontSize = 11.sp),
+                                    color = CloudstreamTheme.extendedColors.textMuted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+
+                        Checkbox(
+                            checked = isSelected,
+                            onCheckedChange = { onToggleCategory(category) },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = MaterialTheme.colors.primary,
+                                uncheckedColor = CloudstreamTheme.extendedColors.textMuted,
+                                checkmarkColor = MaterialTheme.colors.onPrimary
+                            )
+                        )
+                    }
+                }
+            }
+        }
+    )
+}
+
+@Composable
+private fun BackupStatusDialogs(
+    state: AppSettingsState,
+    onDismiss: () -> Unit
+) {
     val successRes = state.backupSuccessRes
     if (successRes != null) {
         ActionDialog(
-            onDismissRequest = { onEvent(AppSettingsEvent.ClearBackupMessage) },
+            onDismissRequest = onDismiss,
             titleRes = Res.string.pref_category_backup,
             iconVector = Icons.Default.CheckCircle,
             iconTint = CloudStreamColors.Success,
             messageRes = successRes,
             confirmTextRes = Res.string.ok,
-            onConfirm = { onEvent(AppSettingsEvent.ClearBackupMessage) },
+            onConfirm = onDismiss,
             cancelText = null,
             cancelTextRes = null,
             onCancel = null
         )
     }
 
-    // Modal: Backup Error Dialog
     val errorRes = state.backupErrorRes
     if (errorRes != null) {
         ActionDialog(
-            onDismissRequest = { onEvent(AppSettingsEvent.ClearBackupMessage) },
+            onDismissRequest = onDismiss,
             titleRes = Res.string.error,
             iconVector = Icons.Default.ErrorOutline,
             iconTint = CloudStreamColors.Error,
             messageRes = errorRes,
             confirmTextRes = Res.string.ok,
-            onConfirm = { onEvent(AppSettingsEvent.ClearBackupMessage) },
+            onConfirm = onDismiss,
             cancelText = null,
             cancelTextRes = null,
             onCancel = null
         )
     }
-
-    // Modal: Backup Frequency Dialog
-    if (showFrequencyDialog) {
-        val frequencies = listOf(
-            stringResource(Res.string.backup_frequency_daily),
-            stringResource(Res.string.backup_frequency_weekly),
-            stringResource(Res.string.backup_frequency_monthly)
-        )
-        SettingsChoiceDialog(
-            title = stringResource(Res.string.backup_frequency),
-            items = frequencies,
-            selectedItem = autoBackupFrequency,
-            itemLabel = { it },
-            onItemSelected = {
-                autoBackupFrequency = it
-                showFrequencyDialog = false
-            },
-            onDismissRequest = { showFrequencyDialog = false }
-        )
-    }
 }
 
-/**
- * 5. Network & DNS Section
- */
+@Composable
+private fun BackupFrequencyDialog(
+    show: Boolean,
+    selectedFrequency: String,
+    onSelectFrequency: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    if (!show) return
+
+    val frequencies = listOf(
+        stringResource(Res.string.backup_frequency_daily),
+        stringResource(Res.string.backup_frequency_weekly),
+        stringResource(Res.string.backup_frequency_monthly)
+    )
+    SettingsChoiceDialog(
+        title = stringResource(Res.string.backup_frequency),
+        items = frequencies,
+        selectedItem = selectedFrequency,
+        itemLabel = { it },
+        onItemSelected = onSelectFrequency,
+        onDismissRequest = onDismiss
+    )
+}
+
 @Composable
 fun NetworkDnsSettingsSection(
     state: AppSettingsState,
-    onEvent: (AppSettingsEvent) -> Unit,
+    onDohProviderSelected: (DohProvider) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -1273,19 +1365,19 @@ fun NetworkDnsSettingsSection(
 
             DohSelector(
                 selectedProvider = state.dohProvider,
-                onProviderSelected = { onEvent(AppSettingsEvent.SetDohProvider(it)) }
+                onProviderSelected = onDohProviderSelected
             )
         }
     }
 }
 
-/**
- * 6. General & Reset Section
- */
 @Composable
 fun GeneralSettingsSection(
     state: AppSettingsState,
-    onEvent: (AppSettingsEvent) -> Unit,
+    onSyncWatchProgressChanged: (Boolean) -> Unit,
+    onSyncScoresChanged: (Boolean) -> Unit,
+    onSyncWifiOnlyChanged: (Boolean) -> Unit,
+    onSkipStartupAccountSelectChanged: (Boolean) -> Unit,
     onRequestReset: () -> Unit,
     onNavigateToAccountSelect: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -1296,7 +1388,6 @@ fun GeneralSettingsSection(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // User Profiles Card
         SettingsCard {
             SettingsSectionHeader(
                 title = stringResource(Res.string.switchAccount),
@@ -1311,7 +1402,6 @@ fun GeneralSettingsSection(
             )
         }
 
-        // App Information Card (Version & Architecture)
         SettingsCard {
             SettingsSectionHeader(
                 title = stringResource(Res.string.settings_about_app),
@@ -1333,7 +1423,6 @@ fun GeneralSettingsSection(
             )
         }
 
-        // Factory Reset Card
         SettingsCard {
             SettingsSectionHeader(
                 title = stringResource(Res.string.resetAllSettings),
@@ -1429,3 +1518,62 @@ fun ErrorMessageBanner(
         }
     }
 }
+
+@Preview
+@Composable
+private fun SettingsScreenPreview() {
+    CloudStreamTheme {
+        ResponsiveSettingsScaffold(
+            categories = persistentListOf(
+                SettingsCategory(
+                    id = "appearance",
+                    title = "Appearance",
+                    description = "Theme & visual styling",
+                    icon = Icons.Default.Palette
+                ),
+                SettingsCategory(
+                    id = "player_subtitles",
+                    title = "Player & Subtitles",
+                    description = "Subtitle styles and player controls",
+                    icon = Icons.Default.Subtitles
+                )
+            ),
+            selectedCategoryId = "appearance",
+            onSelectCategory = {}
+        ) { category ->
+            Box(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = category.title, style = MaterialTheme.typography.h6)
+            }
+        }
+    }
+}
+
+@Preview
+@Composable
+private fun SettingsScreenAmoledLightPreview() {
+    CloudStreamTheme(theme = AppTheme.AMOLED, isDarkMode = false) {
+        ResponsiveSettingsScaffold(
+            categories = persistentListOf(
+                SettingsCategory(
+                    id = "appearance",
+                    title = "Appearance",
+                    description = "Theme & visual styling",
+                    icon = Icons.Default.Palette
+                )
+            ),
+            selectedCategoryId = "appearance",
+            onSelectCategory = {}
+        ) { category ->
+            Box(
+                modifier = Modifier.fillMaxSize().padding(16.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = category.title, style = MaterialTheme.typography.h6)
+            }
+        }
+    }
+}
+

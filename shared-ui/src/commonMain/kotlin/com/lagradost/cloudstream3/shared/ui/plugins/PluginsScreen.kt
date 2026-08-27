@@ -1,5 +1,6 @@
 package com.lagradost.cloudstream3.shared.ui.plugins
 
+import org.jetbrains.compose.resources.StringResource
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -91,10 +92,14 @@ import com.lagradost.cloudstream3.shared.ui.components.designsystem.CloudStreamF
 import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginItem
 import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginOperationState
 import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginRepositoryItem
-import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginsSettingsEvent
+import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginStatus
 import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginsSettingsViewModel
 import com.lagradost.cloudstream3.utils.UiText
 import com.lagradost.cloudstream3.utils.asString
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 private const val COMMUNITY_REPOSITORIES_URL = "https://recloudstream.github.io/csdocs/repositories/"
 
@@ -121,30 +126,26 @@ fun PluginsScreen(
             .fillMaxSize()
             .background(MaterialTheme.colors.background)
     ) {
-        // Operation Status Banner (Downloading, Installing, Success, Error)
         OperationStatusBanner(
             operationState = state.operationState,
             error = state.error,
-            onDismiss = { viewModel.handleEvent(PluginsSettingsEvent.ClearError) }
+            onDismiss = { viewModel.clearError() }
         )
 
-        // Hierarchical Level Switching: Level 1 (Repositories) vs Level 2 (Repository Plugins)
         Box(modifier = Modifier.weight(1f)) {
             if (state.selectedRepositoryUrl == null) {
-                // LEVEL 1: Repositories List
                 RepositoriesLevelView(
                     repositories = state.repositories,
                     installedPlugins = state.installedPlugins,
                     isLoading = state.isLoading,
-                    onEvent = viewModel::handleEvent,
+                    onRefresh = { viewModel.refreshData() },
                     onAddRepoClick = { showAddRepoDialog = true },
                     onDeleteRepoClick = { repoToDelete = it },
                     onRepoClick = { repoUrl ->
-                        viewModel.handleEvent(PluginsSettingsEvent.FilterByRepository(repoUrl))
+                        viewModel.filterByRepository(repoUrl)
                     }
                 )
             } else {
-                // LEVEL 2: Plugins of the Selected Repository
                 RepositoryPluginsLevelView(
                     selectedRepoUrl = state.selectedRepositoryUrl!!,
                     repositories = state.repositories,
@@ -154,8 +155,14 @@ fun PluginsScreen(
                     selectedTvType = state.selectedTvType,
                     operationState = state.operationState,
                     isLoading = state.isLoading,
-                    onEvent = viewModel::handleEvent,
-                    onBackClick = { viewModel.handleEvent(PluginsSettingsEvent.FilterByRepository(null)) },
+                    onRefresh = { viewModel.refreshData() },
+                    onInstallAllPlugins = { viewModel.installAllPlugins(it) },
+                    onQueryChange = { viewModel.setSearchQuery(it) },
+                    onLanguageSelected = { viewModel.setLanguageFilter(it) },
+                    onInstallPlugin = { viewModel.installPlugin(it) },
+                    onUninstallPlugin = { viewModel.uninstallPlugin(it) },
+                    onTogglePlugin = { viewModel.togglePlugin(it) },
+                    onBackClick = { viewModel.filterByRepository(null) },
                     onPluginClick = { plugin ->
                         selectedPluginForDetails = plugin
                         onNavigateToPluginDetails?.invoke(plugin)
@@ -165,7 +172,6 @@ fun PluginsScreen(
         }
     }
 
-    // Modal Dialog: Add Repository
     if (showAddRepoDialog) {
         AddRepositoryDialog(
             viewModel = viewModel,
@@ -173,13 +179,12 @@ fun PluginsScreen(
         )
     }
 
-    // Confirmation Dialog: Delete Repository
     if (repoToDelete != null) {
         ConfirmDeleteDialog(
             onConfirm = {
-                val url = repoToDelete?.url
-                if (url != null) {
-                    viewModel.handleEvent(PluginsSettingsEvent.RemoveRepository(url))
+                val repo = repoToDelete
+                if (repo != null) {
+                    viewModel.removeRepository(repo)
                 }
                 repoToDelete = null
             },
@@ -190,7 +195,6 @@ fun PluginsScreen(
         )
     }
 
-    // LEVEL 3: Plugin Details Interactive Modal
     if (selectedPluginForDetails != null) {
         PluginDetailsDialog(
             plugin = selectedPluginForDetails!!,
@@ -200,16 +204,12 @@ fun PluginsScreen(
     }
 }
 
-// =========================================================================================
-// NIVEL 1: Repositories List View
-// =========================================================================================
-
 @Composable
 fun RepositoriesLevelView(
-    repositories: List<PluginRepositoryItem>,
-    installedPlugins: List<PluginItem>,
+    repositories: ImmutableList<PluginRepositoryItem>,
+    installedPlugins: ImmutableList<PluginItem>,
     isLoading: Boolean,
-    onEvent: (PluginsSettingsEvent) -> Unit,
+    onRefresh: () -> Unit,
     onAddRepoClick: () -> Unit,
     onDeleteRepoClick: (PluginRepositoryItem) -> Unit,
     onRepoClick: (String) -> Unit,
@@ -218,17 +218,15 @@ fun RepositoriesLevelView(
     val uriHandler = LocalUriHandler.current
 
     Column(modifier = modifier.fillMaxSize()) {
-        // Level 1 Top Bar Header
         RepositoriesHeader(
             repoCount = repositories.size,
-            onRefresh = { onEvent(PluginsSettingsEvent.Reload) },
+            onRefresh = onRefresh,
             onAddRepoClick = onAddRepoClick,
             onViewPublicListClick = { uriHandler.openUri(COMMUNITY_REPOSITORIES_URL) }
         )
 
         Divider(color = CloudStreamColors.Divider)
 
-        // Main List Content
         if (isLoading && repositories.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -258,7 +256,7 @@ fun RepositoriesLevelView(
                         repository = repo,
                         installedCount = installedCount,
                         onRepoClick = { onRepoClick(repo.url) },
-                        onReload = { onEvent(PluginsSettingsEvent.Reload) },
+                        onReload = onRefresh,
                         onRemove = { onDeleteRepoClick(repo) }
                     )
                 }
@@ -491,7 +489,6 @@ fun RepositoryCard(
                 modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Avatar / Icon
                 if (!repository.iconUrl.isNullOrBlank()) {
                     Box(
                         modifier = Modifier
@@ -585,7 +582,6 @@ fun RepositoryCard(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Stats Badges
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -615,21 +611,12 @@ fun RepositoryCard(
                                 )
                             }
                         }
-
-                        Text(
-                            text = "${stringResource(Res.string.lastSynced)}: ${PluginsSettingsViewModel.formatSyncTime(repository.lastSyncTime)}",
-                            style = MaterialTheme.typography.caption.copy(
-                                fontSize = 10.sp,
-                                color = CloudStreamColors.TextMuted
-                            )
-                        )
                     }
                 }
             }
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Action Buttons on Card
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(
                     onClick = onReload,
@@ -752,21 +739,23 @@ fun EmptyRepositoriesState(
     }
 }
 
-// =========================================================================================
-// NIVEL 2: Selected Repository Plugins View
-// =========================================================================================
-
 @Composable
 fun RepositoryPluginsLevelView(
     selectedRepoUrl: String,
-    repositories: List<PluginRepositoryItem>,
-    plugins: List<PluginItem>,
+    repositories: ImmutableList<PluginRepositoryItem>,
+    plugins: ImmutableList<PluginItem>,
     searchQuery: String,
     selectedLanguage: String?,
     selectedTvType: String?,
     operationState: PluginOperationState,
     isLoading: Boolean,
-    onEvent: (PluginsSettingsEvent) -> Unit,
+    onRefresh: () -> Unit,
+    onInstallAllPlugins: (String) -> Unit,
+    onQueryChange: (String) -> Unit,
+    onLanguageSelected: (String?) -> Unit,
+    onInstallPlugin: (PluginItem) -> Unit,
+    onUninstallPlugin: (PluginItem) -> Unit,
+    onTogglePlugin: (PluginItem) -> Unit,
     onBackClick: () -> Unit,
     onPluginClick: (PluginItem) -> Unit,
     modifier: Modifier = Modifier
@@ -774,38 +763,33 @@ fun RepositoryPluginsLevelView(
     val currentRepo = repositories.firstOrNull { it.url == selectedRepoUrl }
     val repoName = currentRepo?.name ?: selectedRepoUrl
     val distinctLanguages = remember(plugins) {
-        plugins.mapNotNull { it.language?.takeIf { lang -> lang.isNotBlank() } }.distinct()
+        plugins.mapNotNull { it.language?.takeIf { lang -> lang.isNotBlank() } }.distinct().toImmutableList()
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        // Dedicated Level 2 Top Bar
         RepositoryDetailTopBar(
             repoName = repoName,
             repoUrl = selectedRepoUrl,
             pluginCount = plugins.size,
             onBackClick = onBackClick,
             onBatchDownloadClick = {
-                onEvent(PluginsSettingsEvent.InstallAllPlugins(selectedRepoUrl))
+                onInstallAllPlugins(selectedRepoUrl)
             },
-            onRefreshClick = {
-                onEvent(PluginsSettingsEvent.Reload)
-            }
+            onRefreshClick = onRefresh
         )
 
-        // Search Bar and Filter Chips
         RepositoryPluginsFilterBar(
             query = searchQuery,
-            onQueryChange = { onEvent(PluginsSettingsEvent.Search(it)) },
+            onQueryChange = onQueryChange,
             selectedTvType = selectedTvType,
-            onTvTypeSelected = { onEvent(PluginsSettingsEvent.FilterByTvType(it)) },
+            onTvTypeSelected = {},
             selectedLanguage = selectedLanguage,
-            onLanguageSelected = { onEvent(PluginsSettingsEvent.FilterByLanguage(it)) },
+            onLanguageSelected = onLanguageSelected,
             availableLanguages = distinctLanguages
         )
 
         Divider(color = CloudStreamColors.Divider)
 
-        // Plugins List
         if (isLoading && plugins.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -834,10 +818,10 @@ fun RepositoryPluginsLevelView(
                         operationState = operationState,
                         isInstalled = plugin.isInstalled,
                         onClick = { onPluginClick(plugin) },
-                        onInstall = { onEvent(PluginsSettingsEvent.InstallPlugin(plugin)) },
-                        onUninstall = { onEvent(PluginsSettingsEvent.UninstallPlugin(plugin.internalName)) },
-                        onToggleEnabled = { enabled ->
-                            onEvent(PluginsSettingsEvent.InstallPlugin(plugin.copy(isEnabled = enabled)))
+                        onInstall = { onInstallPlugin(plugin) },
+                        onUninstall = { onUninstallPlugin(plugin) },
+                        onToggleEnabled = { _ ->
+                            onTogglePlugin(plugin)
                         }
                     )
                 }
@@ -953,29 +937,27 @@ fun RepositoryPluginsFilterBar(
     onTvTypeSelected: (String?) -> Unit,
     selectedLanguage: String?,
     onLanguageSelected: (String?) -> Unit,
-    availableLanguages: List<String>,
+    availableLanguages: ImmutableList<String>,
     modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(CloudStreamColors.SurfaceVariant)
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         CloudStreamTextField(
             value = query,
             onValueChange = onQueryChange,
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = stringResource(Res.string.search_plugins_hint),
+            placeholderRes = Res.string.search_plugins_hint,
             leadingIcon = {
                 Icon(
                     imageVector = Icons.Default.Search,
-                    contentDescription = stringResource(Res.string.search_plugins_hint),
+                    contentDescription = stringResource(Res.string.search_hint),
                     tint = CloudStreamColors.TextSecondary
                 )
             },
-            trailingIcon = if (query.isNotBlank()) {
+            trailingIcon = if (query.isNotEmpty()) {
                 {
                     IconButton(onClick = { onQueryChange("") }) {
                         Icon(
@@ -989,7 +971,6 @@ fun RepositoryPluginsFilterBar(
             singleLine = true
         )
 
-        // Filter Chips (TV Types + Languages)
         val tvTypes = listOf("Movie", "TvSeries", "Anime", "Cartoon", "Live", "Torrent")
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
@@ -1044,11 +1025,6 @@ fun RepositoryPluginsFilterBar(
     }
 }
 
-
-
-/**
- * Individual Plugin Card with status badges, version, clean authors formatting, and interactive actions.
- */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PluginCard(
@@ -1064,18 +1040,17 @@ fun PluginCard(
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
 
-    val isThisDownloading = operationState is PluginOperationState.Downloading &&
-            operationState.pluginName.equals(plugin.name, ignoreCase = true)
-    val isThisInstalling = operationState is PluginOperationState.Installing &&
-            operationState.pluginName.equals(plugin.name, ignoreCase = true)
-    val isThisUninstalling = operationState is PluginOperationState.Uninstalling &&
-            operationState.pluginName.equals(plugin.internalName, ignoreCase = true)
+    val isOperating = when (operationState) {
+        is PluginOperationState.Downloading -> operationState.pluginName.equals(plugin.name, ignoreCase = true)
+        is PluginOperationState.Installing -> operationState.pluginName.equals(plugin.name, ignoreCase = true)
+        is PluginOperationState.Uninstalling -> operationState.pluginName.equals(plugin.internalName, ignoreCase = true)
+        else -> false
+    }
 
     val validAuthors = plugin.authors.filter { it.isNotBlank() }
 
     val cardBg by animateColorAsState(
-        targetValue = if (isHovered) CloudStreamColors.SurfaceElevated
-        else CloudStreamColors.SurfaceVariant,
+        targetValue = if (isHovered) CloudStreamColors.SurfaceElevated else CloudStreamColors.SurfaceVariant,
         animationSpec = tween(150)
     )
 
@@ -1099,155 +1074,25 @@ fun PluginCard(
                 verticalAlignment = Alignment.Top,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Plugin Avatar & Info
                 Row(
                     modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (!plugin.iconUrl.isNullOrBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(CloudStreamColors.Divider),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            AsyncImage(
-                                url = plugin.iconUrl,
-                                contentDescription = plugin.name,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(46.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(
-                                    Brush.linearGradient(
-                                        colors = listOf(
-                                            MaterialTheme.colors.primary,
-                                            MaterialTheme.colors.secondary
-                                        )
-                                    )
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = plugin.name.take(2).uppercase(),
-                                style = MaterialTheme.typography.h6.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colors.onPrimary,
-                                    fontSize = 16.sp
-                                )
-                            )
-                        }
-                    }
-
+                    PluginIcon(iconUrl = plugin.iconUrl, name = plugin.name)
                     Spacer(modifier = Modifier.width(12.dp))
-
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = plugin.name,
-                                style = MaterialTheme.typography.subtitle1.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp
-                                ),
-                                color = CloudStreamColors.TextPrimary
-                            )
-
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = CloudStreamColors.Divider
-                            ) {
-                                Text(
-                                    text = "v${plugin.version}",
-                                    style = MaterialTheme.typography.caption.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 10.sp
-                                    ),
-                                    color = CloudStreamColors.TextSecondary,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-
-                            PluginStatusBadge(status = plugin.status)
-                        }
-
-                        // Authors & Language (Clean formatting - Zero "por %s" bug)
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            if (validAuthors.isNotEmpty()) {
-                                Text(
-                                    text = stringResource(Res.string.plugin_by_author_format, validAuthors.joinToString(", ")),
-                                    style = MaterialTheme.typography.caption,
-                                    color = CloudStreamColors.TextSecondary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            if (!plugin.language.isNullOrBlank()) {
-                                Text(
-                                    text = if (validAuthors.isNotEmpty()) "• ${plugin.language.uppercase()}" else plugin.language.uppercase(),
-                                    style = MaterialTheme.typography.caption.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colors.primary
-                                )
-                            }
-                        }
-                    }
+                    PluginCardInfo(plugin = plugin, validAuthors = validAuthors)
                 }
 
-                // Quick Action Controls
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    if (isThisDownloading || isThisInstalling || isThisUninstalling) {
-                        CircularProgressIndicator(
-                            color = MaterialTheme.colors.primary,
-                            strokeWidth = 2.5.dp,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    } else if (isInstalled) {
-                        Switch(
-                            checked = plugin.isEnabled,
-                            onCheckedChange = onToggleEnabled,
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = MaterialTheme.colors.primary,
-                                checkedTrackColor = MaterialTheme.colors.primary.copy(alpha = 0.5f)
-                            )
-                        )
-
-                        IconButton(
-                            onClick = onUninstall,
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = stringResource(Res.string.uninstall),
-                                tint = MaterialTheme.colors.error.copy(alpha = 0.8f)
-                            )
-                        }
-                    } else {
-                        PrimaryButton(
-                            onClick = onInstall,
-                            icon = Icons.Default.Download,
-                            text = stringResource(Res.string.install),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(36.dp),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                        )
-                    }
-                }
+                PluginCardActions(
+                    isOperating = isOperating,
+                    isInstalled = isInstalled,
+                    isEnabled = plugin.isEnabled,
+                    onToggleEnabled = onToggleEnabled,
+                    onUninstall = onUninstall,
+                    onInstall = onInstall
+                )
             }
 
-            // Description
             if (!plugin.description.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
@@ -1259,42 +1104,115 @@ fun PluginCard(
                 )
             }
 
-            // TV Types Tags
-            if (plugin.tvTypes.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    plugin.tvTypes.forEach { tvType ->
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = CloudStreamColors.SurfaceElevated,
-                            border = BorderStroke(1.dp, CloudStreamColors.Divider)
-                        ) {
-                            Text(
-                                text = tvType,
-                                style = MaterialTheme.typography.caption.copy(fontSize = 10.sp),
-                                color = CloudStreamColors.TextSecondary,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
+            PluginTvTypesRow(tvTypes = plugin.tvTypes)
+            PluginDownloadingProgressBar(operationState = operationState, plugin = plugin)
+        }
+    }
+}
+
+@Composable
+private fun PluginIcon(
+    iconUrl: String?,
+    name: String,
+    modifier: Modifier = Modifier
+) {
+    if (!iconUrl.isNullOrBlank()) {
+        Box(
+            modifier = modifier
+                .size(46.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(CloudStreamColors.Divider),
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(
+                url = iconUrl,
+                contentDescription = name,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    } else {
+        Box(
+            modifier = modifier
+                .size(46.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            MaterialTheme.colors.primary,
+                            MaterialTheme.colors.secondary
+                        )
+                    )
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = name.take(2).uppercase(),
+                style = MaterialTheme.typography.h6.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colors.onPrimary,
+                    fontSize = 16.sp
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun PluginCardInfo(
+    plugin: PluginItem,
+    validAuthors: List<String>,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = plugin.name,
+                style = MaterialTheme.typography.subtitle1.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp
+                ),
+                color = CloudStreamColors.TextPrimary
+            )
+
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = CloudStreamColors.Divider
+            ) {
+                Text(
+                    text = "v${plugin.version}",
+                    style = MaterialTheme.typography.caption.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp
+                    ),
+                    color = CloudStreamColors.TextSecondary,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
             }
 
-            // Progress bar if downloading
-            if (operationState is PluginOperationState.Downloading && operationState.pluginName.equals(plugin.name, ignoreCase = true)) {
-                val progress = operationState.progress
-                Spacer(modifier = Modifier.height(8.dp))
-                LinearProgressIndicator(
-                    progress = progress,
-                    color = MaterialTheme.colors.primary,
-                    backgroundColor = CloudStreamColors.Divider,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
+            PluginStatusBadge(status = plugin.status)
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (validAuthors.isNotEmpty()) {
+                Text(
+                    text = stringResource(Res.string.plugin_by_author_format, validAuthors.joinToString(", ")),
+                    style = MaterialTheme.typography.caption,
+                    color = CloudStreamColors.TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (!plugin.language.isNullOrBlank()) {
+                Text(
+                    text = if (validAuthors.isNotEmpty()) "• ${plugin.language.uppercase()}" else plugin.language.uppercase(),
+                    style = MaterialTheme.typography.caption.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colors.primary
                 )
             }
         }
@@ -1302,11 +1220,112 @@ fun PluginCard(
 }
 
 @Composable
-fun PluginStatusBadge(status: Int) {
+private fun PluginCardActions(
+    isOperating: Boolean,
+    isInstalled: Boolean,
+    isEnabled: Boolean,
+    onToggleEnabled: (Boolean) -> Unit,
+    onUninstall: () -> Unit,
+    onInstall: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        if (isOperating) {
+            CircularProgressIndicator(
+                color = MaterialTheme.colors.primary,
+                strokeWidth = 2.5.dp,
+                modifier = Modifier.size(28.dp)
+            )
+        } else if (isInstalled) {
+            Switch(
+                checked = isEnabled,
+                onCheckedChange = onToggleEnabled,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = MaterialTheme.colors.primary,
+                    checkedTrackColor = MaterialTheme.colors.primary.copy(alpha = 0.5f)
+                )
+            )
+
+            IconButton(
+                onClick = onUninstall,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = stringResource(Res.string.uninstall),
+                    tint = MaterialTheme.colors.error.copy(alpha = 0.8f)
+                )
+            }
+        } else {
+            PrimaryButton(
+                onClick = onInstall,
+                icon = Icons.Default.Download,
+                text = stringResource(Res.string.install),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.height(36.dp),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PluginTvTypesRow(tvTypes: ImmutableList<String>) {
+    if (tvTypes.isEmpty()) return
+
+    Spacer(modifier = Modifier.height(8.dp))
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        tvTypes.forEach { tvType ->
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = CloudStreamColors.SurfaceElevated,
+                border = BorderStroke(1.dp, CloudStreamColors.Divider)
+            ) {
+                Text(
+                    text = tvType,
+                    style = MaterialTheme.typography.caption.copy(fontSize = 10.sp),
+                    color = CloudStreamColors.TextSecondary,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PluginDownloadingProgressBar(
+    operationState: PluginOperationState,
+    plugin: PluginItem
+) {
+    if (operationState !is PluginOperationState.Downloading ||
+        !operationState.pluginName.equals(plugin.name, ignoreCase = true)
+    ) return
+
+    val progress = plugin.progress ?: 0.5f
+    Spacer(modifier = Modifier.height(8.dp))
+    LinearProgressIndicator(
+        progress = progress,
+        color = MaterialTheme.colors.primary,
+        backgroundColor = CloudStreamColors.Divider,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(4.dp)
+            .clip(RoundedCornerShape(2.dp))
+    )
+}
+
+@Composable
+fun PluginStatusBadge(status: PluginStatus) {
     val (labelRes, color) = when (status) {
-        0 -> Res.string.plugin_status_down to CloudStreamColors.Error
-        2 -> Res.string.plugin_status_slow to CloudStreamColors.Warning
-        3 -> Res.string.plugin_status_beta to CloudStreamColors.Quality4K
+        PluginStatus.ERROR -> Res.string.plugin_status_down to CloudStreamColors.Error
+        PluginStatus.DOWNLOADING, PluginStatus.UPDATING -> Res.string.plugin_status_slow to CloudStreamColors.Warning
+        PluginStatus.INSTALLED -> Res.string.plugin_status_ok to CloudStreamColors.Success
         else -> Res.string.plugin_status_ok to CloudStreamColors.Success
     }
 
@@ -1326,10 +1345,6 @@ fun PluginStatusBadge(status: Int) {
     }
 }
 
-// =========================================================================================
-// NIVEL 3: Plugin Details Interactive Modal Dialog
-// =========================================================================================
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PluginDetailsDialog(
@@ -1347,10 +1362,11 @@ fun PluginDetailsDialog(
     }
 
     val isInstalled = state.installedPlugins.any { it.internalName == livePlugin.internalName } || livePlugin.isInstalled
-    val isThisDownloading = state.operationState is PluginOperationState.Downloading &&
-            (state.operationState as PluginOperationState.Downloading).pluginName.equals(livePlugin.name, ignoreCase = true)
-    val isThisInstalling = state.operationState is PluginOperationState.Installing &&
-            (state.operationState as PluginOperationState.Installing).pluginName.equals(livePlugin.name, ignoreCase = true)
+    val isOperating = when (val op = state.operationState) {
+        is PluginOperationState.Downloading -> op.pluginName.equals(livePlugin.name, ignoreCase = true)
+        is PluginOperationState.Installing -> op.pluginName.equals(livePlugin.name, ignoreCase = true)
+        else -> false
+    }
 
     val validAuthors = livePlugin.authors.filter { it.isNotBlank() }
 
@@ -1358,317 +1374,262 @@ fun PluginDetailsDialog(
         onDismissRequest = onDismiss,
         modifier = modifier.fillMaxWidth(),
         titleContent = {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (!livePlugin.iconUrl.isNullOrBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(CloudStreamColors.Divider),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            AsyncImage(
-                                url = livePlugin.iconUrl,
-                                contentDescription = livePlugin.name,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(
-                                    Brush.linearGradient(
-                                        colors = listOf(
-                                            MaterialTheme.colors.primary,
-                                            MaterialTheme.colors.secondary
-                                        )
-                                    )
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = livePlugin.name.take(2).uppercase(),
-                                style = MaterialTheme.typography.h6.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colors.onPrimary
-                                )
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = livePlugin.name,
-                                style = MaterialTheme.typography.subtitle1.copy(fontWeight = FontWeight.Bold),
-                                color = CloudStreamColors.TextPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = CloudStreamColors.Divider
-                            ) {
-                                Text(
-                                    text = "v${livePlugin.version}",
-                                    style = MaterialTheme.typography.caption.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 10.sp
-                                    ),
-                                    color = CloudStreamColors.TextSecondary,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-
-                            PluginStatusBadge(status = livePlugin.status)
-                        }
-
-                        if (validAuthors.isNotEmpty()) {
-                            Text(
-                                text = stringResource(Res.string.plugin_by_author_format, validAuthors.joinToString(", ")),
-                                style = MaterialTheme.typography.caption,
-                                color = CloudStreamColors.TextSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                }
-
-                IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = stringResource(Res.string.close),
-                        tint = CloudStreamColors.TextSecondary
-                    )
-                }
-            }
+            PluginDialogHeader(
+                livePlugin = livePlugin,
+                validAuthors = validAuthors,
+                onDismiss = onDismiss
+            )
         },
         buttons = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                if (isInstalled) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Switch(
-                            checked = livePlugin.isEnabled,
-                            onCheckedChange = { enabled ->
-                                viewModel.handleEvent(PluginsSettingsEvent.InstallPlugin(livePlugin.copy(isEnabled = enabled)))
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = MaterialTheme.colors.primary,
-                                checkedTrackColor = MaterialTheme.colors.primary.copy(alpha = 0.5f)
-                            )
-                        )
-                        Text(
-                            text = if (livePlugin.isEnabled) stringResource(Res.string.plugin_status_ok) else stringResource(Res.string.plugin_status_down),
-                            style = MaterialTheme.typography.caption.copy(fontWeight = FontWeight.Medium),
-                            color = CloudStreamColors.TextSecondary
-                        )
-                    }
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SecondaryButton(
-                            text = stringResource(Res.string.uninstall),
-                            icon = Icons.Default.Delete,
-                            onClick = {
-                                viewModel.handleEvent(PluginsSettingsEvent.UninstallPlugin(livePlugin.internalName))
-                                onDismiss()
-                            }
-                        )
-                        SecondaryButton(
-                            text = stringResource(Res.string.close),
-                            onClick = onDismiss
-                        )
-                    }
-                } else {
-                    SecondaryButton(
-                        text = stringResource(Res.string.close),
-                        onClick = onDismiss
-                    )
-
-                    if (isThisDownloading || isThisInstalling) {
-                        CircularProgressIndicator(
-                            color = MaterialTheme.colors.primary,
-                            modifier = Modifier.size(32.dp),
-                            strokeWidth = 2.5.dp
-                        )
-                    } else {
-                        PrimaryButton(
-                            text = stringResource(Res.string.install),
-                            icon = Icons.Default.Download,
-                            onClick = {
-                                viewModel.handleEvent(PluginsSettingsEvent.InstallPlugin(livePlugin))
-                            }
-                        )
-                    }
-                }
-            }
+            PluginDialogButtons(
+                livePlugin = livePlugin,
+                isInstalled = isInstalled,
+                isOperating = isOperating,
+                viewModel = viewModel,
+                onDismiss = onDismiss
+            )
         },
         content = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 420.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+            PluginDialogContent(livePlugin = livePlugin)
+        }
+    )
+}
+
+@Composable
+private fun PluginDialogHeader(
+    livePlugin: PluginItem,
+    validAuthors: List<String>,
+    onDismiss: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PluginIcon(iconUrl = livePlugin.iconUrl, name = livePlugin.name)
+            Spacer(modifier = Modifier.width(12.dp))
+            PluginCardInfo(plugin = livePlugin, validAuthors = validAuthors)
+        }
+
+        IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = stringResource(Res.string.close),
+                tint = CloudStreamColors.TextSecondary
+            )
+        }
+    }
+}
+
+@Composable
+private fun PluginDialogButtons(
+    livePlugin: PluginItem,
+    isInstalled: Boolean,
+    isOperating: Boolean,
+    viewModel: PluginsSettingsViewModel,
+    onDismiss: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        if (isInstalled) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Divider(color = CloudStreamColors.Divider)
+                Switch(
+                    checked = livePlugin.isEnabled,
+                    onCheckedChange = { _ -> viewModel.togglePlugin(livePlugin) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = MaterialTheme.colors.primary,
+                        checkedTrackColor = MaterialTheme.colors.primary.copy(alpha = 0.5f)
+                    )
+                )
+                Text(
+                    text = if (livePlugin.isEnabled) stringResource(Res.string.plugin_status_ok) else stringResource(Res.string.plugin_status_down),
+                    style = MaterialTheme.typography.caption.copy(fontWeight = FontWeight.Medium),
+                    color = CloudStreamColors.TextSecondary
+                )
+            }
 
-                // Badges row: Language & TV Types
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SecondaryButton(
+                    text = stringResource(Res.string.uninstall),
+                    icon = Icons.Default.Delete,
+                    onClick = {
+                        viewModel.uninstallPlugin(livePlugin)
+                        onDismiss()
+                    }
+                )
+                SecondaryButton(
+                    text = stringResource(Res.string.close),
+                    onClick = onDismiss
+                )
+            }
+        } else {
+            SecondaryButton(
+                text = stringResource(Res.string.close),
+                onClick = onDismiss
+            )
+
+            if (isOperating) {
+                CircularProgressIndicator(
+                    color = MaterialTheme.colors.primary,
+                    modifier = Modifier.size(32.dp),
+                    strokeWidth = 2.5.dp
+                )
+            } else {
+                PrimaryButton(
+                    text = stringResource(Res.string.install),
+                    icon = Icons.Default.Download,
+                    onClick = { viewModel.downloadPlugin(livePlugin) }
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PluginDialogContent(livePlugin: PluginItem) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 420.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Divider(color = CloudStreamColors.Divider)
+
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (!livePlugin.language.isNullOrBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = CloudStreamColors.Divider
                 ) {
-                    if (!livePlugin.language.isNullOrBlank()) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = CloudStreamColors.Divider
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Language,
-                                    contentDescription = null,
-                                    tint = CloudStreamColors.TextSecondary,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Text(
-                                    text = livePlugin.language.uppercase(),
-                                    style = MaterialTheme.typography.caption.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp
-                                    ),
-                                    color = CloudStreamColors.TextPrimary
-                                )
-                            }
-                        }
-                    }
-
-                    livePlugin.tvTypes.forEach { tvType ->
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = CloudStreamColors.SurfaceElevated,
-                            border = BorderStroke(1.dp, CloudStreamColors.Divider)
-                        ) {
-                            Text(
-                                text = tvType,
-                                style = MaterialTheme.typography.caption.copy(
-                                    fontWeight = FontWeight.Medium,
-                                    fontSize = 11.sp
-                                ),
-                                color = CloudStreamColors.TextSecondary,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-                }
-
-                // Description
-                if (!livePlugin.description.isNullOrBlank()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            text = stringResource(Res.string.extension_description),
-                            style = MaterialTheme.typography.caption.copy(fontWeight = FontWeight.Bold),
-                            color = CloudStreamColors.TextMuted
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Language,
+                            contentDescription = null,
+                            tint = CloudStreamColors.TextSecondary,
+                            modifier = Modifier.size(13.dp)
                         )
                         Text(
-                            text = livePlugin.description,
-                            style = MaterialTheme.typography.body2.copy(fontSize = 13.sp, lineHeight = 18.sp),
+                            text = livePlugin.language.uppercase(),
+                            style = MaterialTheme.typography.caption.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            ),
                             color = CloudStreamColors.TextPrimary
                         )
                     }
                 }
+            }
 
-                // Changelog if present
-                if (!livePlugin.changelog.isNullOrBlank()) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = null,
-                                tint = CloudStreamColors.TextMuted,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = stringResource(Res.string.changelog),
-                                style = MaterialTheme.typography.caption.copy(fontWeight = FontWeight.Bold),
-                                color = CloudStreamColors.TextMuted
-                            )
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = CloudStreamColors.SurfaceElevated,
-                            border = BorderStroke(1.dp, CloudStreamColors.Divider),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = livePlugin.changelog,
-                                style = MaterialTheme.typography.caption.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 11.sp
-                                ),
-                                color = CloudStreamColors.TextSecondary,
-                                modifier = Modifier.padding(10.dp)
-                            )
-                        }
-                    }
-                }
-
-                // Technical Package identifier
+            livePlugin.tvTypes.forEach { tvType ->
                 Surface(
                     shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colors.background,
+                    color = CloudStreamColors.SurfaceElevated,
                     border = BorderStroke(1.dp, CloudStreamColors.Divider)
                 ) {
                     Text(
-                        text = livePlugin.internalName,
+                        text = tvType,
                         style = MaterialTheme.typography.caption.copy(
-                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Medium,
                             fontSize = 11.sp
                         ),
-                        color = CloudStreamColors.TextMuted,
+                        color = CloudStreamColors.TextSecondary,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
             }
         }
-    )
-}
 
-// =========================================================================================
-// Status Banner & Helpers
-// =========================================================================================
+        if (!livePlugin.description.isNullOrBlank()) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = stringResource(Res.string.extension_description),
+                    style = MaterialTheme.typography.caption.copy(fontWeight = FontWeight.Bold),
+                    color = CloudStreamColors.TextMuted
+                )
+                Text(
+                    text = livePlugin.description,
+                    style = MaterialTheme.typography.body2.copy(fontSize = 13.sp, lineHeight = 18.sp),
+                    color = CloudStreamColors.TextPrimary
+                )
+            }
+        }
+
+        if (!livePlugin.changelog.isNullOrBlank()) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.History,
+                        contentDescription = null,
+                        tint = CloudStreamColors.TextMuted,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = stringResource(Res.string.changelog),
+                        style = MaterialTheme.typography.caption.copy(fontWeight = FontWeight.Bold),
+                        color = CloudStreamColors.TextMuted
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = CloudStreamColors.SurfaceElevated,
+                    border = BorderStroke(1.dp, CloudStreamColors.Divider),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = livePlugin.changelog,
+                        style = MaterialTheme.typography.caption.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp
+                        ),
+                        color = CloudStreamColors.TextSecondary,
+                        modifier = Modifier.padding(10.dp)
+                    )
+                }
+            }
+        }
+
+        Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = MaterialTheme.colors.background,
+            border = BorderStroke(1.dp, CloudStreamColors.Divider)
+        ) {
+            Text(
+                text = livePlugin.internalName,
+                style = MaterialTheme.typography.caption.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp
+                ),
+                color = CloudStreamColors.TextMuted,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
+    }
+}
 
 @Composable
 fun OperationStatusBanner(
@@ -1676,35 +1637,7 @@ fun OperationStatusBanner(
     error: UiText?,
     onDismiss: () -> Unit
 ) {
-    val message = when {
-        error != null -> error.asString()
-        operationState is PluginOperationState.Error -> {
-            if (operationState.messageRes != null) {
-                if (operationState.formatArgs.isNotEmpty()) {
-                    stringResource(operationState.messageRes, *operationState.formatArgs.toTypedArray())
-                } else {
-                    stringResource(operationState.messageRes)
-                }
-            } else {
-                operationState.message
-            }
-        }
-        operationState is PluginOperationState.Success -> {
-            if (operationState.messageRes != null) {
-                if (operationState.formatArgs.isNotEmpty()) {
-                    stringResource(operationState.messageRes, *operationState.formatArgs.toTypedArray())
-                } else {
-                    stringResource(operationState.messageRes)
-                }
-            } else {
-                operationState.message
-            }
-        }
-        operationState is PluginOperationState.Installing -> stringResource(Res.string.plugin_installing_format, operationState.pluginName)
-        operationState is PluginOperationState.Uninstalling -> stringResource(Res.string.plugin_uninstalling_format, operationState.pluginName)
-        else -> null
-    }
-
+    val message = resolveOperationBannerMessage(operationState = operationState, error = error)
     val isError = error != null || operationState is PluginOperationState.Error
 
     AnimatedVisibility(
@@ -1766,6 +1699,51 @@ fun OperationStatusBanner(
 }
 
 @Composable
+private fun resolveOperationBannerMessage(
+    operationState: PluginOperationState,
+    error: UiText?
+): String? {
+    if (error != null) return error.asString()
+
+    return when (operationState) {
+        is PluginOperationState.Error -> resolveResMessage(
+            res = operationState.messageRes,
+            args = operationState.formatArgs,
+            fallback = operationState.message
+        )
+        is PluginOperationState.Success -> resolveResMessage(
+            res = operationState.messageRes,
+            args = operationState.formatArgs,
+            fallback = operationState.message
+        )
+        is PluginOperationState.Installing -> stringResource(
+            Res.string.plugin_installing_format,
+            operationState.pluginName
+        )
+        is PluginOperationState.Uninstalling -> stringResource(
+            Res.string.plugin_uninstalling_format,
+            operationState.pluginName
+        )
+        else -> null
+    }
+}
+
+@Composable
+private fun resolveResMessage(
+    res: StringResource?,
+    args: List<Any>,
+    fallback: String?
+): String? {
+    if (res == null) return fallback
+    return when (args.size) {
+        0 -> stringResource(res)
+        1 -> stringResource(res, args[0])
+        2 -> stringResource(res, args[0], args[1])
+        else -> stringResource(res, *args.toTypedArray())
+    }
+}
+
+@Composable
 fun EmptyPluginState(
     message: String,
     subtitle: String,
@@ -1807,5 +1785,52 @@ fun EmptyPluginState(
                 textAlign = TextAlign.Center
             )
         }
+    }
+}
+
+@Preview
+@Composable
+private fun PluginsScreenPreview() {
+    com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme {
+        RepositoriesLevelView(
+            repositories = persistentListOf(
+                PluginRepositoryItem(
+                    name = "Official Repository",
+                    url = "https://example.com/repo.json",
+                    pluginCount = 12
+                )
+            ),
+            installedPlugins = persistentListOf(),
+            isLoading = false,
+            onRefresh = {},
+            onAddRepoClick = {},
+            onDeleteRepoClick = {},
+            onRepoClick = {}
+        )
+    }
+}
+
+@Preview
+@Composable
+private fun PluginsScreenAmoledLightPreview() {
+    com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme(
+        theme = com.lagradost.cloudstream3.shared.viewmodels.settings.AppTheme.AMOLED,
+        isDarkMode = false
+    ) {
+        RepositoriesLevelView(
+            repositories = persistentListOf(
+                PluginRepositoryItem(
+                    name = "Official Repository",
+                    url = "https://example.com/repo.json",
+                    pluginCount = 12
+                )
+            ),
+            installedPlugins = persistentListOf(),
+            isLoading = false,
+            onRefresh = {},
+            onAddRepoClick = {},
+            onDeleteRepoClick = {},
+            onRepoClick = {}
+        )
     }
 }

@@ -9,9 +9,6 @@ import androidx.room.Upsert
 import com.lagradost.cloudstream3.shared.persistence.entity.ResumeWatchingEntity
 import kotlinx.coroutines.flow.Flow
 
-/**
- * Data Access Object for resume watching state per parent media.
- */
 @Dao
 interface ResumeWatchingDao {
     @Query("SELECT * FROM resume_watching WHERE accountId = :accountId AND parentId = :parentId LIMIT 1")

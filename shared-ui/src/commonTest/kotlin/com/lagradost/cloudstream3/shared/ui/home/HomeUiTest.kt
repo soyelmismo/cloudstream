@@ -33,6 +33,9 @@ import com.lagradost.cloudstream3.shared.ui.components.MediaCardDefaults
 import com.lagradost.cloudstream3.shared.viewmodels.HomeEffect
 import com.lagradost.cloudstream3.shared.viewmodels.HomeEvent
 import com.lagradost.cloudstream3.shared.viewmodels.HomeViewModel
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import com.lagradost.cloudstream3.shared.viewmodels.result.ResultEvent
 import com.lagradost.cloudstream3.shared.viewmodels.result.ResultViewModel
 import com.lagradost.cloudstream3.shared.viewmodels.settings.FakeAppPreferenceRepository
@@ -95,7 +98,7 @@ class FakeProviderRepository(
     private val providers = initialProviders.toMutableList()
     private val listeners = mutableListOf<() -> Unit>()
 
-    override fun getAllProviders(): List<MainAPI> = providers.toList()
+    override fun getAllProviders(): ImmutableList<MainAPI> = providers.toImmutableList()
 
     override fun getApiByName(name: String?): MainAPI? {
         if (name == null) return null
@@ -114,7 +117,7 @@ class FakeProviderRepository(
         }
     }
 
-    override fun getProvidersFlow(): Flow<List<MainAPI>> = flowOf(providers.toList())
+    override fun getProvidersFlow(): Flow<ImmutableList<MainAPI>> = flowOf(providers.toImmutableList())
 
     fun updateProviders(newProviders: List<MainAPI>) {
         providers.clear()
@@ -124,28 +127,28 @@ class FakeProviderRepository(
 }
 
 class FakeBookmarkRepo : BookmarkRepository {
-    private val flow = MutableStateFlow<List<BookmarkEntity>>(emptyList())
-    fun setBookmarks(items: List<BookmarkEntity>) { flow.value = items }
-    override fun getAllBookmarksFlow(accountId: Int): Flow<List<BookmarkEntity>> = flow
-    override suspend fun getAllBookmarks(accountId: Int): List<BookmarkEntity> = flow.value
+    private val flow = MutableStateFlow<ImmutableList<BookmarkEntity>>(persistentListOf())
+    fun setBookmarks(items: List<BookmarkEntity>) { flow.value = items.toImmutableList() }
+    override fun getAllBookmarksFlow(accountId: Int): Flow<ImmutableList<BookmarkEntity>> = flow
+    override suspend fun getAllBookmarks(accountId: Int): ImmutableList<BookmarkEntity> = flow.value
     override suspend fun getBookmark(accountId: Int, id: Int): BookmarkEntity? = flow.value.find { it.id == id }
     override fun getBookmarkFlow(accountId: Int, id: Int): Flow<BookmarkEntity?> = flowOf(flow.value.find { it.id == id })
-    override suspend fun getBookmarksByWatchType(accountId: Int, watchType: Int): List<BookmarkEntity> = flow.value.filter { it.watchType == watchType }
-    override fun getBookmarksByWatchTypeFlow(accountId: Int, watchType: Int): Flow<List<BookmarkEntity>> = flowOf(emptyList())
+    override suspend fun getBookmarksByWatchType(accountId: Int, watchType: Int): ImmutableList<BookmarkEntity> = flow.value.filter { it.watchType == watchType }.toImmutableList()
+    override fun getBookmarksByWatchTypeFlow(accountId: Int, watchType: Int): Flow<ImmutableList<BookmarkEntity>> = flowOf(persistentListOf())
     override suspend fun saveBookmark(bookmark: BookmarkEntity) {
-        flow.value = flow.value.filterNot { it.id == bookmark.id } + bookmark
+        flow.value = (flow.value.filterNot { it.id == bookmark.id } + bookmark).toImmutableList()
     }
     override suspend fun deleteBookmark(accountId: Int, id: Int) {
-        flow.value = flow.value.filterNot { it.id == id }
+        flow.value = flow.value.filterNot { it.id == id }.toImmutableList()
     }
-    override suspend fun clearAll(accountId: Int) { flow.value = emptyList() }
+    override suspend fun clearAll(accountId: Int) { flow.value = persistentListOf() }
 }
 
 class FakeWatchProgressRepo : WatchProgressRepository {
-    private val flow = MutableStateFlow<List<WatchProgressEntity>>(emptyList())
-    fun setProgresses(items: List<WatchProgressEntity>) { flow.value = items }
-    override fun getAllProgressFlow(accountId: Int): Flow<List<WatchProgressEntity>> = flow
-    override suspend fun getAllProgress(accountId: Int): List<WatchProgressEntity> = flow.value
+    private val flow = MutableStateFlow<ImmutableList<WatchProgressEntity>>(persistentListOf())
+    fun setProgresses(items: List<WatchProgressEntity>) { flow.value = items.toImmutableList() }
+    override fun getAllProgressFlow(accountId: Int): Flow<ImmutableList<WatchProgressEntity>> = flow
+    override suspend fun getAllProgress(accountId: Int): ImmutableList<WatchProgressEntity> = flow.value
     override suspend fun getProgress(accountId: Int, mediaId: Int): WatchProgressEntity? = flow.value.find { it.mediaId == mediaId }
     override fun getProgressFlow(accountId: Int, mediaId: Int): Flow<WatchProgressEntity?> = flowOf(flow.value.find { it.mediaId == mediaId })
     override suspend fun setProgress(accountId: Int, mediaId: Int, position: Long, duration: Long, watchState: Int) {
@@ -157,47 +160,47 @@ class FakeWatchProgressRepo : WatchProgressRepository {
             watchState = watchState,
             lastUpdated = 1000L
         )
-        flow.value = flow.value.filterNot { it.mediaId == mediaId } + entity
+        flow.value = (flow.value.filterNot { it.mediaId == mediaId } + entity).toImmutableList()
     }
     override suspend fun deleteProgress(accountId: Int, mediaId: Int) {
-        flow.value = flow.value.filterNot { it.mediaId == mediaId }
+        flow.value = flow.value.filterNot { it.mediaId == mediaId }.toImmutableList()
     }
-    override suspend fun clearProgress(accountId: Int) { flow.value = emptyList() }
+    override suspend fun clearProgress(accountId: Int) { flow.value = persistentListOf() }
 }
 
 class FakeResumeWatchingRepo : ResumeWatchingRepository {
-    private val flow = MutableStateFlow<List<ResumeWatchingEntity>>(emptyList())
-    fun setResumeWatchings(items: List<ResumeWatchingEntity>) { flow.value = items }
-    override fun getAllResumeWatchingFlow(accountId: Int): Flow<List<ResumeWatchingEntity>> = flow
-    override suspend fun getAllResumeWatching(accountId: Int): List<ResumeWatchingEntity> = flow.value
+    private val flow = MutableStateFlow<ImmutableList<ResumeWatchingEntity>>(persistentListOf())
+    fun setResumeWatchings(items: List<ResumeWatchingEntity>) { flow.value = items.toImmutableList() }
+    override fun getAllResumeWatchingFlow(accountId: Int): Flow<ImmutableList<ResumeWatchingEntity>> = flow
+    override suspend fun getAllResumeWatching(accountId: Int): ImmutableList<ResumeWatchingEntity> = flow.value
     override suspend fun getResumeWatching(accountId: Int, parentId: Int): ResumeWatchingEntity? = flow.value.find { it.parentId == parentId }
     override fun getResumeWatchingFlow(accountId: Int, parentId: Int): Flow<ResumeWatchingEntity?> = flowOf(flow.value.find { it.parentId == parentId })
     override suspend fun setResumeWatching(accountId: Int, parentId: Int, episodeId: Int?, episode: Int?, season: Int?, isFromDownload: Boolean, updateTime: Long?) {
         val entity = ResumeWatchingEntity(accountId, parentId, episodeId, episode, season, isFromDownload, updateTime ?: 1000L)
-        flow.value = flow.value.filterNot { it.parentId == parentId } + entity
+        flow.value = (flow.value.filterNot { it.parentId == parentId } + entity).toImmutableList()
     }
     override suspend fun saveResumeWatching(resumeWatching: ResumeWatchingEntity) {
-        flow.value = flow.value.filterNot { it.parentId == resumeWatching.parentId } + resumeWatching
+        flow.value = (flow.value.filterNot { it.parentId == resumeWatching.parentId } + resumeWatching).toImmutableList()
     }
     override suspend fun deleteResumeWatching(accountId: Int, parentId: Int) {
-        flow.value = flow.value.filterNot { it.parentId == parentId }
+        flow.value = flow.value.filterNot { it.parentId == parentId }.toImmutableList()
     }
-    override suspend fun clearAll(accountId: Int) { flow.value = emptyList() }
+    override suspend fun clearAll(accountId: Int) { flow.value = persistentListOf() }
 }
 
 class FakeFavoriteRepo : FavoriteRepository {
-    private val flow = MutableStateFlow<List<FavoriteEntity>>(emptyList())
-    override fun getAllFavoritesFlow(accountId: Int): Flow<List<FavoriteEntity>> = flow
-    override suspend fun getAllFavorites(accountId: Int): List<FavoriteEntity> = flow.value
+    private val flow = MutableStateFlow<ImmutableList<FavoriteEntity>>(persistentListOf())
+    override fun getAllFavoritesFlow(accountId: Int): Flow<ImmutableList<FavoriteEntity>> = flow
+    override suspend fun getAllFavorites(accountId: Int): ImmutableList<FavoriteEntity> = flow.value
     override suspend fun getFavorite(accountId: Int, id: Int): FavoriteEntity? = flow.value.find { it.id == id }
     override fun getFavoriteFlow(accountId: Int, id: Int): Flow<FavoriteEntity?> = flowOf(flow.value.find { it.id == id })
     override suspend fun saveFavorite(favorite: FavoriteEntity) {
-        flow.value = flow.value.filterNot { it.id == favorite.id } + favorite
+        flow.value = (flow.value.filterNot { it.id == favorite.id } + favorite).toImmutableList()
     }
     override suspend fun deleteFavorite(accountId: Int, id: Int) {
-        flow.value = flow.value.filterNot { it.id == id }
+        flow.value = flow.value.filterNot { it.id == id }.toImmutableList()
     }
-    override suspend fun clearAll(accountId: Int) { flow.value = emptyList() }
+    override suspend fun clearAll(accountId: Int) { flow.value = persistentListOf() }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)

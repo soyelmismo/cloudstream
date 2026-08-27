@@ -24,27 +24,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import cloudstream.shared_ui.generated.resources.*
+import com.lagradost.cloudstream3.Actor
 import com.lagradost.cloudstream3.ActorData
 import com.lagradost.cloudstream3.shared.ui.components.AsyncImage
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
-
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
 import org.jetbrains.compose.resources.stringResource
-import cloudstream.shared_ui.generated.resources.*
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
-/**
- * Horizontal scrollable row of Cast & Crew actor cards with circular avatars,
- * actor names, and role/character information.
- */
 @Composable
 fun ResultCastRow(
-    actors: List<ActorData>,
+    actors: ImmutableList<ActorData>,
     onSearchClick: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -90,17 +88,18 @@ fun ActorCard(
         shape = RoundedCornerShape(8.dp),
         backgroundColor = CloudStreamColors.SurfaceVariant.copy(alpha = 0.6f),
         elevation = 0.dp,
-        modifier = modifier.width(96.dp).let {
-            if (onSearchClick != null) {
-                it.clickable { onSearchClick(actorName) }
-            } else it
-        }
+        modifier = modifier
+            .width(96.dp)
+            .let {
+                if (onSearchClick != null) {
+                    it.clickable { onSearchClick(actorName) }
+                } else it
+            }
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(8.dp)
         ) {
-            // Circular Avatar
             Box(
                 modifier = Modifier
                     .size(60.dp)
@@ -128,7 +127,6 @@ fun ActorCard(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Actor Name
             Text(
                 text = actorName,
                 style = MaterialTheme.typography.caption.copy(
@@ -141,7 +139,6 @@ fun ActorCard(
                 textAlign = TextAlign.Center
             )
 
-            // Character / Role Name
             if (!roleName.isNullOrBlank()) {
                 Text(
                     text = roleName,
@@ -155,5 +152,18 @@ fun ActorCard(
                 )
             }
         }
+    }
+}
+
+@Preview
+@Composable
+private fun ResultCastRowPreview() {
+    MaterialTheme {
+        ResultCastRow(
+            actors = persistentListOf(
+                ActorData(actor = Actor("Keanu Reeves", null), roleString = "Neo"),
+                ActorData(actor = Actor("Carrie-Anne Moss", null), roleString = "Trinity")
+            )
+        )
     }
 }

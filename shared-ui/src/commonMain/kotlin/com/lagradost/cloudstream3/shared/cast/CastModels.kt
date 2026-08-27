@@ -1,8 +1,15 @@
 package com.lagradost.cloudstream3.shared.cast
 
+import androidx.compose.runtime.Immutable
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentMapOf
+
 /**
  * Protocol family supported by the discovered casting device.
  */
+@Immutable
 enum class CastProtocol {
     GOOGLE_CAST,
     UPNP_DLNA,
@@ -13,6 +20,7 @@ enum class CastProtocol {
 /**
  * Lifecycle states of an active or pending cast connection.
  */
+@Immutable
 enum class CastState {
     DISCONNECTED,
     CONNECTING,
@@ -27,6 +35,7 @@ enum class CastState {
 /**
  * Target device capable of receiving media streams.
  */
+@Immutable
 data class CastDevice(
     val id: String,
     val name: String,
@@ -42,6 +51,7 @@ data class CastDevice(
 /**
  * Remote subtitle track for cast playback.
  */
+@Immutable
 data class CastSubtitle(
     val name: String,
     val url: String,
@@ -52,6 +62,7 @@ data class CastSubtitle(
 /**
  * Media description payload sent to remote casting renderers.
  */
+@Immutable
 data class CastMediaItem(
     val title: String,
     val subtitle: String? = null,
@@ -60,13 +71,14 @@ data class CastMediaItem(
     val isMovie: Boolean = true,
     val currentEpisode: Int? = null,
     val durationMs: Long = 0L,
-    val headers: Map<String, String> = emptyMap(),
-    val subtitles: List<CastSubtitle> = emptyList()
+    val headers: ImmutableMap<String, String> = persistentMapOf(),
+    val subtitles: ImmutableList<CastSubtitle> = persistentListOf()
 )
 
 /**
  * Active remote casting playback session info.
  */
+@Immutable
 data class CastSessionInfo(
     val device: CastDevice,
     val state: CastState = CastState.CONNECTED,

@@ -474,11 +474,35 @@ object HlsPlaylistParser {
             return url.toString()
         }
 
+        private fun findFragmentIndex(urlString: String): Int {
+            val idx = urlString.indexOf('#')
+            return if (idx == -1) urlString.length else idx
+        }
+
+        private fun findQueryIndex(urlString: String, fragmentIndex: Int): Int {
+            val idx = urlString.indexOf('?')
+            return if (idx == -1 || idx > fragmentIndex) fragmentIndex else idx
+        }
+
+        private fun findSchemeIndex(urlString: String, queryIndex: Int): Int {
+            val slashLimit = urlString.indexOf('/')
+            val schemeLimit = if (slashLimit == -1 || slashLimit > queryIndex) queryIndex else slashLimit
+            val colonIndex = urlString.indexOf(':')
+            return if (colonIndex > schemeLimit) -1 else colonIndex
+        }
+
+        private fun findPathIndex(urlString: String, schemeIndex: Int, queryIndex: Int): Int {
+            val hasAuthority = schemeIndex + 2 < queryIndex &&
+                urlString[schemeIndex + 1] == '/' &&
+                urlString[schemeIndex + 2] == '/'
+            if (!hasAuthority) return schemeIndex + 1
+
+            val slashAfterAuthority = urlString.indexOf('/', schemeIndex + 3)
+            return if (slashAfterAuthority == -1 || slashAfterAuthority > queryIndex) queryIndex else slashAfterAuthority
+        }
+
         /**
          * Calculates indices of the constituent components of a URL.
-         *
-         * @param urlString The URL as a string.
-         * @return The corresponding indices.
          */
         private fun getUrlIndices(urlString: String?): IntArray {
             val indices = IntArray(INDEX_COUNT)
@@ -487,43 +511,10 @@ object HlsPlaylistParser {
                 return indices
             }
 
-            // Determine outer structure from right to left.
-            // Url = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
-            val length = urlString.length
-            var fragmentIndex = urlString.indexOf('#')
-            if (fragmentIndex == -1) {
-                fragmentIndex = length
-            }
-            var queryIndex = urlString.indexOf('?')
-            if (queryIndex == -1 || queryIndex > fragmentIndex) {
-                // '#' before '?': '?' is within the fragment.
-                queryIndex = fragmentIndex
-            }
-            // Slashes are allowed only in hier-part so any colon after the first slash is part of the
-            // hier-part, not the scheme colon separator.
-            var schemeIndexLimit = urlString.indexOf('/')
-            if (schemeIndexLimit == -1 || schemeIndexLimit > queryIndex) {
-                schemeIndexLimit = queryIndex
-            }
-            var schemeIndex = urlString.indexOf(':')
-            if (schemeIndex > schemeIndexLimit) {
-                // '/' before ':'
-                schemeIndex = -1
-            }
-
-            // Determine hier-part structure: hier-part = "//" authority path / path
-            // This block can also cope with schemeIndex == -1.
-            val hasAuthority =
-                schemeIndex + 2 < queryIndex && urlString[schemeIndex + 1] == '/' && urlString[schemeIndex + 2] == '/'
-            var pathIndex: Int
-            if (hasAuthority) {
-                pathIndex = urlString.indexOf('/', schemeIndex + 3) // find first '/' after "://"
-                if (pathIndex == -1 || pathIndex > queryIndex) {
-                    pathIndex = queryIndex
-                }
-            } else {
-                pathIndex = schemeIndex + 1
-            }
+            val fragmentIndex = findFragmentIndex(urlString)
+            val queryIndex = findQueryIndex(urlString, fragmentIndex)
+            val schemeIndex = findSchemeIndex(urlString, queryIndex)
+            val pathIndex = findPathIndex(urlString, schemeIndex, queryIndex)
 
             indices[SCHEME_COLON] = schemeIndex
             indices[PATH] = pathIndex
@@ -926,71 +917,54 @@ object HlsPlaylistParser {
             }
         }
 
+        private val CODEC_PREFIX_MIME_TYPES = listOf(
+            "avc1" to VIDEO_H264,
+            "avc3" to VIDEO_H264,
+            "hev1" to VIDEO_H265,
+            "hvc1" to VIDEO_H265,
+            "dvav" to VIDEO_DOLBY_VISION,
+            "dva1" to VIDEO_DOLBY_VISION,
+            "dvhe" to VIDEO_DOLBY_VISION,
+            "dvh1" to VIDEO_DOLBY_VISION,
+            "av01" to VIDEO_AV1,
+            "vp9" to VIDEO_VP9,
+            "vp09" to VIDEO_VP9,
+            "vp8" to VIDEO_VP8,
+            "vp08" to VIDEO_VP8,
+            "mha1" to AUDIO_MPEGH_MHA1,
+            "mhm1" to AUDIO_MPEGH_MHM1,
+            "ac-3" to AUDIO_AC3,
+            "dac3" to AUDIO_AC3,
+            "ec-3" to AUDIO_E_AC3,
+            "dec3" to AUDIO_E_AC3,
+            CODEC_E_AC3_JOC to AUDIO_E_AC3_JOC,
+            "ac-4" to AUDIO_AC4,
+            "dac4" to AUDIO_AC4,
+            "dtsc" to AUDIO_DTS,
+            "dtse" to AUDIO_DTS_EXPRESS,
+            "dtsh" to AUDIO_DTS_HD,
+            "dtsl" to AUDIO_DTS_HD,
+            "dtsx" to AUDIO_DTS_X,
+            "opus" to AUDIO_OPUS,
+            "vorbis" to AUDIO_VORBIS,
+            "flac" to AUDIO_FLAC,
+            "stpp" to APPLICATION_TTML,
+            "wvtt" to TEXT_VTT,
+        )
+
+        private fun resolveMp4aMimeType(codec: String): String {
+            if (!codec.startsWith("mp4a.")) return AUDIO_AAC
+            val objectType = getObjectTypeFromMp4aRFC6381CodecString(codec) ?: return AUDIO_AAC
+            return getMimeTypeFromMp4ObjectType(objectType.objectTypeIndication) ?: AUDIO_AAC
+        }
+
         fun getMediaMimeType(codecOrNull: String?): String? {
-            var codec = codecOrNull ?: return null
-            codec = codec.trim().lowercase()
-            if (codec.startsWith("avc1") || codec.startsWith("avc3")) {
-                return MimeTypes.VIDEO_H264
-            } else if (codec.startsWith("hev1") || codec.startsWith("hvc1")) {
-                return MimeTypes.VIDEO_H265
-            } else if (codec.startsWith("dvav")
-                || codec.startsWith("dva1")
-                || codec.startsWith("dvhe")
-                || codec.startsWith("dvh1")
-            ) {
-                return MimeTypes.VIDEO_DOLBY_VISION
-            } else if (codec.startsWith("av01")) {
-                return MimeTypes.VIDEO_AV1
-            } else if (codec.startsWith("vp9") || codec.startsWith("vp09")) {
-                return MimeTypes.VIDEO_VP9
-            } else if (codec.startsWith("vp8") || codec.startsWith("vp08")) {
-                return MimeTypes.VIDEO_VP8
-            } else if (codec.startsWith("mp4a")) {
-                var mimeType: String? = null
-                if (codec.startsWith("mp4a.")) {
-                    val objectType: Mp4aObjectType? = getObjectTypeFromMp4aRFC6381CodecString(codec)
-                    if (objectType != null) {
-                        mimeType = getMimeTypeFromMp4ObjectType(objectType.objectTypeIndication)
-                    }
-                }
-                return mimeType ?: MimeTypes.AUDIO_AAC
-            } else if (codec.startsWith("mha1")) {
-                return MimeTypes.AUDIO_MPEGH_MHA1
-            } else if (codec.startsWith("mhm1")) {
-                return MimeTypes.AUDIO_MPEGH_MHM1
-            } else if (codec.startsWith("ac-3") || codec.startsWith("dac3")) {
-                return MimeTypes.AUDIO_AC3
-            } else if (codec.startsWith("ec-3") || codec.startsWith("dec3")) {
-                return AUDIO_E_AC3
-            } else if (codec.startsWith(CODEC_E_AC3_JOC)) {
-                return AUDIO_E_AC3_JOC
-            } else if (codec.startsWith("ac-4") || codec.startsWith("dac4")) {
-                return MimeTypes.AUDIO_AC4
-            } else if (codec.startsWith("dtsc")) {
-                return MimeTypes.AUDIO_DTS
-            } else if (codec.startsWith("dtse")) {
-                return MimeTypes.AUDIO_DTS_EXPRESS
-            } else if (codec.startsWith("dtsh") || codec.startsWith("dtsl")) {
-                return MimeTypes.AUDIO_DTS_HD
-            } else if (codec.startsWith("dtsx")) {
-                return MimeTypes.AUDIO_DTS_X
-            } else if (codec.startsWith("opus")) {
-                return MimeTypes.AUDIO_OPUS
-            } else if (codec.startsWith("vorbis")) {
-                return MimeTypes.AUDIO_VORBIS
-            } else if (codec.startsWith("flac")) {
-                return MimeTypes.AUDIO_FLAC
-            } else if (codec.startsWith("stpp")) {
-                return MimeTypes.APPLICATION_TTML
-            } else if (codec.startsWith("wvtt")) {
-                return TEXT_VTT
-            } else if (codec.contains("cea708")) {
-                return APPLICATION_CEA708
-            } else if (codec.contains("eia608") || codec.contains("cea608")) {
-                return APPLICATION_CEA608
-            } else {
-                return null //getCustomMimeTypeForCodec(codec)
-            }
+            val codec = codecOrNull?.trim()?.lowercase() ?: return null
+            if (codec.startsWith("mp4a")) return resolveMp4aMimeType(codec)
+            if (codec.contains("cea708")) return APPLICATION_CEA708
+            if (codec.contains("eia608") || codec.contains("cea608")) return APPLICATION_CEA608
+
+            return CODEC_PREFIX_MIME_TYPES.firstOrNull { (prefix, _) -> codec.startsWith(prefix) }?.second
         }
 
         /**
@@ -1728,339 +1702,328 @@ object HlsPlaylistParser {
         return null
     }
 
-    @Throws(IOException::class)
-    private fun parseMultivariantPlaylist(
-        iterator: Iterator<String>, baseUri: String
-    ): HlsMultivariantPlaylist {
-        val urlToVariantInfos: HashMap<Url, ArrayList<VariantInfo>?> =
-            HashMap<Url, ArrayList<VariantInfo>?>()
-        val variableDefinitions = HashMap<String, String>()
-        val variants: ArrayList<Variant> = ArrayList<Variant>()
-        val videos: ArrayList<Rendition> = ArrayList<Rendition>()
-        val audios: ArrayList<Rendition> = ArrayList<Rendition>()
-        val subtitles: ArrayList<Rendition> = ArrayList<Rendition>()
-        val closedCaptions: ArrayList<Rendition> = ArrayList<Rendition>()
-        val mediaTags = ArrayList<String>()
-        val sessionKeyDrmInitData: ArrayList<DrmInitData> = ArrayList<DrmInitData>()
-        val tags = ArrayList<String>()
-        var muxedAudioFormat: Format? = null
-        var muxedCaptionFormats: ArrayList<Format> = arrayListOf()
-        var noClosedCaptions = false
-        var hasIndependentSegmentsTag = false
+    private fun parseResolution(resolutionString: String?): Pair<Int, Int> {
+        if (resolutionString == null) return Format.NO_VALUE to Format.NO_VALUE
+        val widthAndHeight = Util.split(resolutionString, "x")
+        val width = widthAndHeight[0].toIntOrNull() ?: Format.NO_VALUE
+        val height = widthAndHeight[1].toIntOrNull() ?: Format.NO_VALUE
+        return if (width <= 0 || height <= 0) {
+            Format.NO_VALUE to Format.NO_VALUE
+        } else {
+            width to height
+        }
+    }
 
-        var line: String
-        while (iterator.hasNext()) {
-            line = iterator.next()
-
-            if (line.startsWith(TAG_PREFIX)) {
-                // We expose all tags through the playlist.
-                tags.add(line)
-            }
-            val isIFrameOnlyVariant = line.startsWith(TAG_I_FRAME_STREAM_INF)
-
-            if (line.startsWith(TAG_DEFINE)) {
-                variableDefinitions[parseStringAttr(line, REGEX_NAME, variableDefinitions)] =
-                    parseStringAttr(line, REGEX_VALUE, variableDefinitions)
-            } else if (line == TAG_INDEPENDENT_SEGMENTS) {
-                hasIndependentSegmentsTag = true
-            } else if (line.startsWith(TAG_MEDIA)) {
-                // Media tags are parsed at the end to include codec information from #EXT-X-STREAM-INF
-                // tags.
-                mediaTags.add(line)
-            } else if (line.startsWith(TAG_SESSION_KEY)) {
-                val keyFormat: String =
-                    parseOptionalStringAttr(
-                        line,
-                        REGEX_KEYFORMAT,
-                        KEYFORMAT_IDENTITY,
-                        variableDefinitions
-                    )!!
-                val schemeData: SchemeData? =
-                    parseDrmSchemeData(line, keyFormat, variableDefinitions)
-                if (schemeData != null) {
-                    val method: String =
-                        parseStringAttr(line, REGEX_METHOD, variableDefinitions)
-                    val scheme: String = parseEncryptionScheme(method)
-                    sessionKeyDrmInitData.add(DrmInitData(scheme, arrayOf(schemeData)))
-                }
-            } else if (line.startsWith(TAG_STREAM_INF) || isIFrameOnlyVariant) {
-                noClosedCaptions = noClosedCaptions or line.contains(ATTR_CLOSED_CAPTIONS_NONE)
-                val roleFlags = if (isIFrameOnlyVariant) C.ROLE_FLAG_TRICK_PLAY else 0
-                val peakBitrate: Int = parseIntAttr(line, REGEX_BANDWIDTH)
-                val averageBitrate: Int =
-                    parseOptionalIntAttr(line, REGEX_AVERAGE_BANDWIDTH, -1)
-                val videoRange: String? =
-                    parseOptionalStringAttr(line, REGEX_VIDEO_RANGE, variableDefinitions)
-                var codecs: String? =
-                    parseOptionalStringAttr(line, REGEX_CODECS, variableDefinitions)
-                val supplementalCodecsStrings: String? =
-                    parseOptionalStringAttr(
-                        line,
-                        REGEX_SUPPLEMENTAL_CODECS,
-                        variableDefinitions
-                    )
-                var supplementalCodecs: String? = null
-                var supplementalProfiles: String? = null // i.e. Compatibility brand
-                if (supplementalCodecsStrings != null) {
-                    val supplementalCodecsString: Array<String> =
-                        Util.splitAtFirst(supplementalCodecsStrings, ",")
-                    // TODO: Support more than one element
-                    val codecsAndProfiles: Array<String> = Util.split(
-                        supplementalCodecsString[0], "/"
-                    )
-                    supplementalCodecs = codecsAndProfiles[0]
-                    if (codecsAndProfiles.size > 1) {
-                        supplementalProfiles = codecsAndProfiles[1]
-                    }
-                }
-                var videoCodecs: String? = Util.getCodecsOfType(codecs, C.TRACK_TYPE_VIDEO)
-                if (isDolbyVisionFormat(
-                        videoRange, videoCodecs, supplementalCodecs, supplementalProfiles
-                    )
-                ) {
-                    videoCodecs = supplementalCodecs ?: videoCodecs
-                    val nonVideoCodecs: String? =
-                        Util.getCodecsWithoutType(codecs, C.TRACK_TYPE_VIDEO)
-                    codecs =
-                        if (nonVideoCodecs != null) "$videoCodecs,$nonVideoCodecs" else videoCodecs
-                }
-
-                val resolutionString: String? =
-                    parseOptionalStringAttr(line, REGEX_RESOLUTION, variableDefinitions)
-                var width: Int
-                var height: Int
-                if (resolutionString != null) {
-                    val widthAndHeight: Array<String> = Util.split(resolutionString, "x")
-                    width = widthAndHeight[0].toInt()
-                    height = widthAndHeight[1].toInt()
-                    if (width <= 0 || height <= 0) {
-                        // Resolution string is invalid.
-                        width = Format.NO_VALUE
-                        height = Format.NO_VALUE
-                    }
-                } else {
-                    width = Format.NO_VALUE
-                    height = Format.NO_VALUE
-                }
-                var frameRate: Float = Format.NO_VALUE.toFloat()
-                val frameRateString: String? =
-                    parseOptionalStringAttr(line, REGEX_FRAME_RATE, variableDefinitions)
-                if (frameRateString != null) {
-                    frameRate = frameRateString.toFloat()
-                }
-                val videoGroupId: String? =
-                    parseOptionalStringAttr(line, REGEX_VIDEO, variableDefinitions)
-                val audioGroupId: String? =
-                    parseOptionalStringAttr(line, REGEX_AUDIO, variableDefinitions)
-                val subtitlesGroupId: String? =
-                    parseOptionalStringAttr(line, REGEX_SUBTITLES, variableDefinitions)
-                val closedCaptionsGroupId: String? =
-                    parseOptionalStringAttr(line, REGEX_CLOSED_CAPTIONS, variableDefinitions)
-                val url: Url
-                if (isIFrameOnlyVariant) {
-                    url =
-                        UrlUtil.resolveToUrl(
-                            baseUri,
-                            parseStringAttr(line, REGEX_URI, variableDefinitions)
-                        )
-                } else if (!iterator.hasNext()) {
-                    throw ParserException.createForMalformedManifest(
-                        "#EXT-X-STREAM-INF must be followed by another line",  /* cause= */null
-                    )
-                } else {
-                    // The following line contains #EXT-X-STREAM-INF's URL.
-                    line = replaceVariableReferences(iterator.next(), variableDefinitions)
-                    url = UrlUtil.resolveToUrl(baseUri, line)
-                }
-
-                val variant =
-                    Variant(
-                        url = url,
-                        format = Format(
-                            id = variants.size.toString(),
-                            containerMimeType = MimeTypes.APPLICATION_M3U8,
-                            codecs = codecs,
-                            averageBitrate = averageBitrate,
-                            peakBitrate = peakBitrate,
-                            width = width,
-                            height = height,
-                            frameRate = frameRate,
-                            roleFlags = roleFlags,
-                        ),
-                        videoGroupId = videoGroupId,
-                        audioGroupId = audioGroupId,
-                        subtitleGroupId = subtitlesGroupId,
-                        captionGroupId = closedCaptionsGroupId
-                    )
-                variants.add(variant)
-                var variantInfosForUrl: ArrayList<VariantInfo>? = urlToVariantInfos[url]
-                if (variantInfosForUrl == null) {
-                    variantInfosForUrl = ArrayList()
-                    urlToVariantInfos[url] = variantInfosForUrl
-                }
-                variantInfosForUrl.add(
-                    VariantInfo(
-                        averageBitrate,
-                        peakBitrate,
-                        videoGroupId,
-                        audioGroupId,
-                        subtitlesGroupId,
-                        closedCaptionsGroupId
-                    )
-                )
+    private fun parseStreamInfCodecs(line: String, variableDefinitions: HashMap<String, String>): String? {
+        val videoRange = parseOptionalStringAttr(line, REGEX_VIDEO_RANGE, variableDefinitions)
+        var codecs = parseOptionalStringAttr(line, REGEX_CODECS, variableDefinitions)
+        val supplementalCodecsStrings = parseOptionalStringAttr(line, REGEX_SUPPLEMENTAL_CODECS, variableDefinitions)
+        var supplementalCodecs: String? = null
+        var supplementalProfiles: String? = null
+        if (supplementalCodecsStrings != null) {
+            val supplementalCodecsString = Util.splitAtFirst(supplementalCodecsStrings, ",")
+            val codecsAndProfiles = Util.split(supplementalCodecsString[0], "/")
+            supplementalCodecs = codecsAndProfiles[0]
+            if (codecsAndProfiles.size > 1) {
+                supplementalProfiles = codecsAndProfiles[1]
             }
         }
+        var videoCodecs = Util.getCodecsOfType(codecs, C.TRACK_TYPE_VIDEO)
+        if (isDolbyVisionFormat(videoRange, videoCodecs, supplementalCodecs, supplementalProfiles)) {
+            videoCodecs = supplementalCodecs ?: videoCodecs
+            val nonVideoCodecs = Util.getCodecsWithoutType(codecs, C.TRACK_TYPE_VIDEO)
+            codecs = if (nonVideoCodecs != null) "$videoCodecs,$nonVideoCodecs" else videoCodecs
+        }
+        return codecs
+    }
 
-        // TODO: Don't deduplicate variants by URL.
-        val deduplicatedVariants = variants.distinctBy { it.url }
-        /*val deduplicatedVariants: ArrayList<Variant> = ArrayList<Variant>()
-        val urlsInDeduplicatedVariants = HashSet<Url>()
-        for (i in variants.indices) {
-            val variant: Variant = variants[i]
-            if (urlsInDeduplicatedVariants.add(variant.url)) {
-                Assertions.checkState(variant.format.metadata == null)
-                val hlsMetadataEntry: HlsTrackMetadataEntry =
-                    HlsTrackMetadataEntry( /* groupId= */
-                        null,  /* name= */
-                        null,
-                        checkNotNull(urlToVariantInfos[variant.url])
-                    )
-                val metadata = Metadata(hlsMetadataEntry)
-                val format: Format = variant.format.buildUpon().setMetadata(metadata).build()
-                deduplicatedVariants.add(variant.copyWithFormat(format))
+    private fun parseVariantUrl(
+        line: String,
+        isIFrameOnlyVariant: Boolean,
+        baseUri: String,
+        iterator: Iterator<String>,
+        variableDefinitions: HashMap<String, String>
+    ): Url {
+        if (isIFrameOnlyVariant) {
+            return UrlUtil.resolveToUrl(baseUri, parseStringAttr(line, REGEX_URI, variableDefinitions))
+        }
+        if (!iterator.hasNext()) {
+            throw ParserException.createForMalformedManifest(
+                "#EXT-X-STREAM-INF must be followed by another line",
+                null
+            )
+        }
+        val nextLine = replaceVariableReferences(iterator.next(), variableDefinitions)
+        return UrlUtil.resolveToUrl(baseUri, nextLine)
+    }
+
+    private fun parseStreamInfTag(
+        line: String,
+        isIFrameOnlyVariant: Boolean,
+        baseUri: String,
+        iterator: Iterator<String>,
+        variableDefinitions: HashMap<String, String>,
+        variants: ArrayList<Variant>,
+        urlToVariantInfos: HashMap<Url, ArrayList<VariantInfo>?>
+    ) {
+        val roleFlags = if (isIFrameOnlyVariant) C.ROLE_FLAG_TRICK_PLAY else 0
+        val peakBitrate = parseIntAttr(line, REGEX_BANDWIDTH)
+        val averageBitrate = parseOptionalIntAttr(line, REGEX_AVERAGE_BANDWIDTH, -1)
+        val codecs = parseStreamInfCodecs(line, variableDefinitions)
+        val (width, height) = parseResolution(parseOptionalStringAttr(line, REGEX_RESOLUTION, variableDefinitions))
+        val frameRate = parseOptionalStringAttr(line, REGEX_FRAME_RATE, variableDefinitions)?.toFloatOrNull() ?: Format.NO_VALUE.toFloat()
+
+        val videoGroupId = parseOptionalStringAttr(line, REGEX_VIDEO, variableDefinitions)
+        val audioGroupId = parseOptionalStringAttr(line, REGEX_AUDIO, variableDefinitions)
+        val subtitlesGroupId = parseOptionalStringAttr(line, REGEX_SUBTITLES, variableDefinitions)
+        val closedCaptionsGroupId = parseOptionalStringAttr(line, REGEX_CLOSED_CAPTIONS, variableDefinitions)
+        val url = parseVariantUrl(line, isIFrameOnlyVariant, baseUri, iterator, variableDefinitions)
+
+        val variant = Variant(
+            url = url,
+            format = Format(
+                id = variants.size.toString(),
+                containerMimeType = MimeTypes.APPLICATION_M3U8,
+                codecs = codecs,
+                averageBitrate = averageBitrate,
+                peakBitrate = peakBitrate,
+                width = width,
+                height = height,
+                frameRate = frameRate,
+                roleFlags = roleFlags,
+            ),
+            videoGroupId = videoGroupId,
+            audioGroupId = audioGroupId,
+            subtitleGroupId = subtitlesGroupId,
+            captionGroupId = closedCaptionsGroupId
+        )
+        variants.add(variant)
+        val variantInfosForUrl = urlToVariantInfos.getOrPut(url) { ArrayList() }!!
+        variantInfosForUrl.add(
+            VariantInfo(
+                averageBitrate,
+                peakBitrate,
+                videoGroupId,
+                audioGroupId,
+                subtitlesGroupId,
+                closedCaptionsGroupId
+            )
+        )
+    }
+
+    private fun parseSessionKeyTag(
+        line: String,
+        variableDefinitions: HashMap<String, String>,
+        sessionKeyDrmInitData: ArrayList<DrmInitData>
+    ) {
+        val keyFormat = parseOptionalStringAttr(line, REGEX_KEYFORMAT, KEYFORMAT_IDENTITY, variableDefinitions)!!
+        val schemeData = parseDrmSchemeData(line, keyFormat, variableDefinitions) ?: return
+        val method = parseStringAttr(line, REGEX_METHOD, variableDefinitions)
+        val scheme = parseEncryptionScheme(method)
+        sessionKeyDrmInitData.add(DrmInitData(scheme, arrayOf(schemeData)))
+    }
+
+    private fun parseVideoMediaTag(
+        groupId: String,
+        name: String,
+        formatBuilder: Format,
+        url: Url?,
+        variants: ArrayList<Variant>,
+        videos: ArrayList<Rendition>
+    ) {
+        var updatedFormat = formatBuilder
+        val variant = getVariantWithVideoGroup(variants, groupId)
+        if (variant != null) {
+            val variantFormat = variant.format
+            updatedFormat = updatedFormat.copy(
+                height = variantFormat.height,
+                width = variantFormat.width,
+                frameRate = variantFormat.frameRate,
+                codecs = Util.getCodecsOfType(variantFormat.codecs, C.TRACK_TYPE_VIDEO)
+            )
+        }
+        if (url != null) {
+            videos.add(Rendition(url = url, format = updatedFormat, groupId = groupId, name = name))
+        }
+    }
+
+    private fun parseAudioMediaTag(
+        line: String,
+        groupId: String,
+        name: String,
+        formatBuilder: Format,
+        url: Url?,
+        variants: ArrayList<Variant>,
+        variableDefinitions: HashMap<String, String>,
+        audios: ArrayList<Rendition>
+    ): Format? {
+        var updatedFormat = formatBuilder
+        var sampleMimeType: String? = null
+        val variant = getVariantWithAudioGroup(variants, groupId)
+        if (variant != null) {
+            val codecs = Util.getCodecsOfType(variant.format.codecs, C.TRACK_TYPE_AUDIO)
+            updatedFormat = updatedFormat.copy(codecs = codecs)
+            sampleMimeType = MimeTypes.getMediaMimeType(codecs)
+        }
+        val channelsString = parseOptionalStringAttr(line, REGEX_CHANNELS, variableDefinitions)
+        if (channelsString != null) {
+            val channelCount = Util.splitAtFirst(channelsString, "/")[0].toInt()
+            updatedFormat = updatedFormat.copy(channelCount = channelCount)
+            if (MimeTypes.AUDIO_E_AC3 == sampleMimeType && channelsString.endsWith("/JOC")) {
+                sampleMimeType = MimeTypes.AUDIO_E_AC3_JOC
+                updatedFormat = updatedFormat.copy(codecs = MimeTypes.CODEC_E_AC3_JOC)
             }
-        }*/
+        }
+        val format = updatedFormat.copy(sampleMimeType = sampleMimeType)
+        if (url != null) {
+            audios.add(Rendition(url, format, groupId, name))
+            return null
+        }
+        return if (variant != null) format else null
+    }
 
-        for (i in mediaTags.indices) {
-            line = mediaTags[i]
-            val groupId: String = parseStringAttr(line, REGEX_GROUP_ID, variableDefinitions)
-            val name: String = parseStringAttr(line, REGEX_NAME, variableDefinitions)
-            var formatBuilder = Format(
+    private fun parseSubtitleMediaTag(
+        groupId: String,
+        name: String,
+        formatBuilder: Format,
+        url: Url?,
+        variants: ArrayList<Variant>,
+        subtitles: ArrayList<Rendition>
+    ) {
+        var updatedFormat = formatBuilder
+        var sampleMimeType: String? = null
+        val variant = getVariantWithSubtitleGroup(variants, groupId)
+        if (variant != null) {
+            val codecs = Util.getCodecsOfType(variant.format.codecs, C.TRACK_TYPE_TEXT)
+            updatedFormat = updatedFormat.copy(codecs = codecs)
+            sampleMimeType = MimeTypes.getMediaMimeType(codecs)
+        }
+        if (sampleMimeType == null) {
+            sampleMimeType = MimeTypes.TEXT_VTT
+        }
+        if (url != null) {
+            subtitles.add(Rendition(url, updatedFormat.copy(sampleMimeType = sampleMimeType), groupId, name))
+        }
+    }
+
+    private fun parseClosedCaptionsMediaTag(
+        line: String,
+        formatBuilder: Format,
+        variableDefinitions: HashMap<String, String>,
+        muxedCaptionFormats: ArrayList<Format>
+    ) {
+        val instreamId = parseStringAttr(line, REGEX_INSTREAM_ID, variableDefinitions)
+        val accessibilityChannel: Int
+        val sampleMimeType: String
+        if (instreamId.startsWith("CC")) {
+            sampleMimeType = MimeTypes.APPLICATION_CEA608
+            accessibilityChannel = instreamId.substring(2).toInt()
+        } else {
+            sampleMimeType = MimeTypes.APPLICATION_CEA708
+            accessibilityChannel = instreamId.substring(7).toInt()
+        }
+        muxedCaptionFormats.add(
+            formatBuilder.copy(
+                sampleMimeType = sampleMimeType,
+                accessibilityChannel = accessibilityChannel
+            )
+        )
+    }
+
+    private fun parseMediaTags(
+        mediaTags: List<String>,
+        baseUri: String,
+        variableDefinitions: HashMap<String, String>,
+        variants: ArrayList<Variant>,
+        videos: ArrayList<Rendition>,
+        audios: ArrayList<Rendition>,
+        subtitles: ArrayList<Rendition>,
+        muxedCaptionFormats: ArrayList<Format>
+    ): Format? {
+        var muxedAudioFormat: Format? = null
+        for (line in mediaTags) {
+            val groupId = parseStringAttr(line, REGEX_GROUP_ID, variableDefinitions)
+            val name = parseStringAttr(line, REGEX_NAME, variableDefinitions)
+            val formatBuilder = Format(
                 id = "$groupId:$name",
                 roleFlags = parseRoleFlags(line, variableDefinitions),
                 selectionFlags = parseSelectionFlags(line),
                 label = name,
-                language = parseOptionalStringAttr(
-                    line,
-                    REGEX_LANGUAGE,
-                    variableDefinitions
-                ),
+                language = parseOptionalStringAttr(line, REGEX_LANGUAGE, variableDefinitions),
                 containerMimeType = MimeTypes.APPLICATION_M3U8,
             )
+            val referenceUrl = parseOptionalStringAttr(line, REGEX_URI, variableDefinitions)
+            val url = referenceUrl?.let { UrlUtil.resolveToUrl(baseUri, it) }
 
-            val referenceUrl: String? =
-                parseOptionalStringAttr(line, REGEX_URI, variableDefinitions)
-            val url: Url? =
-                if (referenceUrl == null) null else UrlUtil.resolveToUrl(baseUri, referenceUrl)
-            //val metadata =
-            //    Metadata(HlsTrackMetadataEntry(groupId, name, emptyList<T>()))
             when (parseStringAttr(line, REGEX_TYPE, variableDefinitions)) {
-                TYPE_VIDEO -> {
-                    val variant: Variant? = getVariantWithVideoGroup(variants, groupId)
-                    if (variant != null) {
-                        val variantFormat: Format = variant.format
-                        formatBuilder = formatBuilder.copy(
-                            height = variantFormat.height,
-                            width = variantFormat.width,
-                            frameRate = variantFormat.frameRate,
-                            codecs = Util.getCodecsOfType(variantFormat.codecs, C.TRACK_TYPE_VIDEO)
-                        )
-                    }
-                    if (url == null) {
-                        // TODO: Remove this case and add a Rendition with a null url to videos.
-                    } else {
-                        //formatBuilder.setMetadata(metadata)
-                        videos.add(Rendition(url = url, format = formatBuilder, groupId, name))
-                    }
-                }
-
+                TYPE_VIDEO -> parseVideoMediaTag(groupId, name, formatBuilder, url, variants, videos)
                 TYPE_AUDIO -> {
-                    var sampleMimeType: String? = null
-                    val variant = getVariantWithAudioGroup(variants, groupId)
-                    if (variant != null) {
-                        val codecs: String? =
-                            Util.getCodecsOfType(variant.format.codecs, C.TRACK_TYPE_AUDIO)
-                        formatBuilder = formatBuilder.copy(codecs = codecs)
-                        sampleMimeType = MimeTypes.getMediaMimeType(codecs)
-                    }
-                    val channelsString: String? =
-                        parseOptionalStringAttr(line, REGEX_CHANNELS, variableDefinitions)
-                    if (channelsString != null) {
-                        val channelCount: Int =
-                            Util.splitAtFirst(channelsString, "/")[0].toInt()
-                        formatBuilder = formatBuilder.copy(channelCount = channelCount)
-                        if (MimeTypes.AUDIO_E_AC3 == sampleMimeType && channelsString.endsWith(
-                                "/JOC"
-                            )
-                        ) {
-                            sampleMimeType = MimeTypes.AUDIO_E_AC3_JOC
-                            formatBuilder = formatBuilder.copy(codecs = MimeTypes.CODEC_E_AC3_JOC)
-                        }
-                    }
-                    val format = formatBuilder.copy(sampleMimeType = sampleMimeType)
-                    if (url != null) {
-                        //formatBuilder.setMetadata(metadata)
-                        audios.add(Rendition(url, format, groupId, name))
-                    } else if (variant != null) {
-                        // TODO: Remove muxedAudioFormat and add a Rendition with a null url to audios.
-                        muxedAudioFormat = format
-                    }
+                    val muxed = parseAudioMediaTag(line, groupId, name, formatBuilder, url, variants, variableDefinitions, audios)
+                    if (muxed != null) muxedAudioFormat = muxed
                 }
-
-                TYPE_SUBTITLES -> {
-                    var sampleMimeType: String? = null
-                    val variant = getVariantWithSubtitleGroup(variants, groupId)
-                    if (variant != null) {
-                        val codecs: String? =
-                            Util.getCodecsOfType(variant.format.codecs, C.TRACK_TYPE_TEXT)
-                        formatBuilder = formatBuilder.copy(
-                            codecs = codecs,
-                        )
-                        sampleMimeType = MimeTypes.getMediaMimeType(codecs)
-                    }
-                    if (sampleMimeType == null) {
-                        sampleMimeType = MimeTypes.TEXT_VTT
-                    }
-                    if (url != null) {
-                        subtitles.add(
-                            Rendition(
-                                url,
-                                formatBuilder.copy(sampleMimeType = sampleMimeType),
-                                groupId,
-                                name
-                            )
-                        )
-                    } else {
-                        /*Log.w(
-                            LOG_TAG,
-                            "EXT-X-MEDIA tag with missing mandatory URI attribute: skipping"
-                        )*/
-                    }
-                }
-
-                TYPE_CLOSED_CAPTIONS -> {
-                    val instreamId: String =
-                        parseStringAttr(line, REGEX_INSTREAM_ID, variableDefinitions)
-                    val accessibilityChannel: Int
-                    val sampleMimeType: String
-                    if (instreamId.startsWith("CC")) {
-                        sampleMimeType = MimeTypes.APPLICATION_CEA608
-                        accessibilityChannel = instreamId.substring(2).toInt()
-                    } else  /* starts with SERVICE */ {
-                        sampleMimeType = MimeTypes.APPLICATION_CEA708
-                        accessibilityChannel = instreamId.substring(7).toInt()
-                    }
-                    muxedCaptionFormats.add(
-                        formatBuilder.copy(
-                            sampleMimeType = sampleMimeType,
-                            accessibilityChannel = accessibilityChannel
-                        )
-                    )
-                }
-
-                else -> {}
+                TYPE_SUBTITLES -> parseSubtitleMediaTag(groupId, name, formatBuilder, url, variants, subtitles)
+                TYPE_CLOSED_CAPTIONS -> parseClosedCaptionsMediaTag(line, formatBuilder, variableDefinitions, muxedCaptionFormats)
             }
         }
+        return muxedAudioFormat
+    }
+
+    @Throws(IOException::class)
+    private fun parseMultivariantPlaylist(
+        iterator: Iterator<String>, baseUri: String
+    ): HlsMultivariantPlaylist {
+        val urlToVariantInfos = HashMap<Url, ArrayList<VariantInfo>?>()
+        val variableDefinitions = HashMap<String, String>()
+        val variants = ArrayList<Variant>()
+        val videos = ArrayList<Rendition>()
+        val audios = ArrayList<Rendition>()
+        val subtitles = ArrayList<Rendition>()
+        val closedCaptions = ArrayList<Rendition>()
+        val mediaTags = ArrayList<String>()
+        val sessionKeyDrmInitData = ArrayList<DrmInitData>()
+        val tags = ArrayList<String>()
+        var muxedCaptionFormats = arrayListOf<Format>()
+        var noClosedCaptions = false
+        var hasIndependentSegmentsTag = false
+
+        while (iterator.hasNext()) {
+            val line = iterator.next()
+            if (line.startsWith(TAG_PREFIX)) tags.add(line)
+
+            when {
+                line.startsWith(TAG_DEFINE) -> {
+                    variableDefinitions[parseStringAttr(line, REGEX_NAME, variableDefinitions)] =
+                        parseStringAttr(line, REGEX_VALUE, variableDefinitions)
+                }
+                line == TAG_INDEPENDENT_SEGMENTS -> hasIndependentSegmentsTag = true
+                line.startsWith(TAG_MEDIA) -> mediaTags.add(line)
+                line.startsWith(TAG_SESSION_KEY) -> parseSessionKeyTag(line, variableDefinitions, sessionKeyDrmInitData)
+                line.startsWith(TAG_STREAM_INF) || line.startsWith(TAG_I_FRAME_STREAM_INF) -> {
+                    noClosedCaptions = noClosedCaptions || line.contains(ATTR_CLOSED_CAPTIONS_NONE)
+                    parseStreamInfTag(
+                        line = line,
+                        isIFrameOnlyVariant = line.startsWith(TAG_I_FRAME_STREAM_INF),
+                        baseUri = baseUri,
+                        iterator = iterator,
+                        variableDefinitions = variableDefinitions,
+                        variants = variants,
+                        urlToVariantInfos = urlToVariantInfos
+                    )
+                }
+            }
+        }
+
+        val deduplicatedVariants = variants.distinctBy { it.url }
+        val muxedAudioFormat = parseMediaTags(
+            mediaTags = mediaTags,
+            baseUri = baseUri,
+            variableDefinitions = variableDefinitions,
+            variants = variants,
+            videos = videos,
+            audios = audios,
+            subtitles = subtitles,
+            muxedCaptionFormats = muxedCaptionFormats
+        )
 
         if (noClosedCaptions) {
             muxedCaptionFormats = arrayListOf()

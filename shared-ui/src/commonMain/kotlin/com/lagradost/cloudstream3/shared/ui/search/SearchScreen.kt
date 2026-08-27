@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION", "DEPRECATION_ERROR")
+
 package com.lagradost.cloudstream3.shared.ui.search
 
 import com.lagradost.cloudstream3.utils.asString
@@ -185,3 +187,32 @@ fun SearchScreenContent(
         }
     }
 }
+
+@Suppress("DEPRECATION")
+@org.jetbrains.compose.ui.tooling.preview.Preview
+@Composable
+private fun SearchScreenPreview() {
+    com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme {
+        SearchScreenContent(
+            state = SearchState(
+                query = "Test Movie",
+                results = kotlinx.collections.immutable.persistentListOf(
+                    com.lagradost.cloudstream3.MovieSearchResponse(
+                        name = "Test Movie Result",
+                        url = "https://example.com/test",
+                        apiName = "ExampleProvider",
+                        type = com.lagradost.cloudstream3.TvType.Movie,
+                        posterUrl = null,
+                        year = 2024,
+                        id = 1,
+                        quality = com.lagradost.cloudstream3.SearchQuality.HD,
+                        posterHeaders = null,
+                        score = null
+                    )
+                )
+            ),
+            onEvent = {}
+        )
+    }
+}
+

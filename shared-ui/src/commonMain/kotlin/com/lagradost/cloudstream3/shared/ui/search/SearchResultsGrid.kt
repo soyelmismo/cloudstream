@@ -67,6 +67,9 @@ import com.lagradost.cloudstream3.shared.ui.components.designsystem.SectionHeade
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.SubtitleText
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.TitleText
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.persistentListOf
 
 /**
  * Adaptive search results grid and grouped presentation view.
@@ -75,8 +78,8 @@ import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
  */
 @Composable
 fun SearchResultsGrid(
-    results: List<SearchResponse>,
-    groupedResults: Map<String, List<SearchResponse>>,
+    results: ImmutableList<SearchResponse>,
+    groupedResults: Map<String, ImmutableList<SearchResponse>>,
     displayMode: SearchDisplayMode,
     isLoading: Boolean,
     isPaginating: Boolean,
@@ -89,7 +92,7 @@ fun SearchResultsGrid(
     onRetry: () -> Unit,
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
-    searchHistory: List<String> = emptyList(),
+    searchHistory: ImmutableList<String> = persistentListOf(),
     onSelectHistoryQuery: ((String) -> Unit)? = null,
     onRemoveHistoryQuery: ((String) -> Unit)? = null,
     onClearHistory: (() -> Unit)? = null
@@ -174,7 +177,7 @@ fun SearchResultsGrid(
  */
 @Composable
 private fun UnifiedResultsGrid(
-    results: List<SearchResponse>,
+    results: ImmutableList<SearchResponse>,
     isPaginating: Boolean,
     hasNextPage: Boolean,
     isLoading: Boolean,
@@ -188,13 +191,13 @@ private fun UnifiedResultsGrid(
     val shouldLoadMore by remember {
         derivedStateOf {
             val totalItems = gridState.layoutInfo.totalItemsCount
-            val lastVisibleIndex = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            totalItems > 0 && lastVisibleIndex >= totalItems - 4
+            val lastVisibleItemIndex = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            hasNextPage && !isPaginating && !isLoading && totalItems > 0 && lastVisibleItemIndex >= totalItems - 6
         }
     }
 
-    LaunchedEffect(shouldLoadMore, hasNextPage, isPaginating, isLoading) {
-        if (shouldLoadMore && hasNextPage && !isPaginating && !isLoading) {
+    LaunchedEffect(shouldLoadMore) {
+        if (shouldLoadMore) {
             onLoadNextPage()
         }
     }
@@ -202,23 +205,22 @@ private fun UnifiedResultsGrid(
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 140.dp),
         state = gridState,
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = modifier.fillMaxSize()
     ) {
         items(
             items = results,
-            key = { item -> item.url }
+            key = { item -> "${item.apiName}_${item.url}" }
         ) { item ->
             SearchResultCard(
                 item = item,
                 onClick = { onItemClick(item) },
-                modifier = Modifier.fillMaxWidth().focusable()
+                modifier = Modifier.fillMaxWidth()
             )
         }
 
-        // Pagination loading footer
         if (isPaginating) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Box(
@@ -227,17 +229,11 @@ private fun UnifiedResultsGrid(
                         .padding(vertical = 16.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            strokeWidth = 2.dp,
-                            color = CloudStreamColors.Primary
-                        )
-                        BodyMutedText(textRes = Res.string.loading)
-                    }
+                    CircularProgressIndicator(
+                        color = CloudStreamColors.Primary,
+                        modifier = Modifier.size(28.dp),
+                        strokeWidth = 2.5.dp
+                    )
                 }
             }
         }
@@ -249,7 +245,7 @@ private fun UnifiedResultsGrid(
  */
 @Composable
 private fun GroupedResultsList(
-    groupedResults: Map<String, List<SearchResponse>>,
+    groupedResults: Map<String, ImmutableList<SearchResponse>>,
     isPaginating: Boolean,
     onExpandProvider: (String) -> Unit,
     onItemClick: (SearchResponse) -> Unit,
@@ -338,7 +334,7 @@ private fun GroupedResultsList(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SearchHistoryView(
-    searchHistory: List<String>,
+    searchHistory: ImmutableList<String>,
     onSelectQuery: (String) -> Unit,
     onRemoveQuery: (String) -> Unit,
     onClearHistory: () -> Unit,

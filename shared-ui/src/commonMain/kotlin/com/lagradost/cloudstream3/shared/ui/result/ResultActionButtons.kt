@@ -2,7 +2,6 @@ package com.lagradost.cloudstream3.shared.ui.result
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +27,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,25 +41,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cloudstream.shared_ui.generated.resources.*
+import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.ActionDialog
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.PrimaryButton
 import com.lagradost.cloudstream3.shared.ui.focus.dpadFocusable
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.viewmodels.result.ExternalSyncStatus
 import com.lagradost.cloudstream3.shared.viewmodels.result.ResultEpisode
 import com.lagradost.cloudstream3.shared.viewmodels.result.ResultEvent
 import com.lagradost.cloudstream3.shared.viewmodels.result.ResultState
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
-/**
- * Action buttons bar for the Details Screen:
- * - Prominent "Continuar viendo" (Continue Watching) / "Reproducir" hero banner using [PrimaryButton].
- * - Bookmark status button with modal watch-type picker [ActionDialog].
- * - Favorite button (toggle).
- * - Subscription button (toggle notifications).
- * - Refresh button.
- * - Trailer action button.
- */
 @Composable
 fun ResultActionButtons(
     state: ResultState,
@@ -71,7 +66,6 @@ fun ResultActionButtons(
     var showBookmarkDialog by remember { mutableStateOf(false) }
     var showSyncDialog by remember { mutableStateOf(false) }
 
-    // Target Episode for Hero Play Button
     val targetEp = state.lastWatchedEpisode ?: state.episodes.firstOrNull()
     val progress = targetEp?.getWatchProgress() ?: 0f
 
@@ -81,60 +75,50 @@ fun ResultActionButtons(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Hero "Continuar Viendo" / "Reproducir" Button
         targetEp?.let { ep ->
             ContinueWatchingHeroButton(
                 episode = ep,
                 isMovie = state.isMovie,
                 progress = progress,
-                onClick = {
-                    onPlayEpisode(ep)
-                },
+                onClick = { onPlayEpisode(ep) },
                 onLongClick = {
                     onEpisodeMenuClick?.invoke(ep) ?: onEvent(ResultEvent.OpenEpisodeMenu(ep))
                 }
             )
         }
 
-        // Secondary Action Icons Row (Trailer, Bookmark, Sync, Favorite, Subscription, Refresh)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Trailer Action (visible when state.hasTrailers == true)
             if (state.hasTrailers) {
                 TrailerActionButton(
                     onClick = { onEvent(ResultEvent.OpenTrailer(0)) }
                 )
             }
 
-            // Bookmark Action
             BookmarkButton(
                 isBookmarked = state.isBookmarked,
                 watchType = state.bookmarkWatchType,
                 onClick = { showBookmarkDialog = true }
             )
 
-            // External Sync Action (AniList, MAL, Simkl, Kitsu)
             SyncActionButton(
                 state = state,
                 onClick = { showSyncDialog = true }
             )
 
-            // Favorite Action
             FavoriteActionButton(
                 isFavorite = state.isFavorite,
                 onClick = { onEvent(ResultEvent.ToggleFavorite) }
             )
 
-            // Subscription Action
             SubscriptionActionButton(
                 isSubscribed = state.isSubscribed,
                 onClick = { onEvent(ResultEvent.ToggleSubscription) }
             )
 
-            // Refresh Action
             RefreshActionButton(
                 isLoading = state.isLoading,
                 onClick = { onEvent(ResultEvent.Refresh) }
@@ -142,7 +126,6 @@ fun ResultActionButtons(
         }
     }
 
-    // Modal Watch Type Selection Dialog
     if (showBookmarkDialog) {
         BookmarkWatchTypeDialog(
             currentWatchType = state.bookmarkWatchType,
@@ -154,12 +137,63 @@ fun ResultActionButtons(
         )
     }
 
-    // Modal External Sync Tracking Dialog
     if (showSyncDialog) {
         SyncDialog(
             state = state,
             onEvent = onEvent,
             onDismiss = { showSyncDialog = false }
+        )
+    }
+}
+
+private fun resolveHeroButtonLabel(
+    episode: ResultEpisode,
+    isMovie: Boolean,
+    progress: Float,
+    continueWatchingText: String,
+    playText: String,
+    typeMovieText: String,
+    episodeText: String
+): String {
+    val isStarted = progress > 0.05f
+    val actionText = if (isStarted) continueWatchingText else playText
+
+    if (isMovie) {
+        return "$actionText ($typeMovieText)"
+    }
+    val epName = episode.name ?: "$episodeText ${episode.episode}"
+    return "$actionText: $epName"
+}
+
+@Composable
+private fun HeroWatchProgressBar(
+    progress: Float,
+    modifier: Modifier = Modifier
+) {
+    if (progress <= 0.02f) return
+
+    Spacer(modifier = Modifier.height(8.dp))
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        LinearProgressIndicator(
+            progress = progress,
+            color = CloudStreamColors.Secondary,
+            backgroundColor = MaterialTheme.colors.onPrimary.copy(alpha = 0.25f),
+            modifier = Modifier
+                .weight(1f)
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+        )
+        Text(
+            text = "${(progress * 100).toInt()}%",
+            style = MaterialTheme.typography.caption.copy(
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colors.onPrimary.copy(alpha = 0.9f),
+                fontSize = 11.sp
+            )
         )
     }
 }
@@ -178,18 +212,16 @@ fun ContinueWatchingHeroButton(
     val playText = stringResource(Res.string.play)
     val typeMovieText = stringResource(Res.string.typeMovie)
     val episodeText = stringResource(Res.string.episode)
-    val buttonLabel = when {
-        isMovie && progress > 0.05f -> "$continueWatchingText ($typeMovieText)"
-        isMovie -> "$playText ($typeMovieText)"
-        progress > 0.05f -> {
-            val epName = episode.name ?: "$episodeText ${episode.episode}"
-            "$continueWatchingText: $epName"
-        }
-        else -> {
-            val epName = episode.name ?: "$episodeText ${episode.episode}"
-            "$playText: $epName"
-        }
-    }
+
+    val buttonLabel = resolveHeroButtonLabel(
+        episode = episode,
+        isMovie = isMovie,
+        progress = progress,
+        continueWatchingText = continueWatchingText,
+        playText = playText,
+        typeMovieText = typeMovieText,
+        episodeText = episodeText
+    )
 
     PrimaryButton(
         onClick = onClick,
@@ -228,34 +260,20 @@ fun ContinueWatchingHeroButton(
                 )
             }
 
-            // Progress Bar if started
-            if (progress > 0.02f) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    LinearProgressIndicator(
-                        progress = progress,
-                        color = CloudStreamColors.Secondary,
-                        backgroundColor = MaterialTheme.colors.onPrimary.copy(alpha = 0.25f),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(4.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                    )
-                    Text(
-                        text = "${(progress * 100).toInt()}%",
-                        style = MaterialTheme.typography.caption.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colors.onPrimary.copy(alpha = 0.9f),
-                            fontSize = 11.sp
-                        )
-                    )
-                }
-            }
+            HeroWatchProgressBar(progress = progress)
         }
+    }
+}
+
+@Composable
+private fun resolveBookmarkStyle(watchType: Int, isBookmarked: Boolean): Pair<StringResource, Color> {
+    return when (watchType) {
+        1 -> Res.string.statusWatching to CloudStreamColors.Secondary
+        2 -> Res.string.statusCompleted to CloudStreamColors.Success
+        3 -> Res.string.statusOnHold to CloudStreamColors.Warning
+        4 -> Res.string.statusDropped to CloudStreamColors.Error
+        5 -> Res.string.statusPlanToWatch to CloudStreamColors.Primary
+        else -> if (isBookmarked) Res.string.bookmarked to CloudStreamColors.Secondary else Res.string.bookmark to CloudStreamColors.TextSecondary
     }
 }
 
@@ -266,14 +284,8 @@ fun BookmarkButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val (label, iconTint) = when (watchType) {
-        1 -> stringResource(Res.string.statusWatching) to CloudStreamColors.Secondary
-        2 -> stringResource(Res.string.statusCompleted) to CloudStreamColors.Success
-        3 -> stringResource(Res.string.statusOnHold) to CloudStreamColors.Warning
-        4 -> stringResource(Res.string.statusDropped) to CloudStreamColors.Error
-        5 -> stringResource(Res.string.statusPlanToWatch) to CloudStreamColors.Primary
-        else -> if (isBookmarked) stringResource(Res.string.bookmarked) to CloudStreamColors.Secondary else stringResource(Res.string.bookmark) to CloudStreamColors.TextSecondary
-    }
+    val (labelRes, iconTint) = resolveBookmarkStyle(watchType, isBookmarked)
+    val label = stringResource(labelRes)
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -325,9 +337,7 @@ fun SyncActionButton(
     val activeColor = primarySync?.service?.brandColor ?: CloudStreamColors.Secondary
 
     val label = when {
-        primarySync != null && primarySync.status != com.lagradost.cloudstream3.shared.viewmodels.result.ExternalSyncStatus.None -> {
-            primarySync.service.serviceName
-        }
+        primarySync != null && primarySync.status != ExternalSyncStatus.None -> primarySync.service.serviceName
         isLinked -> stringResource(Res.string.syncLinked)
         else -> stringResource(Res.string.syncButton)
     }
@@ -357,7 +367,6 @@ fun SyncActionButton(
                 modifier = Modifier.size(22.dp)
             )
 
-            // Linked Indicator Badge Dot
             if (isLinked) {
                 Box(
                     modifier = Modifier
@@ -568,9 +577,74 @@ fun TrailerActionButton(
     }
 }
 
-/**
- * Modal Watch Type Selector Dialog using [ActionDialog].
- */
+@Immutable
+data class WatchTypeItem(
+    val id: Int,
+    val title: String,
+    val subtitle: String,
+    val color: Color
+)
+
+@Composable
+private fun BookmarkWatchTypeItem(
+    item: WatchTypeItem,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = if (isSelected) item.color.copy(alpha = 0.2f) else CloudStreamColors.SurfaceVariant,
+        border = BorderStroke(
+            if (isSelected) 1.5.dp else 1.dp,
+            if (isSelected) item.color else CloudStreamColors.Divider.copy(alpha = 0.5f)
+        ),
+        elevation = if (isSelected) 2.dp else 0.dp,
+        modifier = modifier
+            .fillMaxWidth()
+            .dpadFocusable(
+                onClick = onClick,
+                shape = RoundedCornerShape(10.dp)
+            )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.title,
+                    style = MaterialTheme.typography.body1.copy(
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (isSelected) item.color else CloudStreamColors.TextPrimary
+                    )
+                )
+                if (item.subtitle.isNotBlank()) {
+                    Text(
+                        text = item.subtitle,
+                        style = MaterialTheme.typography.caption.copy(
+                            color = CloudStreamColors.TextMuted,
+                            fontSize = 11.sp
+                        )
+                    )
+                }
+            }
+
+            if (isSelected) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = stringResource(Res.string.selected),
+                    tint = item.color,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
 @Composable
 fun BookmarkWatchTypeDialog(
     currentWatchType: Int,
@@ -600,65 +674,49 @@ fun BookmarkWatchTypeDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 options.forEach { item ->
-                    val isSelected = currentWatchType == item.id
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isSelected) item.color.copy(alpha = 0.2f) else CloudStreamColors.SurfaceVariant,
-                        border = BorderStroke(
-                            if (isSelected) 1.5.dp else 1.dp,
-                            if (isSelected) item.color else CloudStreamColors.Divider.copy(alpha = 0.5f)
-                        ),
-                        elevation = if (isSelected) 2.dp else 0.dp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onSelectWatchType(item.id) }
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = item.title,
-                                    style = MaterialTheme.typography.body1.copy(
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (isSelected) item.color else CloudStreamColors.TextPrimary
-                                    )
-                                )
-                                if (item.subtitle.isNotBlank()) {
-                                    Text(
-                                        text = item.subtitle,
-                                        style = MaterialTheme.typography.caption.copy(
-                                            color = CloudStreamColors.TextMuted,
-                                            fontSize = 11.sp
-                                        )
-                                    )
-                                }
-                            }
-
-                            if (isSelected) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = stringResource(Res.string.selected),
-                                    tint = item.color,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                    }
+                    BookmarkWatchTypeItem(
+                        item = item,
+                        isSelected = currentWatchType == item.id,
+                        onClick = { onSelectWatchType(item.id) }
+                    )
                 }
             }
         }
     )
 }
 
-data class WatchTypeItem(
-    val id: Int,
-    val title: String,
-    val subtitle: String,
-    val color: Color
-)
+@Preview
+@Composable
+private fun ContinueWatchingHeroButtonPreview() {
+    MaterialTheme {
+        ContinueWatchingHeroButton(
+            episode = ResultEpisode(
+                headerName = "Season 1",
+                name = "Episode 1: The Beginning",
+                episode = 1,
+                data = "",
+                apiName = "Test",
+                id = 1,
+                index = 0,
+                tvType = TvType.TvSeries,
+                parentId = 0
+            ),
+            isMovie = false,
+            progress = 0.45f,
+            onClick = {}
+        )
+    }
+}
+
+@Preview
+@Composable
+private fun BookmarkButtonsPreview() {
+    MaterialTheme {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            BookmarkButton(isBookmarked = true, watchType = 1, onClick = {})
+            FavoriteActionButton(isFavorite = true, onClick = {})
+            SubscriptionActionButton(isSubscribed = true, onClick = {})
+            RefreshActionButton(isLoading = false, onClick = {})
+        }
+    }
+}

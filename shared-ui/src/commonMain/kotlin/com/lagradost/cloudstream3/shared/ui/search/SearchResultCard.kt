@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION", "DEPRECATION_ERROR")
+
 package com.lagradost.cloudstream3.shared.ui.search
 
 import androidx.compose.animation.core.animateFloatAsState
@@ -48,12 +50,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.lagradost.cloudstream3.MovieSearchResponse
 import com.lagradost.cloudstream3.SearchResponse
+import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.shared.ui.components.AsyncImage
 import com.lagradost.cloudstream3.shared.ui.components.QualityBadge
 import com.lagradost.cloudstream3.shared.ui.components.TypeBadge
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
+import com.lagradost.cloudstream3.shared.viewmodels.settings.AppTheme
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 import cloudstream.shared_ui.generated.resources.*
 
 /**
@@ -116,7 +123,6 @@ fun SearchResultCard(
                 .fillMaxWidth()
                 .padding(bottom = 8.dp)
         ) {
-            // Poster Box with Aspect Ratio ~2:3 (Standard poster format)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -138,7 +144,6 @@ fun SearchResultCard(
                     SearchPosterGraphic(item = item)
                 }
 
-                // Top badges row (Canonical Type & Quality Badges from MediaBadges.kt)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -156,7 +161,6 @@ fun SearchResultCard(
                     QualityBadge(quality = item.quality)
                 }
 
-                // Bottom gradient with score & provider name
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -177,7 +181,6 @@ fun SearchResultCard(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Provider Name
                         Text(
                             text = item.apiName,
                             style = MaterialTheme.typography.caption.copy(
@@ -190,7 +193,6 @@ fun SearchResultCard(
                             modifier = Modifier.weight(1f, fill = false)
                         )
 
-                        // Score if available
                         item.score?.let { score ->
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -219,7 +221,6 @@ fun SearchResultCard(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Title
             Text(
                 text = item.name,
                 style = MaterialTheme.typography.subtitle2.copy(
@@ -256,7 +257,6 @@ private fun SearchPosterGraphic(item: SearchResponse) {
             verticalArrangement = Arrangement.Center,
             modifier = Modifier.padding(8.dp)
         ) {
-            // First letter abbreviation or decorative icon
             Text(
                 text = item.name.firstOrNull()?.uppercase() ?: "?",
                 style = MaterialTheme.typography.h4.copy(
@@ -264,6 +264,48 @@ private fun SearchPosterGraphic(item: SearchResponse) {
                     fontWeight = FontWeight.Bold
                 ),
                 textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Suppress("DEPRECATION")
+@Preview
+@Composable
+private fun SearchResultCardPreview() {
+    CloudStreamTheme {
+        Box(modifier = Modifier.padding(16.dp).width(160.dp)) {
+            SearchResultCard(
+                item = MovieSearchResponse(
+                    name = "Demon Slayer: Kimetsu no Yaiba",
+                    url = "https://example.com/item",
+                    apiName = "AnimeProvider",
+                    type = TvType.AnimeMovie,
+                    posterUrl = null,
+                    year = 2024
+                ),
+                onClick = {}
+            )
+        }
+    }
+}
+
+@Suppress("DEPRECATION")
+@Preview
+@Composable
+private fun SearchResultCardAmoledLightPreview() {
+    CloudStreamTheme(theme = AppTheme.AMOLED, isDarkMode = false) {
+        Box(modifier = Modifier.padding(16.dp).width(160.dp)) {
+            SearchResultCard(
+                item = MovieSearchResponse(
+                    name = "Sousou no Frieren",
+                    url = "https://example.com/item2",
+                    apiName = "StreamProvider",
+                    type = TvType.Anime,
+                    posterUrl = null,
+                    year = 2023
+                ),
+                onClick = {}
             )
         }
     }

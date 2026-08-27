@@ -9,6 +9,9 @@ import com.lagradost.cloudstream3.shared.persistence.repository.WatchProgressRep
 import com.lagradost.cloudstream3.shared.player.PlayerEvent
 import com.lagradost.cloudstream3.shared.player.PlayerState
 import com.lagradost.cloudstream3.shared.player.VideoPlayer
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
@@ -17,22 +20,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.coroutines.CoroutineContext
 
-/**
- * Agnostic, decoupled ViewModel / Controller for video playback in Compose Multiplatform.
- *
- * Implements MVI architecture:
- * - Emits [PlayerUiState] via [state] / [uiState].
- * - Consumes [PlayerUiEvent] via [handleEvent] / [onEvent].
- * - Synchronizes with [VideoPlayer] reactive state.
- * - Periodically persists watch progress into Room KMP via [WatchProgressRepository] and [ResumeWatchingRepository].
- *
- * @param player The platform-agnostic video player interface.
- * @param watchProgressRepository The Room KMP repository for tracking watch history.
- * @param resumeWatchingRepository The Room KMP repository for tracking resume watching state.
- * @param bookmarkRepository The Room KMP repository for tracking library bookmarks.
- * @param coroutineContext Optional custom CoroutineContext for the ViewModel scope.
- * @param progressSaveIntervalMs Interval in milliseconds between periodic watch progress saves. Set <= 0 to disable periodic ticker.
- */
 class PlayerControllerViewModel(
     val player: VideoPlayer,
     val watchProgressRepository: WatchProgressRepository? = null,
@@ -46,20 +33,17 @@ class PlayerControllerViewModel(
     coroutineContext = coroutineContext
 ), AutoCloseable {
 
-    /** Alias to [state] for UI consumption */
     val uiState: StateFlow<PlayerUiState> get() = state
 
     private var hasAutoPlayedCurrentEpisode = false
 
     init {
-        // Collect reactive state from player
         launch {
             player.stateFlow.collect { playerState ->
                 handlePlayerStateUpdate(playerState)
             }
         }
 
-        // Collect discrete events from player
         launch {
             player.events.collect { event ->
                 handlePlayerEvent(event)
@@ -68,7 +52,6 @@ class PlayerControllerViewModel(
     }
 
     private fun handlePlayerStateUpdate(playerState: PlayerState) {
-        println("CloudStreamDebug: PlayerControllerViewModel.handlePlayerStateUpdate: isPlaying=${playerState.isPlaying}, isBuffering=${playerState.isBuffering}, pos=${playerState.positionMs}, currentUrl=${playerState.currentUrl}")
         val wasPlaying = currentState.isPlaying
         val isNowPlaying = playerState.isPlaying
 
@@ -114,7 +97,6 @@ class PlayerControllerViewModel(
                 updateState { copy(isBuffering = true) }
             }
             is PlayerEvent.OnError -> {
-                println("CloudStreamDebug: PlayerControllerViewModel received PlayerEvent.OnError: ${event.message}")
                 updateState {
                     copy(
                         isPlaying = false,
@@ -143,7 +125,6 @@ class PlayerControllerViewModel(
                 updateState { copy(areControlsVisible = !areControlsVisible) }
             }
             is PlayerEvent.OnBackRequested -> {
-                println("CloudStreamDebug: PlayerControllerViewModel received PlayerEvent.OnBackRequested")
                 emitEffect(PlayerUiEffect.NavigateBack)
             }
         }
@@ -151,27 +132,62 @@ class PlayerControllerViewModel(
 
     override fun handleEvent(event: PlayerUiEvent) {
         when (event) {
+            is PlayerUiEvent.Play,
+            is PlayerUiEvent.Pause,
+            is PlayerUiEvent.TogglePlayPause,
+            is PlayerUiEvent.Stop,
+            is PlayerUiEvent.SeekTo,
+            is PlayerUiEvent.SeekBy,
+            is PlayerUiEvent.SetSpeed,
+            is PlayerUiEvent.SkipIntro,
+            is PlayerUiEvent.SkipOutro,
+            is PlayerUiEvent.SkipToTimestamp,
+            is PlayerUiEvent.SaveProgressNow -> handlePlaybackEvents(event)
+
+            is PlayerUiEvent.SelectQuality,
+            is PlayerUiEvent.SelectSubtitle,
+            is PlayerUiEvent.SelectAudioTrack,
+            is PlayerUiEvent.UpdateQualitiesAndSubtitles,
+            is PlayerUiEvent.SetSubtitleDelay,
+            is PlayerUiEvent.SetAudioDelay,
+            is PlayerUiEvent.SetAspectRatio,
+            is PlayerUiEvent.CycleResizeMode -> handleTrackAndQualityEvents(event)
+
+            is PlayerUiEvent.NextEpisode,
+            is PlayerUiEvent.PreviousEpisode,
+            is PlayerUiEvent.SelectEpisode,
+            is PlayerUiEvent.LoadEpisode,
+            is PlayerUiEvent.LoadPlaylist,
+            is PlayerUiEvent.LoadMedia -> handlePlaylistAndMediaEvents(event)
+
+            is PlayerUiEvent.ToggleControlsLock,
+            is PlayerUiEvent.SetLockPin,
+            is PlayerUiEvent.ShowLockPinDialog,
+            is PlayerUiEvent.UnlockWithPin,
+            is PlayerUiEvent.ClearLockPin,
+            is PlayerUiEvent.VisibilityChanged,
+            is PlayerUiEvent.ToggleControlsVisibility,
+            is PlayerUiEvent.SetActiveModal,
+            is PlayerUiEvent.DismissError -> handleUiControlsAndSecurityEvents(event)
+        }
+    }
+
+    private fun handlePlaybackEvents(event: PlayerUiEvent) {
+        when (event) {
             is PlayerUiEvent.Play -> {
                 player.resume()
                 updateState { copy(isPlaying = true, isStopped = false) }
                 onPlaybackActiveChanged(true)
             }
-
             is PlayerUiEvent.Pause -> {
                 player.pause()
                 updateState { copy(isPlaying = false) }
                 onPlaybackActiveChanged(false)
                 launch { saveCurrentWatchProgress() }
             }
-
             is PlayerUiEvent.TogglePlayPause -> {
-                if (currentState.isPlaying) {
-                    handleEvent(PlayerUiEvent.Pause)
-                } else {
-                    handleEvent(PlayerUiEvent.Play)
-                }
+                if (currentState.isPlaying) handleEvent(PlayerUiEvent.Pause) else handleEvent(PlayerUiEvent.Play)
             }
-
             is PlayerUiEvent.Stop -> {
                 onPlaybackActiveChanged(false)
                 launch { saveCurrentWatchProgress() }
@@ -185,310 +201,358 @@ class PlayerControllerViewModel(
                     )
                 }
             }
+            is PlayerUiEvent.SeekTo -> handleSeekTo(event.positionMs)
+            is PlayerUiEvent.SeekBy -> handleSeekBy(event.offsetMs)
+            is PlayerUiEvent.SetSpeed -> handleSetSpeed(event.speed)
+            is PlayerUiEvent.SkipIntro -> handleSkipIntro()
+            is PlayerUiEvent.SkipOutro -> handleSkipOutro()
+            is PlayerUiEvent.SkipToTimestamp -> handleSeekTo(event.timestamp.endMs)
+            is PlayerUiEvent.SaveProgressNow -> launch { saveCurrentWatchProgress() }
+            else -> Unit
+        }
+    }
 
-            is PlayerUiEvent.SeekTo -> {
-                val duration = currentState.durationMs
-                val clamped = if (duration > 0) event.positionMs.coerceIn(0L, duration) else event.positionMs.coerceAtLeast(0L)
-                player.seekTo(clamped)
-                updateState {
-                    val activeStamp = skipTimestamps.firstOrNull { it.contains(clamped) }
-                    copy(positionMs = clamped, activeSkipTimestamp = activeStamp)
-                }
-                launch { saveCurrentWatchProgress() }
+    private fun handleTrackAndQualityEvents(event: PlayerUiEvent) {
+        when (event) {
+            is PlayerUiEvent.SelectQuality -> handleSelectQuality(event.quality)
+            is PlayerUiEvent.SelectSubtitle -> handleSelectSubtitle(event.subtitle)
+            is PlayerUiEvent.SelectAudioTrack -> updateState { copy(selectedAudioTrack = event.track) }
+            is PlayerUiEvent.UpdateQualitiesAndSubtitles -> handleQualitiesUpdate(event)
+            is PlayerUiEvent.SetAspectRatio -> handleSetAspectRatio(event.aspectRatio)
+            is PlayerUiEvent.CycleResizeMode -> handleCycleResizeMode()
+            is PlayerUiEvent.SetSubtitleDelay -> handleSetSubtitleDelay(event.delayMs)
+            is PlayerUiEvent.SetAudioDelay -> handleSetAudioDelay(event.delayMs)
+            else -> Unit
+        }
+    }
+
+    private fun handlePlaylistAndMediaEvents(event: PlayerUiEvent) {
+        when (event) {
+            is PlayerUiEvent.NextEpisode -> handleEpisodeNavigation(offset = 1)
+            is PlayerUiEvent.PreviousEpisode -> handleEpisodeNavigation(offset = -1)
+            is PlayerUiEvent.SelectEpisode -> handleSelectEpisode(event.index)
+            is PlayerUiEvent.LoadEpisode -> loadEpisodeInternal(
+                episode = event.episode,
+                playlist = persistentListOf(event.episode),
+                index = 0,
+                accountId = event.accountId,
+                autoPlay = event.autoPlay,
+                resumePosition = event.resumePosition
+            )
+            is PlayerUiEvent.LoadPlaylist -> handleLoadPlaylist(event)
+            is PlayerUiEvent.LoadMedia -> loadMediaInternal(
+                url = event.url,
+                mediaId = event.mediaId,
+                parentId = event.parentId,
+                accountId = event.accountId,
+                qualities = event.qualities,
+                subtitles = event.subtitles,
+                initialSubtitle = event.initialSubtitle,
+                skipTimestamps = event.skipTimestamps,
+                autoPlay = event.autoPlay,
+                resumePosition = event.resumePosition
+            )
+            else -> Unit
+        }
+    }
+
+    private fun handleUiControlsAndSecurityEvents(event: PlayerUiEvent) {
+        when (event) {
+            is PlayerUiEvent.ToggleControlsLock -> updateState {
+                copy(isControlsLocked = event.isLocked ?: !isControlsLocked)
             }
-
-            is PlayerUiEvent.SeekBy -> {
-                val currentPos = currentState.positionMs
-                val duration = currentState.durationMs
-                val targetPos = (currentPos + event.offsetMs).let { pos ->
-                    if (duration > 0) pos.coerceIn(0L, duration) else pos.coerceAtLeast(0L)
-                }
-                handleEvent(PlayerUiEvent.SeekTo(targetPos))
-            }
-
-            is PlayerUiEvent.SelectQuality -> {
-                hasAutoPlayedCurrentEpisode = true
-                val currentPos = currentState.positionMs
-                val wasPlaying = currentState.isPlaying
-                updateState {
-                    copy(
-                        selectedQuality = event.quality,
-                        currentUrl = event.quality.url
-                    )
-                }
-                if (event.quality.url.isNotBlank()) {
-                    player.play(event.quality, currentState.availableSubtitles)
-                    if (currentPos > 0L) {
-                        player.seekTo(currentPos)
-                    }
-                    if (!wasPlaying) {
-                        player.pause()
-                    }
-                }
-            }
-
-            is PlayerUiEvent.SelectSubtitle -> {
-                updateState { copy(selectedSubtitle = event.subtitle) }
-                if (event.subtitle != null && event.subtitle.url.isNotBlank()) {
-                    player.loadSubtitle(event.subtitle.url, event.subtitle.headers)
-                }
-            }
-
-            is PlayerUiEvent.SetSpeed -> {
-                val clampedSpeed = event.speed.coerceIn(0.25f, 4.0f)
-                player.setPlaybackSpeed(clampedSpeed)
-                updateState { copy(playbackSpeed = clampedSpeed) }
-            }
-
-            is PlayerUiEvent.SkipIntro -> {
-                val active = currentState.activeSkipTimestamp
-                    ?: currentState.skipTimestamps.firstOrNull { it.isIntro }
-                if (active != null) {
-                    handleEvent(PlayerUiEvent.SeekTo(active.endMs))
-                }
-            }
-
-            is PlayerUiEvent.SkipOutro -> {
-                val active = currentState.activeSkipTimestamp
-                    ?: currentState.skipTimestamps.firstOrNull { it.isOutro }
-                if (active != null) {
-                    if (currentState.hasNextEpisode) {
-                        handleEvent(PlayerUiEvent.NextEpisode)
-                    } else {
-                        handleEvent(PlayerUiEvent.SeekTo(active.endMs))
-                    }
-                }
-            }
-
-            is PlayerUiEvent.SkipToTimestamp -> {
-                handleEvent(PlayerUiEvent.SeekTo(event.timestamp.endMs))
-            }
-
-            is PlayerUiEvent.NextEpisode -> {
-                val current = currentState
-                if (current.hasNextEpisode) {
-                    launch { saveCurrentWatchProgress() }
-                    val nextIndex = current.currentEpisodeIndex + 1
-                    val nextEp = current.playlist[nextIndex]
-                    loadEpisodeInternal(
-                        episode = nextEp,
-                        playlist = current.playlist,
-                        index = nextIndex,
-                        accountId = current.accountId,
-                        autoPlay = true,
-                        resumePosition = null
-                    )
-                }
-            }
-
-            is PlayerUiEvent.PreviousEpisode -> {
-                val current = currentState
-                if (current.hasPreviousEpisode) {
-                    launch { saveCurrentWatchProgress() }
-                    val prevIndex = current.currentEpisodeIndex - 1
-                    val prevEp = current.playlist[prevIndex]
-                    loadEpisodeInternal(
-                        episode = prevEp,
-                        playlist = current.playlist,
-                        index = prevIndex,
-                        accountId = current.accountId,
-                        autoPlay = true,
-                        resumePosition = null
-                    )
-                }
-            }
-
-            is PlayerUiEvent.ToggleControlsLock -> {
-                updateState {
-                    val newLockState = event.isLocked ?: !isControlsLocked
-                    copy(isControlsLocked = newLockState)
-                }
-            }
-
-            is PlayerUiEvent.SelectAudioTrack -> {
-                updateState { copy(selectedAudioTrack = event.track) }
-            }
-
-            is PlayerUiEvent.SetLockPin -> {
-                updateState {
-                    copy(
-                        lockPin = event.pin,
-                        isPinLocked = !event.pin.isNullOrBlank()
-                    )
-                }
-            }
-
-            is PlayerUiEvent.ShowLockPinDialog -> {
-                updateState {
-                    copy(
-                        showLockPinDialog = event.show,
-                        lockPinDialogMode = event.mode
-                    )
-                }
-            }
-
-            is PlayerUiEvent.UnlockWithPin -> {
-                val currentPin = currentState.lockPin
-                if (currentPin.isNullOrBlank() || currentPin == event.pin) {
-                    updateState {
-                        copy(
-                            isControlsLocked = false,
-                            showLockPinDialog = false,
-                            areControlsVisible = true
-                        )
-                    }
-                }
-            }
-
-            is PlayerUiEvent.ClearLockPin -> {
-                updateState {
-                    copy(
-                        lockPin = null,
-                        isPinLocked = false,
-                        showLockPinDialog = false
-                    )
-                }
-            }
-
-            is PlayerUiEvent.VisibilityChanged -> {
-                updateState { copy(areControlsVisible = event.isVisible) }
-            }
-
-            is PlayerUiEvent.ToggleControlsVisibility -> {
-                updateState { copy(areControlsVisible = !areControlsVisible) }
-            }
-
-            is PlayerUiEvent.SetActiveModal -> {
-                updateState { copy(activeModal = event.modal) }
-            }
-
-            is PlayerUiEvent.LoadEpisode -> {
-                loadEpisodeInternal(
-                    episode = event.episode,
-                    playlist = listOf(event.episode),
-                    index = 0,
-                    accountId = event.accountId,
-                    autoPlay = event.autoPlay,
-                    resumePosition = event.resumePosition
+            is PlayerUiEvent.SetLockPin -> updateState {
+                copy(
+                    lockPin = event.pin,
+                    isPinLocked = !event.pin.isNullOrBlank()
                 )
             }
-
-            is PlayerUiEvent.LoadPlaylist -> {
-                val safeIndex = event.startIndex.coerceIn(0, (event.playlist.size - 1).coerceAtLeast(0))
-                val targetEpisode = event.playlist.getOrNull(safeIndex)
-                if (targetEpisode != null) {
-                    loadEpisodeInternal(
-                        episode = targetEpisode,
-                        playlist = event.playlist,
-                        index = safeIndex,
-                        accountId = event.accountId,
-                        autoPlay = event.autoPlay,
-                        resumePosition = null
-                    )
-                }
-            }
-
-            is PlayerUiEvent.LoadMedia -> {
-                loadMediaInternal(
-                    url = event.url,
-                    mediaId = event.mediaId,
-                    parentId = event.parentId,
-                    accountId = event.accountId,
-                    qualities = event.qualities,
-                    subtitles = event.subtitles,
-                    initialSubtitle = event.initialSubtitle,
-                    skipTimestamps = event.skipTimestamps,
-                    autoPlay = event.autoPlay,
-                    resumePosition = event.resumePosition
+            is PlayerUiEvent.ShowLockPinDialog -> updateState {
+                copy(
+                    showLockPinDialog = event.show,
+                    lockPinDialogMode = event.mode
                 )
             }
-
-            is PlayerUiEvent.UpdateQualitiesAndSubtitles -> {
-                val currentQualities = currentState.availableQualities
-                val currentSubs = currentState.availableSubtitles
-                val newQualities = (currentQualities + event.qualities)
-                    .distinctBy { it.url }
-                    .sortedByDescending { it.effectiveResolution }
-                val newSubs = (currentSubs + event.subtitles).distinctBy { it.url }
-
-                val isAlreadyActive = hasAutoPlayedCurrentEpisode || currentState.isPlaying || currentState.isBuffering || !currentState.currentUrl.isNullOrBlank()
-                val shouldAutoPlayFirst = !isAlreadyActive && newQualities.isNotEmpty()
-                if (shouldAutoPlayFirst) {
-                    hasAutoPlayedCurrentEpisode = true
-                }
-                val selectedQ = if (shouldAutoPlayFirst) {
-                    newQualities.first()
-                } else {
-                    currentState.selectedQuality ?: newQualities.firstOrNull { it.url == currentState.currentUrl } ?: newQualities.firstOrNull()
-                }
-                val selectedSub = currentState.selectedSubtitle ?: newSubs.firstOrNull { it.isDefault } ?: newSubs.firstOrNull()
-
-                updateState {
-                    copy(
-                        availableQualities = newQualities,
-                        availableSubtitles = newSubs,
-                        selectedQuality = selectedQ,
-                        selectedSubtitle = selectedSub,
-                        currentUrl = if (shouldAutoPlayFirst) selectedQ?.url ?: currentUrl else currentUrl,
-                        isBuffering = if (shouldAutoPlayFirst) true else isBuffering,
-                        isStopped = if (shouldAutoPlayFirst) false else isStopped
-                    )
-                }
-
-                if (shouldAutoPlayFirst && selectedQ?.url?.isNotBlank() == true) {
-                    player.play(selectedQ, newSubs)
-                    if (currentState.positionMs > 0L) {
-                        player.seekTo(currentState.positionMs)
-                    }
-                    if (selectedSub != null && selectedSub.url.isNotBlank()) {
-                        player.loadSubtitle(selectedSub.url, selectedSub.headers)
-                    }
-                    onPlaybackActiveChanged(true)
-                }
+            is PlayerUiEvent.UnlockWithPin -> handleUnlockWithPin(event.pin)
+            is PlayerUiEvent.ClearLockPin -> updateState {
+                copy(
+                    lockPin = null,
+                    isPinLocked = false,
+                    showLockPinDialog = false
+                )
             }
+            is PlayerUiEvent.VisibilityChanged -> updateState {
+                copy(areControlsVisible = event.isVisible)
+            }
+            is PlayerUiEvent.ToggleControlsVisibility -> updateState {
+                copy(areControlsVisible = !areControlsVisible)
+            }
+            is PlayerUiEvent.SetActiveModal -> updateState {
+                copy(activeModal = event.modal)
+            }
+            is PlayerUiEvent.DismissError -> updateState { copy(errorMessage = null) }
+            else -> Unit
+        }
+    }
 
+    private fun handleSeekTo(positionMs: Long) {
+        val duration = currentState.durationMs
+        val clamped = if (duration > 0) positionMs.coerceIn(0L, duration) else positionMs.coerceAtLeast(0L)
+        player.seekTo(clamped)
+        updateState {
+            val activeStamp = skipTimestamps.firstOrNull { it.contains(clamped) }
+            copy(positionMs = clamped, activeSkipTimestamp = activeStamp)
+        }
+        launch { saveCurrentWatchProgress() }
+    }
 
-            is PlayerUiEvent.SetAspectRatio -> {
-                player.setAspectRatio(event.aspectRatio.name)
-                updateState { copy(aspectRatio = event.aspectRatio) }
-            }
-            is PlayerUiEvent.CycleResizeMode -> {
-                val entries = PlayerAspectRatio.entries
-                val nextIndex = (currentState.aspectRatio.ordinal + 1) % entries.size
-                val nextRatio = entries[nextIndex]
-                handleEvent(PlayerUiEvent.SetAspectRatio(nextRatio))
-            }
-            is PlayerUiEvent.SetSubtitleDelay -> {
-                player.setSubtitleDelay(event.delayMs)
-                updateState { copy(subtitleDelayMs = event.delayMs) }
-            }
-            is PlayerUiEvent.SetAudioDelay -> {
-                player.setAudioDelay(event.delayMs)
-                updateState { copy(audioDelayMs = event.delayMs) }
-            }
-            is PlayerUiEvent.SelectEpisode -> {
-                val current = currentState
-                if (event.index in current.playlist.indices) {
-                    launch { saveCurrentWatchProgress() }
-                    val targetEp = current.playlist[event.index]
-                    loadEpisodeInternal(
-                        episode = targetEp,
-                        playlist = current.playlist,
-                        index = event.index,
-                        accountId = current.accountId,
-                        autoPlay = true,
-                        resumePosition = null
-                    )
-                }
-            }
-            is PlayerUiEvent.DismissError -> {
-                updateState { copy(errorMessage = null) }
-            }
+    private fun handleSeekBy(offsetMs: Long) {
+        val currentPos = currentState.positionMs
+        val duration = currentState.durationMs
+        val targetPos = (currentPos + offsetMs).let { pos ->
+            if (duration > 0) pos.coerceIn(0L, duration) else pos.coerceAtLeast(0L)
+        }
+        handleSeekTo(targetPos)
+    }
 
-            is PlayerUiEvent.SaveProgressNow -> {
-                launch { saveCurrentWatchProgress() }
+    private fun handleSelectQuality(quality: PlayerQuality) {
+        hasAutoPlayedCurrentEpisode = true
+        val currentPos = currentState.positionMs
+        val wasPlaying = currentState.isPlaying
+        updateState {
+            copy(
+                selectedQuality = quality,
+                currentUrl = quality.url
+            )
+        }
+        if (quality.url.isNotBlank()) {
+            player.play(quality, currentState.availableSubtitles)
+            if (currentPos > 0L) {
+                player.seekTo(currentPos)
+            }
+            if (!wasPlaying) {
+                player.pause()
             }
         }
+    }
+
+    private fun handleSelectSubtitle(subtitle: PlayerSubtitleTrack?) {
+        updateState { copy(selectedSubtitle = subtitle) }
+        if (subtitle != null && subtitle.url.isNotBlank()) {
+            player.loadSubtitle(subtitle.url, subtitle.headers)
+        }
+    }
+
+    private fun handleSetSpeed(speed: Float) {
+        val clampedSpeed = speed.coerceIn(0.25f, 4.0f)
+        player.setPlaybackSpeed(clampedSpeed)
+        updateState { copy(playbackSpeed = clampedSpeed) }
+    }
+
+    private fun handleSkipIntro() {
+        val active = currentState.activeSkipTimestamp
+            ?: currentState.skipTimestamps.firstOrNull { it.isIntro }
+        if (active != null) {
+            handleSeekTo(active.endMs)
+        }
+    }
+
+    private fun handleSkipOutro() {
+        val active = currentState.activeSkipTimestamp
+            ?: currentState.skipTimestamps.firstOrNull { it.isOutro }
+        if (active != null) {
+            if (currentState.hasNextEpisode) {
+                handleEpisodeNavigation(offset = 1)
+            } else {
+                handleSeekTo(active.endMs)
+            }
+        }
+    }
+
+    private fun handleEpisodeNavigation(offset: Int) {
+        val current = currentState
+        val targetIndex = current.currentEpisodeIndex + offset
+        if (targetIndex in current.playlist.indices) {
+            launch { saveCurrentWatchProgress() }
+            val targetEp = current.playlist[targetIndex]
+            loadEpisodeInternal(
+                episode = targetEp,
+                playlist = current.playlist,
+                index = targetIndex,
+                accountId = current.accountId,
+                autoPlay = true,
+                resumePosition = null
+            )
+        }
+    }
+
+    private fun handleSelectEpisode(index: Int) {
+        val current = currentState
+        if (index in current.playlist.indices) {
+            launch { saveCurrentWatchProgress() }
+            val targetEp = current.playlist[index]
+            loadEpisodeInternal(
+                episode = targetEp,
+                playlist = current.playlist,
+                index = index,
+                accountId = current.accountId,
+                autoPlay = true,
+                resumePosition = null
+            )
+        }
+    }
+
+    private fun handleUnlockWithPin(pin: String) {
+        val currentPin = currentState.lockPin
+        if (currentPin.isNullOrBlank() || currentPin == pin) {
+            updateState {
+                copy(
+                    isControlsLocked = false,
+                    showLockPinDialog = false,
+                    areControlsVisible = true
+                )
+            }
+        }
+    }
+
+    private fun handleLoadPlaylist(event: PlayerUiEvent.LoadPlaylist) {
+        val safeIndex = event.startIndex.coerceIn(0, (event.playlist.size - 1).coerceAtLeast(0))
+        val targetEpisode = event.playlist.getOrNull(safeIndex) ?: return
+        loadEpisodeInternal(
+            episode = targetEpisode,
+            playlist = event.playlist.toImmutableList(),
+            index = safeIndex,
+            accountId = event.accountId,
+            autoPlay = event.autoPlay,
+            resumePosition = null
+        )
+    }
+
+    private fun resolveSelectedQuality(
+        newQualities: ImmutableList<PlayerQuality>,
+        shouldAutoPlay: Boolean
+    ): PlayerQuality? {
+        if (shouldAutoPlay) return newQualities.firstOrNull()
+        return currentState.selectedQuality
+            ?: newQualities.firstOrNull { it.url == currentState.currentUrl }
+            ?: newQualities.firstOrNull()
+    }
+
+    private fun resolveSelectedSubtitle(newSubs: ImmutableList<PlayerSubtitleTrack>): PlayerSubtitleTrack? {
+        return currentState.selectedSubtitle
+            ?: newSubs.firstOrNull { it.isDefault }
+            ?: newSubs.firstOrNull()
+    }
+
+    private fun autoPlayInitialQuality(
+        quality: PlayerQuality,
+        subtitles: ImmutableList<PlayerSubtitleTrack>,
+        selectedSub: PlayerSubtitleTrack?
+    ) {
+        if (quality.url.isBlank()) return
+        player.play(quality, subtitles)
+        if (currentState.positionMs > 0L) {
+            player.seekTo(currentState.positionMs)
+        }
+        if (selectedSub != null && selectedSub.url.isNotBlank()) {
+            player.loadSubtitle(selectedSub.url, selectedSub.headers)
+        }
+        onPlaybackActiveChanged(true)
+    }
+
+    private fun handleQualitiesUpdate(event: PlayerUiEvent.UpdateQualitiesAndSubtitles) {
+        val newQualities = (currentState.availableQualities + event.qualities)
+            .distinctBy { it.url }
+            .sortedByDescending { it.effectiveResolution }
+            .toImmutableList()
+        val newSubs = (currentState.availableSubtitles + event.subtitles)
+            .distinctBy { it.url }
+            .toImmutableList()
+
+        val isAlreadyActive = hasAutoPlayedCurrentEpisode || currentState.isPlaying ||
+                currentState.isBuffering || !currentState.currentUrl.isNullOrBlank()
+        val shouldAutoPlayFirst = !isAlreadyActive && newQualities.isNotEmpty()
+        if (shouldAutoPlayFirst) {
+            hasAutoPlayedCurrentEpisode = true
+        }
+
+        val selectedQ = resolveSelectedQuality(newQualities, shouldAutoPlayFirst)
+        val selectedSub = resolveSelectedSubtitle(newSubs)
+
+        updateState {
+            copy(
+                availableQualities = newQualities,
+                availableSubtitles = newSubs,
+                selectedQuality = selectedQ,
+                selectedSubtitle = selectedSub,
+                currentUrl = if (shouldAutoPlayFirst) selectedQ?.url ?: currentUrl else currentUrl,
+                isBuffering = if (shouldAutoPlayFirst) true else isBuffering,
+                isStopped = if (shouldAutoPlayFirst) false else isStopped
+            )
+        }
+
+        if (shouldAutoPlayFirst && selectedQ != null) {
+            autoPlayInitialQuality(selectedQ, newSubs, selectedSub)
+        }
+    }
+
+    private fun handleSetAspectRatio(aspectRatio: PlayerAspectRatio) {
+        player.setAspectRatio(aspectRatio.name)
+        updateState { copy(aspectRatio = aspectRatio) }
+    }
+
+    private fun handleCycleResizeMode() {
+        val entries = PlayerAspectRatio.entries
+        val nextIndex = (currentState.aspectRatio.ordinal + 1) % entries.size
+        val nextRatio = entries[nextIndex]
+        player.setAspectRatio(nextRatio.name)
+        updateState { copy(aspectRatio = nextRatio) }
+    }
+
+    private fun handleSetSubtitleDelay(delayMs: Long) {
+        player.setSubtitleDelay(delayMs)
+        updateState { copy(subtitleDelayMs = delayMs) }
+    }
+
+    private fun handleSetAudioDelay(delayMs: Long) {
+        player.setAudioDelay(delayMs)
+        updateState { copy(audioDelayMs = delayMs) }
+    }
+
+    private suspend fun resolveSavedProgressPosition(accountId: Int, mediaId: Int, explicitPosition: Long?): Long? {
+        if (explicitPosition != null) return explicitPosition
+        if (watchProgressRepository == null) return null
+        return try {
+            val saved = watchProgressRepository.getProgress(accountId = accountId, mediaId = mediaId)
+            saved?.position?.takeIf { it > 0L }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun startPlaybackSession(
+        quality: PlayerQuality?,
+        initialUrl: String,
+        subtitles: List<PlayerSubtitleTrack>,
+        defaultSubtitle: PlayerSubtitleTrack?,
+        targetResume: Long?,
+        autoPlay: Boolean
+    ) {
+        if (initialUrl.isNotBlank()) {
+            player.play(quality ?: PlayerQuality(url = initialUrl), subtitles)
+            if (targetResume != null && targetResume > 0L) {
+                player.seekTo(targetResume)
+            }
+            if (!autoPlay) {
+                player.pause()
+            }
+        }
+
+        if (defaultSubtitle != null && defaultSubtitle.url.isNotBlank()) {
+            player.loadSubtitle(defaultSubtitle.url, defaultSubtitle.headers)
+        }
+
+        onPlaybackActiveChanged(autoPlay && initialUrl.isNotBlank())
     }
 
     private fun loadEpisodeInternal(
@@ -500,19 +564,8 @@ class PlayerControllerViewModel(
         resumePosition: Long?
     ) {
         launchSafeJob(key = "load_media") {
-            var targetResume = resumePosition
-            if (targetResume == null && watchProgressRepository != null) {
-                try {
-                    val saved = watchProgressRepository.getProgress(accountId = accountId, mediaId = episode.id)
-                    if (saved != null && saved.position > 0L) {
-                        targetResume = saved.position
-                    }
-                } catch (e: Exception) {
-                    // Ignore persistence lookup error
-                }
-            }
-
-            val sortedQualities = episode.qualities.distinctBy { it.url }.sortedByDescending { it.effectiveResolution }
+            val targetResume = resolveSavedProgressPosition(accountId, episode.id, resumePosition)
+            val sortedQualities = episode.qualities.distinctBy { it.url }.sortedByDescending { it.effectiveResolution }.toImmutableList()
             val defaultQuality = sortedQualities.firstOrNull()
             val initialUrl = defaultQuality?.url ?: ""
             hasAutoPlayedCurrentEpisode = initialUrl.isNotBlank()
@@ -536,7 +589,7 @@ class PlayerControllerViewModel(
                     parentId = parentId ?: episode.id,
                     currentEpisodeId = episode.id,
                     currentEpisode = episode,
-                    playlist = playlist,
+                    playlist = playlist.toImmutableList(),
                     currentEpisodeIndex = index,
                     hasNextEpisode = index < playlist.size - 1,
                     hasPreviousEpisode = index > 0,
@@ -544,21 +597,14 @@ class PlayerControllerViewModel(
                 )
             }
 
-            if (initialUrl.isNotBlank()) {
-                player.play(defaultQuality ?: PlayerQuality(url = initialUrl), episode.subtitles)
-                if (targetResume != null && targetResume > 0L) {
-                    player.seekTo(targetResume)
-                }
-                if (!autoPlay) {
-                    player.pause()
-                }
-            }
-
-            if (defaultSubtitle != null && defaultSubtitle.url.isNotBlank()) {
-                player.loadSubtitle(defaultSubtitle.url, defaultSubtitle.headers)
-            }
-
-            onPlaybackActiveChanged(autoPlay && initialUrl.isNotBlank())
+            startPlaybackSession(
+                quality = defaultQuality,
+                initialUrl = initialUrl,
+                subtitles = episode.subtitles,
+                defaultSubtitle = defaultSubtitle,
+                targetResume = targetResume,
+                autoPlay = autoPlay
+            )
         }
     }
 
@@ -574,12 +620,12 @@ class PlayerControllerViewModel(
         autoPlay: Boolean,
         resumePosition: Long?
     ) {
-        println("CloudStreamDebug: PlayerControllerViewModel.loadMediaInternal: url=$url, autoPlay=$autoPlay, mediaId=$mediaId, qualities=${qualities.size}")
         hasAutoPlayedCurrentEpisode = url.isNotBlank()
+        val sortedQualities = qualities.distinctBy { it.url }.sortedByDescending { it.effectiveResolution }.toImmutableList()
+        val defaultQuality = sortedQualities.firstOrNull { it.url == url } ?: sortedQualities.firstOrNull()
+        val defaultSubtitle = initialSubtitle ?: subtitles.firstOrNull { it.isDefault } ?: subtitles.firstOrNull()
+
         if (url.isNotBlank()) {
-            val sortedQualities = qualities.distinctBy { it.url }.sortedByDescending { it.effectiveResolution }
-            val defaultQuality = sortedQualities.firstOrNull { it.url == url } ?: sortedQualities.firstOrNull()
-            val defaultSubtitle = initialSubtitle ?: subtitles.firstOrNull { it.isDefault } ?: subtitles.firstOrNull()
             updateState {
                 copy(
                     isPlaying = autoPlay,
@@ -590,9 +636,9 @@ class PlayerControllerViewModel(
                     durationMs = 0L,
                     availableQualities = sortedQualities,
                     selectedQuality = defaultQuality,
-                    availableSubtitles = subtitles,
+                    availableSubtitles = subtitles.toImmutableList(),
                     selectedSubtitle = defaultSubtitle,
-                    skipTimestamps = skipTimestamps,
+                    skipTimestamps = skipTimestamps.toImmutableList(),
                     accountId = accountId,
                     parentId = parentId ?: mediaId,
                     currentEpisodeId = mediaId,
@@ -600,22 +646,13 @@ class PlayerControllerViewModel(
                 )
             }
         }
-        launchSafeJob(key = "load_media") {
-            var targetResume = resumePosition
-            if (targetResume == null && mediaId != null && watchProgressRepository != null) {
-                try {
-                    val saved = watchProgressRepository.getProgress(accountId = accountId, mediaId = mediaId)
-                    if (saved != null && saved.position > 0L) {
-                        targetResume = saved.position
-                    }
-                } catch (e: Exception) {
-                    // Ignore persistence lookup error
-                }
-            }
 
-            val sortedQualities = qualities.distinctBy { it.url }.sortedByDescending { it.effectiveResolution }
-            val defaultQuality = sortedQualities.firstOrNull { it.url == url } ?: sortedQualities.firstOrNull()
-            val defaultSubtitle = initialSubtitle ?: subtitles.firstOrNull { it.isDefault } ?: subtitles.firstOrNull()
+        launchSafeJob(key = "load_media") {
+            val targetResume = if (mediaId != null) {
+                resolveSavedProgressPosition(accountId, mediaId, resumePosition)
+            } else {
+                resumePosition
+            }
 
             updateState {
                 copy(
@@ -627,15 +664,15 @@ class PlayerControllerViewModel(
                     currentUrl = url,
                     availableQualities = sortedQualities,
                     selectedQuality = defaultQuality,
-                    availableSubtitles = subtitles,
+                    availableSubtitles = subtitles.toImmutableList(),
                     selectedSubtitle = defaultSubtitle,
-                    skipTimestamps = skipTimestamps,
+                    skipTimestamps = skipTimestamps.toImmutableList(),
                     activeSkipTimestamp = null,
                     accountId = accountId,
                     parentId = parentId ?: mediaId,
                     currentEpisodeId = mediaId,
                     currentEpisode = null,
-                    playlist = emptyList(),
+                    playlist = persistentListOf(),
                     currentEpisodeIndex = 0,
                     hasNextEpisode = false,
                     hasPreviousEpisode = false,
@@ -643,28 +680,57 @@ class PlayerControllerViewModel(
                 )
             }
 
-            if (url.isNotBlank()) {
-                player.play(defaultQuality ?: PlayerQuality(url = url), subtitles)
-                if (targetResume != null && targetResume > 0L) {
-                    player.seekTo(targetResume)
-                }
-                if (!autoPlay) {
-                    player.pause()
-                }
-            }
-
-            if (defaultSubtitle != null && defaultSubtitle.url.isNotBlank()) {
-                player.loadSubtitle(defaultSubtitle.url, defaultSubtitle.headers)
-            }
-
-            onPlaybackActiveChanged(autoPlay && url.isNotBlank())
+            startPlaybackSession(
+                quality = defaultQuality,
+                initialUrl = url,
+                subtitles = subtitles,
+                defaultSubtitle = defaultSubtitle,
+                targetResume = targetResume,
+                autoPlay = autoPlay
+            )
         }
     }
 
-    /**
-     * Persists current playback progress into the [WatchProgressRepository], [ResumeWatchingRepository],
-     * and updates the associated [BookmarkRepository] entry's update timestamp.
-     */
+    private fun computeWatchState(position: Long, duration: Long): Int {
+        return when {
+            duration > 0L && (position.toDouble() / duration.toDouble()) >= 0.90 -> 2
+            position > 0L -> 1
+            else -> 0
+        }
+    }
+
+    private suspend fun persistResumeWatching(accountId: Int, parentId: Int, mediaId: Int) {
+        val resumeRepo = resumeWatchingRepository ?: return
+        try {
+            val ep = currentState.currentEpisode
+            resumeRepo.saveResumeWatching(
+                ResumeWatchingEntity(
+                    accountId = accountId,
+                    parentId = parentId,
+                    episodeId = mediaId,
+                    episode = ep?.episode ?: ep?.episodeNumber,
+                    season = ep?.season ?: ep?.seasonNumber,
+                    isFromDownload = false,
+                    updateTime = APIHolder.unixTimeMS
+                )
+            )
+        } catch (e: Exception) {
+            // Ignore persistence error
+        }
+    }
+
+    private suspend fun persistBookmarkUpdate(accountId: Int, parentId: Int) {
+        val repo = bookmarkRepository ?: return
+        try {
+            val bookmark = repo.getBookmark(accountId, parentId)
+            if (bookmark != null) {
+                repo.saveBookmark(bookmark.copy(latestUpdatedTime = APIHolder.unixTimeMS))
+            }
+        } catch (e: Exception) {
+            // Ignore persistence error
+        }
+    }
+
     suspend fun saveCurrentWatchProgress() {
         val current = currentState
         val mediaId = current.currentEpisodeId ?: return
@@ -673,13 +739,7 @@ class PlayerControllerViewModel(
 
         if (pos <= 0L && dur <= 0L) return
 
-        val watchState = if (dur > 0L && (pos.toDouble() / dur.toDouble()) >= 0.90) {
-            2 // Watched
-        } else if (pos > 0L) {
-            1 // Watching
-        } else {
-            0 // None
-        }
+        val watchState = computeWatchState(pos, dur)
 
         try {
             watchProgressRepository?.setProgress(
@@ -693,34 +753,9 @@ class PlayerControllerViewModel(
             // Ignore persistence error
         }
 
-        try {
-            val parentId = current.parentId ?: mediaId
-            resumeWatchingRepository?.saveResumeWatching(
-                ResumeWatchingEntity(
-                    accountId = current.accountId,
-                    parentId = parentId,
-                    episodeId = mediaId,
-                    episode = current.currentEpisode?.episode ?: current.currentEpisode?.episodeNumber,
-                    season = current.currentEpisode?.season ?: current.currentEpisode?.seasonNumber,
-                    isFromDownload = false,
-                    updateTime = APIHolder.unixTimeMS
-                )
-            )
-        } catch (e: Exception) {
-            // Ignore persistence error
-        }
-
-        try {
-            val parentId = current.parentId ?: mediaId
-            bookmarkRepository?.let { repo ->
-                val bookmark = repo.getBookmark(current.accountId, parentId)
-                if (bookmark != null) {
-                    repo.saveBookmark(bookmark.copy(latestUpdatedTime = APIHolder.unixTimeMS))
-                }
-            }
-        } catch (e: Exception) {
-            // Ignore persistence error
-        }
+        val parentId = current.parentId ?: mediaId
+        persistResumeWatching(current.accountId, parentId, mediaId)
+        persistBookmarkUpdate(current.accountId, parentId)
     }
 
     private fun onPlaybackActiveChanged(isActive: Boolean) {
@@ -748,9 +783,6 @@ class PlayerControllerViewModel(
         cancelJob("periodic_saver")
     }
 
-    /**
-     * Releases controller resources, persists pending progress, and stops the player.
-     */
     fun release() {
         stopPeriodicProgressSaver()
         launch {

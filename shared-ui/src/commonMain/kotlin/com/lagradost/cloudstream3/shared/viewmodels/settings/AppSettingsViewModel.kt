@@ -1,20 +1,32 @@
 package com.lagradost.cloudstream3.shared.viewmodels.settings
 
+import androidx.compose.runtime.Immutable
 import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.shared.backup.BackupCategory
 import com.lagradost.cloudstream3.shared.backup.BackupManager
 import com.lagradost.cloudstream3.shared.backup.BackupManagerImpl
 import com.lagradost.cloudstream3.shared.backup.BackupRestoreResult
 import com.lagradost.cloudstream3.shared.backup.PlatformFilePicker
-import com.lagradost.cloudstream3.shared.mvi.MviViewModel
-import com.lagradost.cloudstream3.shared.mvi.UiEvent
+import com.lagradost.cloudstream3.shared.mvi.BaseViewModel
 import com.lagradost.cloudstream3.shared.mvi.UiState
 import com.lagradost.cloudstream3.shared.persistence.driver.DatabaseDriverFactory
 import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceRepository
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.ImmutableSet
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentMapOf
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.collections.immutable.toImmutableSet
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.update
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.encodeToString
@@ -32,10 +44,6 @@ import com.lagradost.cloudstream3.utils.UiText
 import com.lagradost.cloudstream3.utils.txt
 import org.jetbrains.compose.resources.StringResource
 
-/**
- * App visual theme families supported across all platforms.
- * Dark/Light variations are dynamically controlled by the application's dark mode preference.
- */
 @Serializable
 enum class AppTheme(val key: String, val displayNameRes: StringResource) {
     SYSTEM("System", Res.string.theme_system),
@@ -60,9 +68,6 @@ enum class AppTheme(val key: String, val displayNameRes: StringResource) {
     }
 }
 
-/**
- * DNS-over-HTTPS (DoH) providers supported by the application.
- */
 @Serializable
 enum class DohProvider(
     val id: Int,
@@ -95,9 +100,6 @@ enum class DohProvider(
     }
 }
 
-/**
- * Subtitle edge/border rendering styles.
- */
 @Serializable
 enum class SubtitleEdgeType(val id: Int, val displayName: String) {
     NONE(0, "None"),
@@ -112,9 +114,7 @@ enum class SubtitleEdgeType(val id: Int, val displayName: String) {
     }
 }
 
-/**
- * Options and style configuration for video subtitles.
- */
+@Immutable
 @Serializable
 data class SubtitleStyle(
     val fontSize: Float = 20f,
@@ -137,14 +137,12 @@ data class SubtitleStyle(
     val fontFilePath: String? = null
 )
 
-/**
- * Immutable UI state for App Settings in MVI.
- */
+@Immutable
 @Serializable
 data class AppSettingsState(
     val theme: AppTheme = AppTheme.SYSTEM,
     val isDarkMode: Boolean = true,
-    val preferredProviderLanguages: List<String> = listOf("en"),
+    val preferredProviderLanguages: ImmutableList<String> = persistentListOf("en"),
     val dohProvider: DohProvider = DohProvider.NONE,
     val subtitleStyle: SubtitleStyle = SubtitleStyle(),
     val appLanguage: String = "en",
@@ -157,56 +155,19 @@ data class AppSettingsState(
     val syncWifiOnly: Boolean = false,
     val skipStartupAccountSelect: Boolean = false,
     val showSourcesOnPlay: Boolean = false,
-    val activeAuthAccounts: Map<String, AuthData?> = emptyMap(),
+    val activeAuthAccounts: ImmutableMap<String, AuthData?> = persistentMapOf(),
     val isBackingUp: Boolean = false,
     val isRestoring: Boolean = false,
     @Transient
     val backupSuccessRes: StringResource? = null,
     @Transient
     val backupErrorRes: StringResource? = null,
-    val availableBackupCategories: Set<BackupCategory> = BackupCategory.entries.toSet(),
+    val availableBackupCategories: ImmutableSet<BackupCategory> = BackupCategory.entries.toImmutableSet(),
     val isLoading: Boolean = false,
     @Transient
     val error: UiText? = null
 ) : UiState
 
-/**
- * Sealed events/intents for App Settings in MVI.
- */
-sealed class AppSettingsEvent : UiEvent {
-    data object LoadSettings : AppSettingsEvent()
-    data class SetTheme(val theme: AppTheme) : AppSettingsEvent()
-    data class SetDarkMode(val enabled: Boolean) : AppSettingsEvent()
-    data class SetLanguage(val languages: List<String>) : AppSettingsEvent()
-    data class SetAppLanguage(val languageCode: String) : AppSettingsEvent()
-    data class SetDohProvider(val provider: DohProvider) : AppSettingsEvent()
-    data class SetDefaultSubtitleStyle(val style: SubtitleStyle) : AppSettingsEvent()
-    data class SetQualityWifi(val quality: Int) : AppSettingsEvent()
-    data class SetQualityMobile(val quality: Int) : AppSettingsEvent()
-    data class SetSoftwareDecoding(val mode: Int) : AppSettingsEvent()
-    data class SetSubtitleEncoding(val encoding: String) : AppSettingsEvent()
-    data class SetSyncWatchProgress(val enabled: Boolean) : AppSettingsEvent()
-    data class SetSyncScores(val enabled: Boolean) : AppSettingsEvent()
-    data class SetSyncWifiOnly(val enabled: Boolean) : AppSettingsEvent()
-    data class SetSkipStartupAccountSelect(val enabled: Boolean) : AppSettingsEvent()
-    data class SetShowSourcesOnPlay(val enabled: Boolean) : AppSettingsEvent()
-    data class LoginInApp(val api: AuthRepo, val form: AuthLoginResponse) : AppSettingsEvent()
-    data class LoginPin(val api: AuthRepo, val pinData: AuthPinData) : AppSettingsEvent()
-    data class LogoutAccount(val api: AuthRepo, val user: AuthUser) : AppSettingsEvent()
-    data class SwitchActiveAccount(val api: AuthRepo, val accountId: Int) : AppSettingsEvent()
-    data class StartOAuthLogin(val api: AuthRepo) : AppSettingsEvent()
-    data class CreateBackup(val categories: Set<BackupCategory>) : AppSettingsEvent()
-    data class RestoreBackup(val jsonContent: String, val categories: Set<BackupCategory>? = null) : AppSettingsEvent()
-    data class ExportBackupWithPicker(val categories: Set<BackupCategory> = BackupCategory.entries.toSet()) : AppSettingsEvent()
-    data object ImportBackupWithPicker : AppSettingsEvent()
-    data object ClearBackupMessage : AppSettingsEvent()
-    data object ResetToDefaults : AppSettingsEvent()
-    data object ClearError : AppSettingsEvent()
-}
-
-/**
- * Cross-platform MVI ViewModel for Application Settings connected to AppPreferenceRepository.
- */
 class AppSettingsViewModel(
     private val preferenceRepository: AppPreferenceRepository,
     coroutineScope: CoroutineScope? = null,
@@ -216,10 +177,21 @@ class AppSettingsViewModel(
         isLenient = true
         encodeDefaults = true
     }
-) : MviViewModel<AppSettingsState, AppSettingsEvent>(
-    initialState = AppSettingsState(isLoading = true),
-    coroutineScope = coroutineScope
-) {
+) : BaseViewModel(coroutineScope) {
+
+    private val _state = MutableStateFlow(AppSettingsState(isLoading = true))
+    val state: StateFlow<AppSettingsState> = _state.asStateFlow()
+    val currentState: AppSettingsState
+        get() = _state.value
+
+    protected fun updateState(reducer: AppSettingsState.() -> AppSettingsState) {
+        _state.update { it.reducer() }
+    }
+
+    protected fun setState(newState: AppSettingsState) {
+        _state.value = newState
+    }
+
     private val backupManager: BackupManager = backupManager ?: run {
         try {
             BackupManagerImpl(
@@ -276,44 +248,15 @@ class AppSettingsViewModel(
     }
 
     init {
-        handleEvent(AppSettingsEvent.LoadSettings)
+        loadSettings()
         observePreferenceChanges()
     }
 
-    override fun handleEvent(event: AppSettingsEvent) {
-        when (event) {
-            is AppSettingsEvent.LoadSettings -> loadSettings()
-            is AppSettingsEvent.SetTheme -> setTheme(event.theme)
-            is AppSettingsEvent.SetDarkMode -> setDarkMode(event.enabled)
-            is AppSettingsEvent.SetLanguage -> setProviderLanguages(event.languages)
-            is AppSettingsEvent.SetAppLanguage -> setAppLanguage(event.languageCode)
-            is AppSettingsEvent.SetDohProvider -> setDohProvider(event.provider)
-            is AppSettingsEvent.SetDefaultSubtitleStyle -> setDefaultSubtitleStyle(event.style)
-            is AppSettingsEvent.SetQualityWifi -> setQualityWifi(event.quality)
-            is AppSettingsEvent.SetQualityMobile -> setQualityMobile(event.quality)
-            is AppSettingsEvent.SetSoftwareDecoding -> setSoftwareDecoding(event.mode)
-            is AppSettingsEvent.SetSubtitleEncoding -> setSubtitleEncoding(event.encoding)
-            is AppSettingsEvent.SetSyncWatchProgress -> setSyncWatchProgress(event.enabled)
-            is AppSettingsEvent.SetSyncScores -> setSyncScores(event.enabled)
-            is AppSettingsEvent.SetSyncWifiOnly -> setSyncWifiOnly(event.enabled)
-            is AppSettingsEvent.SetSkipStartupAccountSelect -> setSkipStartupAccountSelect(event.enabled)
-            is AppSettingsEvent.SetShowSourcesOnPlay -> setShowSourcesOnPlay(event.enabled)
-            is AppSettingsEvent.LoginInApp -> loginInApp(event.api, event.form)
-            is AppSettingsEvent.LoginPin -> loginPin(event.api, event.pinData)
-            is AppSettingsEvent.LogoutAccount -> logoutAccount(event.api, event.user)
-            is AppSettingsEvent.SwitchActiveAccount -> switchActiveAccount(event.api, event.accountId)
-            is AppSettingsEvent.StartOAuthLogin -> startOAuthLogin(event.api)
-            is AppSettingsEvent.CreateBackup -> createBackup(event.categories)
-            is AppSettingsEvent.RestoreBackup -> restoreBackup(event.jsonContent, event.categories)
-            is AppSettingsEvent.ExportBackupWithPicker -> exportBackupWithPicker(event.categories)
-            is AppSettingsEvent.ImportBackupWithPicker -> importBackupWithPicker()
-            is AppSettingsEvent.ClearBackupMessage -> clearBackupMessage()
-            is AppSettingsEvent.ResetToDefaults -> resetToDefaults()
-            is AppSettingsEvent.ClearError -> updateState { copy(error = null) }
-        }
+    fun clearError() {
+        updateState { copy(error = null) }
     }
 
-    private fun loadSettings() {
+    fun loadSettings() {
         launchSafeJob(
             key = "load_settings",
             onError = { t ->
@@ -334,7 +277,7 @@ class AppSettingsViewModel(
             val isDarkMode = darkModeStr?.toBooleanStrictOrNull() ?: true
 
             val langStr = preferenceRepository.getString(KEY_PROVIDER_LANG)
-            val providerLangs = parseStringList(langStr, default = listOf("en"))
+            val providerLangs = parseStringList(langStr, default = listOf("en")).toImmutableList()
 
             val dohStr = preferenceRepository.getString(KEY_DOH_PROVIDER)
             val dohProvider = DohProvider.fromString(dohStr)
@@ -361,7 +304,7 @@ class AppSettingsViewModel(
             val syncWifiOnly = preferenceRepository.getBoolean(KEY_SYNC_WIFI_ONLY, false)
             val skipStartupAccountSelect = preferenceRepository.getBoolean(KEY_SKIP_STARTUP_ACCOUNT_SELECT, false)
             val showSourcesOnPlay = preferenceRepository.getBoolean(KEY_SHOW_SOURCES_ON_PLAY, false)
-            val activeAuthAccounts = AccountManager.accountsState.value
+            val activeAuthAccounts = AccountManager.accountsState.value.toImmutableMap()
 
             updateState {
                 copy(
@@ -458,7 +401,7 @@ class AppSettingsViewModel(
 
         AccountManager.accountsState
             .onEach { accounts ->
-                updateState { copy(activeAuthAccounts = accounts) }
+                updateState { copy(activeAuthAccounts = accounts.toImmutableMap()) }
             }
             .catch { /* ignore */ }
             .launchIn(viewModelScope)
@@ -481,47 +424,47 @@ class AppSettingsViewModel(
         }
     }
 
-    private fun setTheme(theme: AppTheme) = persistPreference("theme", {
+    fun setTheme(theme: AppTheme) = persistPreference("theme", {
         preferenceRepository.setString(KEY_APP_THEME, theme.key)
     }) { copy(theme = theme) }
 
-    private fun setDarkMode(enabled: Boolean) = persistPreference("dark mode", {
+    fun setDarkMode(enabled: Boolean) = persistPreference("dark mode", {
         preferenceRepository.setString(KEY_DARK_MODE, enabled.toString())
     }) { copy(isDarkMode = enabled) }
 
-    private fun setProviderLanguages(languages: List<String>) {
-        val distinctLangs = languages.distinct()
+    fun setProviderLanguages(languages: List<String>) {
+        val distinctLangs = languages.distinct().toImmutableList()
         persistPreference("provider languages", {
-            preferenceRepository.setString(KEY_PROVIDER_LANG, json.encodeToString(distinctLangs))
+            preferenceRepository.setString(KEY_PROVIDER_LANG, json.encodeToString<List<String>>(distinctLangs))
         }) { copy(preferredProviderLanguages = distinctLangs) }
     }
 
-    private fun setAppLanguage(languageCode: String) = persistPreference("app language", {
+    fun setAppLanguage(languageCode: String) = persistPreference("app language", {
         preferenceRepository.setString(KEY_APP_LOCALE, languageCode)
     }) { copy(appLanguage = languageCode) }
 
-    private fun setDohProvider(provider: DohProvider) = persistPreference("DoH provider", {
+    fun setDohProvider(provider: DohProvider) = persistPreference("DoH provider", {
         preferenceRepository.setString(KEY_DOH_PROVIDER, provider.id.toString())
     }) { copy(dohProvider = provider) }
 
-    private fun setDefaultSubtitleStyle(style: SubtitleStyle) = persistPreference("subtitle style", {
+    fun setDefaultSubtitleStyle(style: SubtitleStyle) = persistPreference("subtitle style", {
         preferenceRepository.setString(KEY_SUBTITLE_SETTINGS, json.encodeToString(style))
         preferenceRepository.setString(KEY_SUBTITLE_ENCODING, style.encoding)
     }) { copy(subtitleStyle = style, subtitleEncoding = style.encoding) }
 
-    private fun setQualityWifi(quality: Int) = persistPreference("WiFi quality", {
+    fun setQualityWifi(quality: Int) = persistPreference("WiFi quality", {
         preferenceRepository.setInt(KEY_QUALITY_WIFI, quality)
     }) { copy(qualityWifi = quality) }
 
-    private fun setQualityMobile(quality: Int) = persistPreference("mobile quality", {
+    fun setQualityMobile(quality: Int) = persistPreference("mobile quality", {
         preferenceRepository.setInt(KEY_QUALITY_MOBILE, quality)
     }) { copy(qualityMobile = quality) }
 
-    private fun setSoftwareDecoding(mode: Int) = persistPreference("software decoding", {
+    fun setSoftwareDecoding(mode: Int) = persistPreference("software decoding", {
         preferenceRepository.setInt(KEY_SOFTWARE_DECODING, mode)
     }) { copy(softwareDecoding = mode) }
 
-    private fun setSubtitleEncoding(encoding: String) {
+    fun setSubtitleEncoding(encoding: String) {
         val updatedStyle = currentState.subtitleStyle.copy(encoding = encoding)
         persistPreference("subtitle encoding", {
             preferenceRepository.setString(KEY_SUBTITLE_ENCODING, encoding)
@@ -529,27 +472,27 @@ class AppSettingsViewModel(
         }) { copy(subtitleEncoding = encoding, subtitleStyle = updatedStyle) }
     }
 
-    private fun setSyncWatchProgress(enabled: Boolean) = persistPreference("sync watch progress", {
+    fun setSyncWatchProgress(enabled: Boolean) = persistPreference("sync watch progress", {
         preferenceRepository.setBoolean(KEY_SYNC_WATCH_PROGRESS, enabled)
     }) { copy(syncWatchProgress = enabled) }
 
-    private fun setSyncScores(enabled: Boolean) = persistPreference("sync scores", {
+    fun setSyncScores(enabled: Boolean) = persistPreference("sync scores", {
         preferenceRepository.setBoolean(KEY_SYNC_SCORES, enabled)
     }) { copy(syncScores = enabled) }
 
-    private fun setSyncWifiOnly(enabled: Boolean) = persistPreference("sync wifi only", {
+    fun setSyncWifiOnly(enabled: Boolean) = persistPreference("sync wifi only", {
         preferenceRepository.setBoolean(KEY_SYNC_WIFI_ONLY, enabled)
     }) { copy(syncWifiOnly = enabled) }
 
-    private fun setSkipStartupAccountSelect(enabled: Boolean) = persistPreference("skip startup account select", {
+    fun setSkipStartupAccountSelect(enabled: Boolean) = persistPreference("skip startup account select", {
         preferenceRepository.setBoolean(KEY_SKIP_STARTUP_ACCOUNT_SELECT, enabled)
     }) { copy(skipStartupAccountSelect = enabled) }
 
-    private fun setShowSourcesOnPlay(enabled: Boolean) = persistPreference("show sources on play", {
+    fun setShowSourcesOnPlay(enabled: Boolean) = persistPreference("show sources on play", {
         preferenceRepository.setBoolean(KEY_SHOW_SOURCES_ON_PLAY, enabled)
     }) { copy(showSourcesOnPlay = enabled) }
 
-    private fun loginInApp(api: AuthRepo, form: AuthLoginResponse) {
+    fun loginInApp(api: AuthRepo, form: AuthLoginResponse) {
         launchSafeJob(
             onError = { t ->
                 updateState {
@@ -564,7 +507,7 @@ class AppSettingsViewModel(
         }
     }
 
-    private fun loginPin(api: AuthRepo, pinData: AuthPinData) {
+    fun loginPin(api: AuthRepo, pinData: AuthPinData) {
         launchSafeJob(
             onError = { t ->
                 updateState {
@@ -579,7 +522,7 @@ class AppSettingsViewModel(
         }
     }
 
-    private fun logoutAccount(api: AuthRepo, user: AuthUser) {
+    fun logoutAccount(api: AuthRepo, user: AuthUser) {
         launchSafeJob(
             onError = { t ->
                 updateState {
@@ -591,7 +534,7 @@ class AppSettingsViewModel(
         }
     }
 
-    private fun switchActiveAccount(api: AuthRepo, accountId: Int) {
+    fun switchActiveAccount(api: AuthRepo, accountId: Int) {
         launchSafeJob(
             onError = { t ->
                 updateState {
@@ -603,7 +546,7 @@ class AppSettingsViewModel(
         }
     }
 
-    private fun startOAuthLogin(api: AuthRepo) {
+    fun startOAuthLogin(api: AuthRepo) {
         launchSafeJob(
             onError = { t ->
                 updateState {
@@ -615,7 +558,7 @@ class AppSettingsViewModel(
         }
     }
 
-    private fun createBackup(categories: Set<BackupCategory>) {
+    fun createBackup(categories: Set<BackupCategory>) {
         launchSafeJob(
             onError = { _ ->
                 updateState {
@@ -639,7 +582,7 @@ class AppSettingsViewModel(
         }
     }
 
-    private fun restoreBackup(jsonContent: String, categories: Set<BackupCategory>?) {
+    fun restoreBackup(jsonContent: String, categories: Set<BackupCategory>? = null) {
         launchSafeJob(
             onError = { _ ->
                 updateState {
@@ -676,7 +619,7 @@ class AppSettingsViewModel(
         }
     }
 
-    private fun exportBackupWithPicker(categories: Set<BackupCategory>) {
+    fun exportBackupWithPicker(categories: Set<BackupCategory> = BackupCategory.entries.toSet()) {
         launchSafeJob(
             onError = { _ ->
                 updateState {
@@ -712,7 +655,7 @@ class AppSettingsViewModel(
         }
     }
 
-    private fun importBackupWithPicker() {
+    fun importBackupWithPicker() {
         launchSafeJob(
             onError = { _ ->
                 updateState {
@@ -754,11 +697,11 @@ class AppSettingsViewModel(
         }
     }
 
-    private fun clearBackupMessage() {
+    fun clearBackupMessage() {
         updateState { copy(backupSuccessRes = null, backupErrorRes = null) }
     }
 
-    private fun resetToDefaults() {
+    fun resetToDefaults() {
         launchSafeJob(
             onError = { t ->
                 updateState {
@@ -769,7 +712,7 @@ class AppSettingsViewModel(
             val defaultState = AppSettingsState()
             preferenceRepository.setString(KEY_APP_THEME, defaultState.theme.key)
             preferenceRepository.setString(KEY_DARK_MODE, defaultState.isDarkMode.toString())
-            preferenceRepository.setString(KEY_PROVIDER_LANG, json.encodeToString(defaultState.preferredProviderLanguages))
+            preferenceRepository.setString(KEY_PROVIDER_LANG, json.encodeToString<List<String>>(defaultState.preferredProviderLanguages))
             preferenceRepository.setString(KEY_DOH_PROVIDER, defaultState.dohProvider.id.toString())
             preferenceRepository.setString(KEY_SUBTITLE_SETTINGS, json.encodeToString(defaultState.subtitleStyle))
             preferenceRepository.setString(KEY_APP_LOCALE, defaultState.appLanguage)
@@ -782,7 +725,7 @@ class AppSettingsViewModel(
             preferenceRepository.setBoolean(KEY_SYNC_WIFI_ONLY, defaultState.syncWifiOnly)
             preferenceRepository.setBoolean(KEY_SKIP_STARTUP_ACCOUNT_SELECT, defaultState.skipStartupAccountSelect)
             preferenceRepository.setBoolean(KEY_SHOW_SOURCES_ON_PLAY, defaultState.showSourcesOnPlay)
-            setState(defaultState.copy(activeAuthAccounts = AccountManager.accountsState.value))
+            setState(defaultState.copy(activeAuthAccounts = AccountManager.accountsState.value.toImmutableMap()))
         }
     }
 
@@ -791,7 +734,6 @@ class AppSettingsViewModel(
         return try {
             json.decodeFromString<List<String>>(value)
         } catch (_: Throwable) {
-            // Support comma-separated format or raw set format
             value.removePrefix("[").removeSuffix("]")
                 .split(",")
                 .map { it.trim().trim('"', '\'') }

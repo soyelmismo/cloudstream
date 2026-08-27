@@ -38,18 +38,18 @@ class OnboardingViewModelTest {
         assertEquals(OnboardingStep.WELCOME_LANGUAGE, viewModel.state.value.currentStep)
 
         // Forward steps
-        viewModel.handleEvent(OnboardingEvent.NextStep)
+        viewModel.nextStep()
         assertEquals(OnboardingStep.LAYOUT_THEME, viewModel.state.value.currentStep)
 
-        viewModel.handleEvent(OnboardingEvent.NextStep)
+        viewModel.nextStep()
         assertEquals(OnboardingStep.PLUGINS_REPOSITORIES, viewModel.state.value.currentStep)
 
         // Backward step
-        viewModel.handleEvent(OnboardingEvent.PreviousStep)
+        viewModel.previousStep()
         assertEquals(OnboardingStep.LAYOUT_THEME, viewModel.state.value.currentStep)
 
         // Direct navigation
-        viewModel.handleEvent(OnboardingEvent.GoToStep(OnboardingStep.PROFILE_SETUP))
+        viewModel.goToStep(OnboardingStep.PROFILE_SETUP)
         assertEquals(OnboardingStep.PROFILE_SETUP, viewModel.state.value.currentStep)
     }
 
@@ -66,26 +66,26 @@ class OnboardingViewModelTest {
         )
         advanceUntilIdle()
 
-        viewModel.handleEvent(OnboardingEvent.SelectLanguage("en"))
+        viewModel.selectLanguage("en")
         assertEquals("en", viewModel.state.value.selectedLanguage)
 
-        viewModel.handleEvent(OnboardingEvent.SelectLayoutMode("desktop"))
+        viewModel.selectLayoutMode("desktop")
         assertEquals("desktop", viewModel.state.value.selectedLayoutMode)
 
-        viewModel.handleEvent(OnboardingEvent.SelectTheme(AppTheme.AMOLED))
+        viewModel.selectTheme(AppTheme.AMOLED)
         assertEquals(AppTheme.AMOLED, viewModel.state.value.selectedTheme)
 
-        viewModel.handleEvent(OnboardingEvent.SelectDohProvider(DohProvider.ADGUARD))
+        viewModel.selectDohProvider(DohProvider.ADGUARD)
         assertEquals(DohProvider.ADGUARD, viewModel.state.value.selectedDohProvider)
 
         val firstRepoUrl = viewModel.state.value.starterRepositories.first().url
-        viewModel.handleEvent(OnboardingEvent.ToggleStarterRepo(firstRepoUrl))
+        viewModel.toggleStarterRepo(firstRepoUrl)
         assertFalse(viewModel.state.value.starterRepositories.first().isSelected)
 
-        viewModel.handleEvent(OnboardingEvent.SetProfileName("Cinema Room"))
+        viewModel.setProfileName("Cinema Room")
         assertEquals("Cinema Room", viewModel.state.value.profileName)
 
-        viewModel.handleEvent(OnboardingEvent.SetProfileAvatar(5))
+        viewModel.setProfileAvatar(5)
         assertEquals(5, viewModel.state.value.profileAvatarIndex)
     }
 
@@ -104,14 +104,14 @@ class OnboardingViewModelTest {
         )
         advanceUntilIdle()
 
-        viewModel.handleEvent(OnboardingEvent.SelectLanguage("es"))
-        viewModel.handleEvent(OnboardingEvent.SelectLayoutMode("mobile"))
-        viewModel.handleEvent(OnboardingEvent.SelectTheme(AppTheme.AMOLED))
-        viewModel.handleEvent(OnboardingEvent.SelectDohProvider(DohProvider.CLOUDFLARE))
-        viewModel.handleEvent(OnboardingEvent.SetProfileName("Rot Streamer"))
-        viewModel.handleEvent(OnboardingEvent.SetProfileAvatar(2))
+        viewModel.selectLanguage("es")
+        viewModel.selectLayoutMode("mobile")
+        viewModel.selectTheme(AppTheme.AMOLED)
+        viewModel.selectDohProvider(DohProvider.CLOUDFLARE)
+        viewModel.setProfileName("Rot Streamer")
+        viewModel.setProfileAvatar(2)
 
-        viewModel.handleEvent(OnboardingEvent.CompleteOnboarding)
+        viewModel.completeOnboarding()
         advanceUntilIdle()
 
         val state = viewModel.state.value
@@ -144,7 +144,7 @@ class OnboardingViewModelTest {
         )
         advanceUntilIdle()
 
-        viewModel.handleEvent(OnboardingEvent.SkipOnboarding)
+        viewModel.skipOnboarding()
         advanceUntilIdle()
 
         assertTrue(viewModel.state.value.hasCompleted)

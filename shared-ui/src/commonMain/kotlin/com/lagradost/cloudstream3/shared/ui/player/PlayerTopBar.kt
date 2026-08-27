@@ -38,21 +38,43 @@ import androidx.compose.ui.unit.sp
 import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.shared.ui.focus.dpadFocusable
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerActiveModal
+import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerEpisode
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerUiEvent
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerUiState
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
-/**
- * Top control bar for the video player overlay.
- *
- * Provides:
- * - Back button with wide touch target (min 48x48dp), hover feedback, and TV D-Pad focus.
- * - Content title and episode subtitle metadata with clear typography.
- * - Quick action buttons for Quality/Sources, Subtitles, Audio Tracks, Playback Speed, and Controls Lock.
- * - Safe drawing window insets adherence.
- */
+private fun resolvePlayerTopBarTitle(
+    currentEp: PlayerEpisode?,
+    currentUrl: String?,
+    episodePrefix: String,
+    playingDefault: String
+): String {
+    return currentEp?.name
+        ?: currentEp?.episodeNumber?.let { "$episodePrefix $it" }
+        ?: currentUrl?.substringAfterLast("/")?.substringBefore("?")
+        ?: playingDefault
+}
+
+private fun resolvePlayerTopBarSubtitle(
+    currentEp: PlayerEpisode?,
+    seasonShort: String,
+    episodeShort: String
+): String {
+    if (currentEp == null) return ""
+    return buildString {
+        if (currentEp.seasonNumber != null && currentEp.seasonNumber > 0) {
+            append("$seasonShort${currentEp.seasonNumber} ")
+        }
+        if (currentEp.episodeNumber != null) {
+            append("$episodeShort${currentEp.episodeNumber}")
+        }
+    }
+}
+
 @Composable
 fun PlayerTopBar(
     state: PlayerUiState,
@@ -60,23 +82,13 @@ fun PlayerTopBar(
     onBackClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val currentEp = state.currentEpisode
     val episodePrefix = stringResource(Res.string.episode)
-    val title = currentEp?.name
-        ?: currentEp?.episodeNumber?.let { "$episodePrefix $it" }
-        ?: state.currentUrl?.substringAfterLast("/")?.substringBefore("?")
-        ?: stringResource(Res.string.playing)
-
+    val playingDefault = stringResource(Res.string.playing)
     val seasonShort = stringResource(Res.string.season_short)
     val episodeShort = stringResource(Res.string.episode_short)
-    val subtitleInfo = buildString {
-        if (currentEp?.seasonNumber != null && currentEp.seasonNumber > 0) {
-            append("$seasonShort${currentEp.seasonNumber} ")
-        }
-        if (currentEp?.episodeNumber != null) {
-            append("$episodeShort${currentEp.episodeNumber}")
-        }
-    }
+
+    val title = resolvePlayerTopBarTitle(state.currentEpisode, state.currentUrl, episodePrefix, playingDefault)
+    val subtitle = resolvePlayerTopBarSubtitle(state.currentEpisode, seasonShort, episodeShort)
 
     Row(
         modifier = modifier
@@ -86,166 +98,225 @@ fun PlayerTopBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        // Left Section: Back Button & Media Details
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.weight(1f, fill = false)
         ) {
-            // Back Navigation Button (min 48x48dp touch target)
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .background(Color.Black.copy(alpha = 0.50f), CircleShape)
-                    .dpadFocusable(
-                        onClick = onBackClick,
-                        shape = CircleShape,
-                        scaleOnFocus = 1.12f
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(Res.string.action_back),
-                    tint = CloudStreamColors.OnMediaScrim,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-
-            // Title & Episode Subtitle
-            Column(
-                modifier = Modifier.padding(start = 2.dp),
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.subtitle1.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = CloudStreamColors.OnMediaScrim,
-                        fontSize = 16.sp
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                if (subtitleInfo.isNotBlank()) {
-                    Text(
-                        text = subtitleInfo,
-                        style = MaterialTheme.typography.caption.copy(
-                            fontWeight = FontWeight.Medium,
-                            color = CloudStreamColors.TextSecondary,
-                            fontSize = 12.sp
-                        ),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
+            PlayerTopBarBackButton(onClick = onBackClick)
+            PlayerTopBarTitleInfo(title = title, subtitle = subtitle)
         }
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        // Right Section: Quick Action Buttons
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // 1. Sources / Quality Selector Button
-            val autoLabel = stringResource(Res.string.quality_auto)
-            val qualityText = state.selectedQuality?.let {
-                if (it.quality > 0) "${it.quality}p" else autoLabel
-            } ?: stringResource(Res.string.quality)
+        PlayerTopBarQuickActions(state = state, onEvent = onEvent)
+    }
+}
 
-            PlayerTopBarActionButton(
-                iconPainter = painterResource(Res.drawable.ic_baseline_hd_24),
-                label = qualityText,
-                contentDescription = stringResource(Res.string.quality),
-                onClick = { onEvent(PlayerUiEvent.SetActiveModal(PlayerActiveModal.QUALITY_SOURCES)) }
+@Composable
+private fun PlayerTopBarBackButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .size(48.dp)
+            .background(Color.Black.copy(alpha = 0.50f), CircleShape)
+            .dpadFocusable(
+                onClick = onClick,
+                shape = CircleShape,
+                scaleOnFocus = 1.12f
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = stringResource(Res.string.action_back),
+            tint = CloudStreamColors.OnMediaScrim,
+            modifier = Modifier.size(24.dp)
+        )
+    }
+}
+
+@Composable
+private fun PlayerTopBarTitleInfo(
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.padding(start = 2.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.subtitle1.copy(
+                fontWeight = FontWeight.Bold,
+                color = CloudStreamColors.OnMediaScrim,
+                fontSize = 16.sp
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        if (subtitle.isNotBlank()) {
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.caption.copy(
+                    fontWeight = FontWeight.Medium,
+                    color = CloudStreamColors.TextSecondary,
+                    fontSize = 12.sp
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
-
-            // 2. Subtitles Selector Button
-            val hasActiveSubtitle = state.selectedSubtitle != null
-            val subLabel = state.selectedSubtitle?.languageCode?.uppercase() ?: stringResource(Res.string.subtitles)
-
-            PlayerTopBarActionButton(
-                iconPainter = painterResource(Res.drawable.ic_outline_subtitles_24),
-                label = subLabel,
-                contentDescription = stringResource(Res.string.subtitles),
-                isHighlighted = hasActiveSubtitle,
-                highlightColor = CloudStreamColors.Secondary,
-                onClick = { onEvent(PlayerUiEvent.SetActiveModal(PlayerActiveModal.SUBTITLES)) }
-            )
-
-            // 3. Audio Tracks Button (if multiple or available)
-            if (state.availableAudioTracks.isNotEmpty()) {
-                val audioLabel = state.selectedAudioTrack?.languageCode?.uppercase()
-                    ?: stringResource(Res.string.audio_singular)
-
-                PlayerTopBarActionButton(
-                    iconPainter = painterResource(Res.drawable.ic_baseline_volume_up_24),
-                    label = audioLabel,
-                    contentDescription = stringResource(Res.string.audio_tracks_dialog_title),
-                    onClick = { onEvent(PlayerUiEvent.SetActiveModal(PlayerActiveModal.AUDIO_TRACKS)) }
-                )
-            }
-
-            // 4. Playback Speed Button
-            val isCustomSpeed = state.playbackSpeed != 1.0f
-            val speedLabel = if (state.playbackSpeed == 1.0f) "1x" else "${state.playbackSpeed}x"
-
-            PlayerTopBarActionButton(
-                iconPainter = painterResource(Res.drawable.ic_baseline_speed_24),
-                label = speedLabel,
-                contentDescription = stringResource(Res.string.speed),
-                isHighlighted = isCustomSpeed,
-                highlightColor = CloudStreamColors.Primary,
-                onClick = { onEvent(PlayerUiEvent.SetActiveModal(PlayerActiveModal.SPEED)) }
-            )
-
-            // 5. Episodes List Button (if playlist available)
-            if (state.playlist.isNotEmpty()) {
-                PlayerTopBarActionButton(
-                    iconPainter = painterResource(Res.drawable.ic_baseline_playlist_play_24),
-                    label = stringResource(Res.string.episodes),
-                    contentDescription = stringResource(Res.string.episodes),
-                    onClick = { onEvent(PlayerUiEvent.SetActiveModal(PlayerActiveModal.EPISODES)) }
-                )
-            }
-
-            // 6. Aspect Ratio / Scaling Button
-            PlayerTopBarActionButton(
-                iconPainter = painterResource(Res.drawable.ic_baseline_aspect_ratio_24),
-                label = stringResource(Res.string.aspect_ratio),
-                contentDescription = stringResource(Res.string.aspect_ratio),
-                onClick = { onEvent(PlayerUiEvent.CycleResizeMode) }
-            )
-
-            // 7. Controls Lock Button (min 48x48dp touch target)
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .background(Color.Black.copy(alpha = 0.50f), CircleShape)
-                    .dpadFocusable(
-                        onClick = { onEvent(PlayerUiEvent.ToggleControlsLock(true)) },
-                        shape = CircleShape,
-                        scaleOnFocus = 1.12f
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    painter = painterResource(Res.drawable.video_locked),
-                    contentDescription = stringResource(Res.string.action_lock_controls),
-                    tint = CloudStreamColors.OnMediaScrim,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
         }
     }
 }
 
-/**
- * Standardized Top Bar action pill button with icon, label, hover and D-Pad focus indicators.
- */
+@Composable
+private fun PlayerTopBarQuickActions(
+    state: PlayerUiState,
+    onEvent: (PlayerUiEvent) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier
+    ) {
+        QualityActionButton(state = state, onEvent = onEvent)
+        SubtitlesActionButton(state = state, onEvent = onEvent)
+        AudioTracksActionButton(state = state, onEvent = onEvent)
+        SpeedActionButton(state = state, onEvent = onEvent)
+        EpisodesActionButton(state = state, onEvent = onEvent)
+        AspectRatioActionButton(onEvent = onEvent)
+        ControlsLockActionButton(onEvent = onEvent)
+    }
+}
+
+@Composable
+private fun QualityActionButton(
+    state: PlayerUiState,
+    onEvent: (PlayerUiEvent) -> Unit
+) {
+    val autoLabel = stringResource(Res.string.quality_auto)
+    val qualityText = state.selectedQuality?.let {
+        if (it.quality > 0) "${it.quality}p" else autoLabel
+    } ?: stringResource(Res.string.quality)
+
+    PlayerTopBarActionButton(
+        iconPainter = painterResource(Res.drawable.ic_baseline_hd_24),
+        label = qualityText,
+        contentDescription = stringResource(Res.string.quality),
+        onClick = { onEvent(PlayerUiEvent.SetActiveModal(PlayerActiveModal.QUALITY_SOURCES)) }
+    )
+}
+
+@Composable
+private fun SubtitlesActionButton(
+    state: PlayerUiState,
+    onEvent: (PlayerUiEvent) -> Unit
+) {
+    val hasActiveSubtitle = state.selectedSubtitle != null
+    val subLabel = state.selectedSubtitle?.languageCode?.uppercase() ?: stringResource(Res.string.subtitles)
+
+    PlayerTopBarActionButton(
+        iconPainter = painterResource(Res.drawable.ic_outline_subtitles_24),
+        label = subLabel,
+        contentDescription = stringResource(Res.string.subtitles),
+        isHighlighted = hasActiveSubtitle,
+        highlightColor = CloudStreamColors.Secondary,
+        onClick = { onEvent(PlayerUiEvent.SetActiveModal(PlayerActiveModal.SUBTITLES)) }
+    )
+}
+
+@Composable
+private fun AudioTracksActionButton(
+    state: PlayerUiState,
+    onEvent: (PlayerUiEvent) -> Unit
+) {
+    if (state.availableAudioTracks.isEmpty()) return
+    val audioLabel = state.selectedAudioTrack?.languageCode?.uppercase()
+        ?: stringResource(Res.string.audio_singular)
+
+    PlayerTopBarActionButton(
+        iconPainter = painterResource(Res.drawable.ic_baseline_volume_up_24),
+        label = audioLabel,
+        contentDescription = stringResource(Res.string.audio_tracks_dialog_title),
+        onClick = { onEvent(PlayerUiEvent.SetActiveModal(PlayerActiveModal.AUDIO_TRACKS)) }
+    )
+}
+
+@Composable
+private fun SpeedActionButton(
+    state: PlayerUiState,
+    onEvent: (PlayerUiEvent) -> Unit
+) {
+    val isCustomSpeed = state.playbackSpeed != 1.0f
+    val speedLabel = if (state.playbackSpeed == 1.0f) "1x" else "${state.playbackSpeed}x"
+
+    PlayerTopBarActionButton(
+        iconPainter = painterResource(Res.drawable.ic_baseline_speed_24),
+        label = speedLabel,
+        contentDescription = stringResource(Res.string.speed),
+        isHighlighted = isCustomSpeed,
+        highlightColor = CloudStreamColors.Primary,
+        onClick = { onEvent(PlayerUiEvent.SetActiveModal(PlayerActiveModal.SPEED)) }
+    )
+}
+
+@Composable
+private fun EpisodesActionButton(
+    state: PlayerUiState,
+    onEvent: (PlayerUiEvent) -> Unit
+) {
+    if (state.playlist.isEmpty()) return
+
+    PlayerTopBarActionButton(
+        iconPainter = painterResource(Res.drawable.ic_baseline_playlist_play_24),
+        label = stringResource(Res.string.episodes),
+        contentDescription = stringResource(Res.string.episodes),
+        onClick = { onEvent(PlayerUiEvent.SetActiveModal(PlayerActiveModal.EPISODES)) }
+    )
+}
+
+@Composable
+private fun AspectRatioActionButton(
+    onEvent: (PlayerUiEvent) -> Unit
+) {
+    PlayerTopBarActionButton(
+        iconPainter = painterResource(Res.drawable.ic_baseline_aspect_ratio_24),
+        label = stringResource(Res.string.aspect_ratio),
+        contentDescription = stringResource(Res.string.aspect_ratio),
+        onClick = { onEvent(PlayerUiEvent.CycleResizeMode) }
+    )
+}
+
+@Composable
+private fun ControlsLockActionButton(
+    onEvent: (PlayerUiEvent) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .background(Color.Black.copy(alpha = 0.50f), CircleShape)
+            .dpadFocusable(
+                onClick = { onEvent(PlayerUiEvent.ToggleControlsLock(true)) },
+                shape = CircleShape,
+                scaleOnFocus = 1.12f
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            painter = painterResource(Res.drawable.video_locked),
+            contentDescription = stringResource(Res.string.action_lock_controls),
+            tint = CloudStreamColors.OnMediaScrim,
+            modifier = Modifier.size(22.dp)
+        )
+    }
+}
+
 @Composable
 private fun PlayerTopBarActionButton(
     iconPainter: Painter,
@@ -295,5 +366,17 @@ private fun PlayerTopBarActionButton(
                 )
             )
         }
+    }
+}
+
+@Preview
+@Composable
+private fun PlayerTopBarPreview() {
+    CloudStreamTheme {
+        PlayerTopBar(
+            state = PlayerUiState(),
+            onEvent = {},
+            onBackClick = {}
+        )
     }
 }

@@ -1,5 +1,6 @@
 package com.lagradost.cloudstream3
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.PictureInPictureParams
@@ -7,13 +8,9 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.content.res.Resources
-import android.Manifest
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.util.DisplayMetrics
 import android.util.Log
-import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.View.NO_ID
@@ -23,38 +20,34 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.MainThread
 import androidx.annotation.StringRes
-import cloudstream.shared_ui.generated.resources.*
-import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SearchView
 import androidx.core.content.ContextCompat
 import androidx.core.view.children
 import androidx.core.view.isNotEmpty
+import cloudstream.shared_ui.generated.resources.*
 import com.google.android.gms.cast.framework.CastSession
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigationrail.NavigationRailView
-import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager
-import com.lagradost.cloudstream3.actions.OpenInAppAction
-import com.lagradost.cloudstream3.actions.VideoClickActionHolder
 import com.lagradost.cloudstream3.mvvm.logError
+import com.lagradost.cloudstream3.plugins.PluginManager
+import com.lagradost.cloudstream3.plugins.VotingApi
+import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager
+import com.lagradost.cloudstream3.shared.player.native.PlayerPipHelper.isPIPPossible
+import com.lagradost.cloudstream3.shared.player.native.Torrent
 import com.lagradost.cloudstream3.shared.syncproviders.AccountManager
 import com.lagradost.cloudstream3.shared.syncproviders.AuthRepo
 import com.lagradost.cloudstream3.shared.syncproviders.SyncConfig
-import com.lagradost.cloudstream3.shared.player.native.PlayerPipHelper.isPIPPossible
-import com.lagradost.cloudstream3.shared.player.native.Torrent
 import com.lagradost.cloudstream3.utils.AppContextUtils
-import com.lagradost.cloudstream3.utils.Globals.isLayout
-import com.lagradost.cloudstream3.utils.UiText
-import com.lagradost.cloudstream3.utils.asString
-import com.lagradost.cloudstream3.utils.asStringNull
-import com.lagradost.cloudstream3.utils.Globals.TV
-import com.lagradost.cloudstream3.utils.Globals.updateTv
-import com.lagradost.cloudstream3.plugins.PluginManager
-import com.lagradost.cloudstream3.plugins.VotingApi
 import com.lagradost.cloudstream3.utils.AppContextUtils.isRtl
 import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.Event
+import com.lagradost.cloudstream3.utils.Globals.TV
+import com.lagradost.cloudstream3.utils.Globals.isLayout
+import com.lagradost.cloudstream3.utils.Globals.updateTv
 import com.lagradost.cloudstream3.utils.UIHelper.showInputMethod
-import com.lagradost.cloudstream3.utils.UIHelper.toPx
+import com.lagradost.cloudstream3.utils.UiText
+import com.lagradost.cloudstream3.utils.asString
+import com.lagradost.cloudstream3.utils.asStringNull
 import com.lagradost.cloudstream3.utils.txt
 import java.lang.ref.WeakReference
 import java.util.Locale
@@ -244,21 +237,10 @@ object CommonActivity {
         AccountManager.initMainAPI()
         NewPipe.init(DownloaderTestImpl.getInstance())
 
-        MainActivity.activityResultLauncher =
-            componentActivity.registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-                if (result.resultCode == AppCompatActivity.RESULT_OK) {
-                    val actionUid =
-                        AppPreferenceManager.getStringSync("last_click_action") ?: return@registerForActivityResult
-                    Log.d(TAG, "Loading action $actionUid result handler")
-                    val action = VideoClickActionHolder.getByUniqueId(actionUid) as? OpenInAppAction
-                        ?: return@registerForActivityResult
-                    action.onResultSafe(act, result.data)
-                    AppPreferenceManager.deletePreferenceSync("last_click_action")
-                    AppPreferenceManager.deletePreferenceSync("last_opened")
-                }
-            }
+        requestNotificationPermissionIfRequired(componentActivity)
+    }
 
-        // Ask for notification permissions on Android 13
+    private fun requestNotificationPermissionIfRequired(componentActivity: ComponentActivity) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(
                 componentActivity,
@@ -276,7 +258,6 @@ object CommonActivity {
         }
     }
 
-    /** Enters pip mode if it is both possible and desired to do so*/
     private fun Activity.enterPIPMode() {
         if (!isPipDesired || !this.isPIPPossible()) return
 
@@ -285,15 +266,12 @@ object CommonActivity {
                 try {
                     enterPictureInPictureMode(PictureInPictureParams.Builder().build())
                 } catch (_: Exception) {
-                    // Use fallback just in case
                     @Suppress("DEPRECATION")
                     enterPictureInPictureMode()
                 }
-            } else {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    @Suppress("DEPRECATION")
-                    enterPictureInPictureMode()
-                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                @Suppress("DEPRECATION")
+                enterPictureInPictureMode()
             }
         } catch (e: Exception) {
             logError(e)
@@ -301,7 +279,6 @@ object CommonActivity {
     }
 
     fun onUserLeaveHint(act: Activity) {
-        // On Android 12 and later we use setAutoEnterEnabled() instead.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return
         act.enterPIPMode()
     }
@@ -319,62 +296,66 @@ object CommonActivity {
             val currentNightMode =
                 act.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
             return when (currentNightMode) {
-                Configuration.UI_MODE_NIGHT_NO -> R.style.LightMode // Night mode is not active, we're using the light theme
-                else -> R.style.AppTheme // Night mode is active, we're using dark theme
+                Configuration.UI_MODE_NIGHT_NO -> R.style.LightMode
+                else -> R.style.AppTheme
             }
         } else {
             return R.style.AppTheme
         }
     }
 
+    private fun resolveThemeRes(themeName: String?, act: Activity): Int {
+        return when (themeName) {
+            "System" -> mapSystemTheme(act)
+            "Black" -> R.style.AppTheme
+            "Light" -> R.style.LightMode
+            "Amoled" -> R.style.AmoledMode
+            "AmoledLight" -> R.style.AmoledModeLight
+            "Monet" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) R.style.MonetMode else R.style.AppTheme
+            "Dracula" -> R.style.DraculaMode
+            "Lavender" -> R.style.LavenderMode
+            "SilentBlue" -> R.style.SilentBlueMode
+            else -> R.style.AppTheme
+        }
+    }
+
+    private val overlayThemes = mapOf(
+        "Normal" to R.style.OverlayPrimaryColorNormal,
+        "DandelionYellow" to R.style.OverlayPrimaryColorDandelionYellow,
+        "CarnationPink" to R.style.OverlayPrimaryColorCarnationPink,
+        "Orange" to R.style.OverlayPrimaryColorOrange,
+        "DarkGreen" to R.style.OverlayPrimaryColorDarkGreen,
+        "Maroon" to R.style.OverlayPrimaryColorMaroon,
+        "NavyBlue" to R.style.OverlayPrimaryColorNavyBlue,
+        "Grey" to R.style.OverlayPrimaryColorGrey,
+        "White" to R.style.OverlayPrimaryColorWhite,
+        "CoolBlue" to R.style.OverlayPrimaryColorCoolBlue,
+        "Brown" to R.style.OverlayPrimaryColorBrown,
+        "Purple" to R.style.OverlayPrimaryColorPurple,
+        "Green" to R.style.OverlayPrimaryColorGreen,
+        "GreenApple" to R.style.OverlayPrimaryColorGreenApple,
+        "Red" to R.style.OverlayPrimaryColorRed,
+        "Banana" to R.style.OverlayPrimaryColorBanana,
+        "Party" to R.style.OverlayPrimaryColorParty,
+        "Pink" to R.style.OverlayPrimaryColorPink,
+        "Lavender" to R.style.OverlayPrimaryColorLavender,
+    )
+
+    private fun resolveOverlayThemeRes(colorName: String?): Int {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (colorName == "Monet") return R.style.OverlayPrimaryColorMonet
+            if (colorName == "Monet2") return R.style.OverlayPrimaryColorMonetTwo
+        }
+        return overlayThemes[colorName] ?: R.style.OverlayPrimaryColorNormal
+    }
+
     fun loadThemes(act: Activity?) {
         if (act == null) return
-        val currentTheme =
-            when (AppPreferenceManager.getStringSync(AppPreferenceManager.KEY_APP_THEME, "AmoledLight")) {
-                "System" -> mapSystemTheme(act)
-                "Black" -> R.style.AppTheme
-                "Light" -> R.style.LightMode
-                "Amoled" -> R.style.AmoledMode
-                "AmoledLight" -> R.style.AmoledModeLight
-                "Monet" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                    R.style.MonetMode else R.style.AppTheme
+        val themeKey = AppPreferenceManager.getStringSync(AppPreferenceManager.KEY_APP_THEME, "AmoledLight")
+        val colorKey = AppPreferenceManager.getStringSync("primary_color_key", "Normal")
 
-                "Dracula" -> R.style.DraculaMode
-                "Lavender" -> R.style.LavenderMode
-                "SilentBlue" -> R.style.SilentBlueMode
-
-                else -> R.style.AppTheme
-            }
-
-        val currentOverlayTheme =
-            when (AppPreferenceManager.getStringSync("primary_color_key", "Normal")) {
-                "Normal" -> R.style.OverlayPrimaryColorNormal
-                "DandelionYellow" -> R.style.OverlayPrimaryColorDandelionYellow
-                "CarnationPink" -> R.style.OverlayPrimaryColorCarnationPink
-                "Orange" -> R.style.OverlayPrimaryColorOrange
-                "DarkGreen" -> R.style.OverlayPrimaryColorDarkGreen
-                "Maroon" -> R.style.OverlayPrimaryColorMaroon
-                "NavyBlue" -> R.style.OverlayPrimaryColorNavyBlue
-                "Grey" -> R.style.OverlayPrimaryColorGrey
-                "White" -> R.style.OverlayPrimaryColorWhite
-                "CoolBlue" -> R.style.OverlayPrimaryColorCoolBlue
-                "Brown" -> R.style.OverlayPrimaryColorBrown
-                "Purple" -> R.style.OverlayPrimaryColorPurple
-                "Green" -> R.style.OverlayPrimaryColorGreen
-                "GreenApple" -> R.style.OverlayPrimaryColorGreenApple
-                "Red" -> R.style.OverlayPrimaryColorRed
-                "Banana" -> R.style.OverlayPrimaryColorBanana
-                "Party" -> R.style.OverlayPrimaryColorParty
-                "Pink" -> R.style.OverlayPrimaryColorPink
-                "Lavender" -> R.style.OverlayPrimaryColorLavender
-                "Monet" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                    R.style.OverlayPrimaryColorMonet else R.style.OverlayPrimaryColorNormal
-
-                "Monet2" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                    R.style.OverlayPrimaryColorMonetTwo else R.style.OverlayPrimaryColorNormal
-
-                else -> R.style.OverlayPrimaryColorNormal
-            }
+        val currentTheme = resolveThemeRes(themeKey, act)
+        val currentOverlayTheme = resolveOverlayThemeRes(colorKey)
 
         act.theme.applyStyle(currentTheme, true)
         act.theme.applyStyle(currentOverlayTheme, true)
@@ -382,33 +363,18 @@ object CommonActivity {
         appliedColor = currentOverlayTheme
         act.updateTv()
         if (isLayout(TV)) act.theme.applyStyle(R.style.AppThemeTvOverlay, true)
-        act.theme.applyStyle(
-            R.style.LoadedStyle,
-            true
-        ) // THEME IS SET BEFORE VIEW IS CREATED TO APPLY THE THEME TO THE MAIN VIEW
+        act.theme.applyStyle(R.style.LoadedStyle, true)
     }
 
-    /** because we want closes find, aka when multiple have the same id, we go to parent
-    until the correct one is found */
     private fun localLook(from: View, id: Int): View? {
         if (id == NO_ID) return null
         var currentLook: View = from
-        // limit to 15 look depth
         for (i in 0..15) {
             currentLook.findViewById<View?>(id)?.let { return it }
             currentLook = (currentLook.parent as? View) ?: break
         }
         return null
     }
-    /*var currentLook: View = view
-    while (true) {
-        val tmpNext = currentLook.findViewById<View?>(nextId)
-        if (tmpNext != null) {
-            next = tmpNext
-            break
-        }
-        currentLook = currentLook.parent as? View ?: break
-    }*/
 
     private fun View.hasContent(): Boolean {
         return isShown && when (this) {
@@ -417,7 +383,29 @@ object CommonActivity {
         }
     }
 
-    /** skips the initial stage of searching for an id using the view, see getNextFocus for specification */
+    private fun findRootViewById(root: Any?, id: Int): View? {
+        return when (root) {
+            is Activity -> root.findViewById(id)
+            is View -> root.rootView.findViewById(id)
+            else -> null
+        }
+    }
+
+    private fun View.canAcceptFocus(hasContent: Boolean): Boolean {
+        if (isFocusable) return true
+        if (!hasContent) return true
+        val viewGroup = this as? ViewGroup ?: return false
+        return viewGroup.descendantFocusability == ViewGroup.FOCUS_AFTER_DESCENDANTS && viewGroup.isNotEmpty()
+    }
+
+    private fun resolveCompositeChildFocus(view: View): View? {
+        return when (view) {
+            is ChipGroup -> view.children.firstOrNull { it.isFocusable && it.isShown }
+            is NavigationRailView -> view.findViewById(view.selectedItemId)
+            else -> null
+        }
+    }
+
     fun continueGetNextFocus(
         root: Any?,
         view: View,
@@ -427,169 +415,95 @@ object CommonActivity {
     ): View? {
         if (nextId == NO_ID) return null
 
-        // do an initial search for the view, in case the localLook is too deep we can use this as
-        // an early break and backup view
-        var next =
-            when (root) {
-                is Activity -> root.findViewById(nextId)
-                is View -> root.rootView.findViewById<View?>(nextId)
-                else -> null
-            } ?: return null
+        val candidate = findRootViewById(root, nextId) ?: return null
+        val targetView = localLook(view, nextId) ?: candidate
+        val hasContent = targetView.hasContent()
 
-        next = localLook(view, nextId) ?: next
-        val shown = next.hasContent()
+        if (!targetView.canAcceptFocus(hasContent)) return null
 
-        // if cant focus but visible then break and let android decide
-        // the exception if is the view is a parent and has children that wants focus
-        val hasChildrenThatWantsFocus = (next as? ViewGroup)?.let { parent ->
-            parent.descendantFocusability == ViewGroup.FOCUS_AFTER_DESCENDANTS && parent.isNotEmpty()
-        } ?: false
-        if (!next.isFocusable && shown && !hasChildrenThatWantsFocus) return null
-
-        // if not shown then continue because we will "skip" over views to get to a replacement
-        if (!shown) {
-            // we don't want a while true loop, so we let android decide if we find a recursive view
-            if (next == view) return null
-            return getNextFocus(root, next, direction, depth + 1)
+        if (!hasContent) {
+            if (targetView == view) return null
+            return getNextFocus(root, targetView, direction, depth + 1)
         }
 
-        (when (next) {
-            is ChipGroup -> {
-                next.children.firstOrNull { it.isFocusable && it.isShown }
-            }
-
-            is NavigationRailView -> {
-                next.findViewById(next.selectedItemId)
-            }
-
-            else -> null
-        })?.let {
-            return it
-        }
-
-        // nothing wrong with the view found, return it
-        return next
+        return resolveCompositeChildFocus(targetView) ?: targetView
     }
 
-    /** recursively looks for a next focus up to a depth of 10,
-     * this is used to override the normal shit focus system
-     * because this application has a lot of invisible views that messes with some tv devices*/
+    private fun View.getHorizontalFocusId(isStart: Boolean): Int {
+        val shouldGoRight = if (isRtl()) isStart else !isStart
+        return if (shouldGoRight) nextFocusRightId else nextFocusLeftId
+    }
+
+    private fun View.getDirectionalNextFocusId(direction: FocusDirection): Int {
+        val id = when (direction) {
+            FocusDirection.Start -> getHorizontalFocusId(isStart = true)
+            FocusDirection.End -> getHorizontalFocusId(isStart = false)
+            FocusDirection.Up -> nextFocusUpId
+            FocusDirection.Down -> nextFocusDownId
+        }
+        return if (id != NO_ID) id else nextFocusForwardId
+    }
+
     fun getNextFocus(
         root: Any?,
         view: View?,
         direction: FocusDirection,
         depth: Int = 0
     ): View? {
-        // if input is invalid let android decide + depth test to not crash if loop is found
-        if (view == null || depth >= 10 || root == null) {
-            return null
-        }
+        if (view == null || root == null || depth >= 10) return null
 
-        var nextId = when (direction) {
-            FocusDirection.Start -> {
-                if (view.isRtl())
-                    view.nextFocusRightId
-                else
-                    view.nextFocusLeftId
-            }
+        val nextId = view.getDirectionalNextFocusId(direction)
+        if (nextId == NO_ID) return null
 
-            FocusDirection.Up -> {
-                view.nextFocusUpId
-            }
-
-            FocusDirection.End -> {
-                if (view.isRtl())
-                    view.nextFocusLeftId
-                else
-                    view.nextFocusRightId
-            }
-
-            FocusDirection.Down -> {
-                view.nextFocusDownId
-            }
-        }
-
-        if (nextId == NO_ID) {
-            // if not specified then use forward id
-            nextId = view.nextFocusForwardId
-            // if view is still not found to next focus then return and let android decide
-            if (nextId == NO_ID)
-                return null
-        }
         return continueGetNextFocus(root, view, direction, nextId, depth)
     }
-
 
     fun onKeyDown(act: Activity?, keyCode: Int, event: KeyEvent?): Boolean? {
         return null
     }
 
-    /** overrides focus and custom key events */
+    private fun keyCodeToFocusDirection(keyCode: Int): FocusDirection? {
+        return when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT -> FocusDirection.Start
+            KeyEvent.KEYCODE_DPAD_RIGHT -> FocusDirection.End
+            KeyEvent.KEYCODE_DPAD_UP -> FocusDirection.Up
+            KeyEvent.KEYCODE_DPAD_DOWN -> FocusDirection.Down
+            else -> null
+        }
+    }
+
+    private fun handleDpadNavigation(act: Activity, currentFocus: View, event: KeyEvent): Boolean {
+        val direction = keyCodeToFocusDirection(event.keyCode) ?: return false
+        val nextView = getNextFocus(act, currentFocus, direction) ?: return false
+        nextView.requestFocus()
+        keyEventListener?.invoke(Pair(event, true))
+        return true
+    }
+
+    @SuppressLint("RestrictedApi")
+    private fun handleSearchInputTrigger(currentFocus: View?, keyCode: Int) {
+        val isConfirmKey = keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER
+        if (!isConfirmKey) return
+        val isSearchField = currentFocus is SearchView || currentFocus is SearchView.SearchAutoComplete
+        if (isSearchField) {
+            showInputMethod(currentFocus.findFocus())
+        }
+    }
+
+    private fun tryHandleKeyDown(act: Activity, currentFocus: View, event: KeyEvent): Boolean {
+        if (handleDpadNavigation(act, currentFocus, event)) return true
+        handleSearchInputTrigger(currentFocus, event.keyCode)
+        return false
+    }
+
     fun dispatchKeyEvent(act: Activity?, event: KeyEvent?): Boolean? {
-        if (act == null) return null
+        if (act == null || event == null) return null
+
         val currentFocus = act.currentFocus
-
-        event?.keyCode?.let { keyCode ->
-            if (currentFocus == null || event.action != KeyEvent.ACTION_DOWN) return@let
-            val nextView = when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_LEFT -> getNextFocus(
-                    act,
-                    currentFocus,
-                    FocusDirection.Start
-                )
-
-                KeyEvent.KEYCODE_DPAD_RIGHT -> getNextFocus(
-                    act,
-                    currentFocus,
-                    FocusDirection.End
-                )
-
-                KeyEvent.KEYCODE_DPAD_UP -> getNextFocus(
-                    act,
-                    currentFocus,
-                    FocusDirection.Up
-                )
-
-                KeyEvent.KEYCODE_DPAD_DOWN -> getNextFocus(
-                    act,
-                    currentFocus,
-                    FocusDirection.Down
-                )
-
-                else -> null
-            }
-
-            // println("NEXT FOCUS : $nextView")
-            if (nextView != null) {
-                nextView.requestFocus()
-                keyEventListener?.invoke(Pair(event, true))
-                return true
-            }
-
-            // TODO: Figure out why removing the check for SearchAutoComplete seems
-            // to break focus on TV as it shouldn't need to be used.
-            // Also handle KEYCODE_ENTER here because some remotes (e.g. LG Magic Remote)
-            // send KEYCODE_ENTER instead of KEYCODE_DPAD_CENTER when clicking the OK button.
-            @SuppressLint("RestrictedApi")
-            if ((keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) &&
-                (act.currentFocus is SearchView || act.currentFocus is SearchView.SearchAutoComplete)
-            ) {
-                showInputMethod(act.currentFocus?.findFocus())
-            }
-
-            //println("Keycode: $keyCode")
-            //showToast(
-            //    this,
-            //    "Got Keycode $keyCode | ${KeyEvent.keyCodeToString(keyCode)} \n ${event?.action}",
-            //    Toast.LENGTH_LONG
-            //)
+        if (event.action == KeyEvent.ACTION_DOWN && currentFocus != null) {
+            if (tryHandleKeyDown(act, currentFocus, event)) return true
         }
 
-        // if someone else want to override the focus then don't handle the event as it is already
-        // consumed. used in video player
-        if (keyEventListener?.invoke(Pair(event, false)) == true) {
-            return true
-        }
-        return null
+        return if (keyEventListener?.invoke(Pair(event, false)) == true) true else null
     }
 }

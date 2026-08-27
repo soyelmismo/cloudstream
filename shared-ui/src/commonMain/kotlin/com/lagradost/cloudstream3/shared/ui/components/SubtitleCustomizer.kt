@@ -1,5 +1,6 @@
 package com.lagradost.cloudstream3.shared.ui.components
 
+import org.jetbrains.compose.resources.StringResource
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -59,9 +60,13 @@ import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.SectionHeader
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.SecondaryButton
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import com.lagradost.cloudstream3.shared.viewmodels.settings.SubtitleEdgeType
 import com.lagradost.cloudstream3.shared.viewmodels.settings.SubtitleStyle
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 /**
  * Converts a raw-ARGB `Long` (e.g. `0xFFFFFFFFL`, matching `SubtitleStyle` defaults)
@@ -92,10 +97,8 @@ fun SubtitleCustomizer(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Real-Time Live Preview Scene
         SubtitleLivePreviewBox(style = style)
 
-        // Subtitle Text Appearance Group
         SettingsCard {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -117,7 +120,6 @@ fun SubtitleCustomizer(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Font Size Slider
             SettingsSliderItem(
                 title = stringResource(Res.string.fontSize),
                 value = style.fontSize,
@@ -128,7 +130,6 @@ fun SubtitleCustomizer(
 
             Divider(color = CloudStreamColors.Divider, modifier = Modifier.padding(vertical = 8.dp))
 
-            // Text Color Swatches
             ColorPickerRow(
                 title = stringResource(Res.string.textColor),
                 selectedColor = colorFromArgbLong(style.textColor),
@@ -140,7 +141,6 @@ fun SubtitleCustomizer(
 
             Divider(color = CloudStreamColors.Divider, modifier = Modifier.padding(vertical = 8.dp))
 
-            // Typography Toggles (Bold, Italic, Uppercase)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -170,7 +170,6 @@ fun SubtitleCustomizer(
             }
         }
 
-        // Subtitle Border, Shadows & Background Group
         SettingsCard {
             SectionHeader(
                 title = stringResource(Res.string.edgeEffect),
@@ -179,7 +178,6 @@ fun SubtitleCustomizer(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Edge / Border Type
             Text(
                 text = stringResource(Res.string.edgeEffect),
                 style = MaterialTheme.typography.body1.copy(fontWeight = FontWeight.Medium),
@@ -194,7 +192,6 @@ fun SubtitleCustomizer(
 
             Divider(color = CloudStreamColors.Divider, modifier = Modifier.padding(vertical = 8.dp))
 
-            // Subtitle Text Outline Width Slider (0dp to 4dp, default 1dp)
             SettingsSliderItem(
                 title = stringResource(Res.string.subs_outline_width),
                 value = style.outlineWidth,
@@ -206,7 +203,6 @@ fun SubtitleCustomizer(
 
             Divider(color = CloudStreamColors.Divider, modifier = Modifier.padding(vertical = 8.dp))
 
-            // Edge Color Swatches
             ColorPickerRow(
                 title = stringResource(Res.string.edgeColor),
                 selectedColor = colorFromArgbLong(style.edgeColor),
@@ -218,7 +214,6 @@ fun SubtitleCustomizer(
 
             Divider(color = CloudStreamColors.Divider, modifier = Modifier.padding(vertical = 8.dp))
 
-            // Background Box Color
             ColorPickerRow(
                 title = stringResource(Res.string.backgroundColor),
                 selectedColor = colorFromArgbLong(style.backgroundColor),
@@ -231,7 +226,6 @@ fun SubtitleCustomizer(
 
             Divider(color = CloudStreamColors.Divider, modifier = Modifier.padding(vertical = 8.dp))
 
-            // Subtitle Background Opacity / Alpha Slider (0% to 100%)
             SettingsSliderItem(
                 title = stringResource(Res.string.subs_background_opacity),
                 value = style.backgroundOpacity,
@@ -243,7 +237,6 @@ fun SubtitleCustomizer(
 
             Divider(color = CloudStreamColors.Divider, modifier = Modifier.padding(vertical = 8.dp))
 
-            // Subtitle Elevation Slider
             SettingsSliderItem(
                 title = stringResource(Res.string.subs_bottom_margin_elevation),
                 value = style.elevation.toFloat(),
@@ -253,7 +246,6 @@ fun SubtitleCustomizer(
             )
         }
 
-        // Caption Processing & Auto Features
         SettingsCard {
             SectionHeader(
                 title = stringResource(Res.string.subs_behavior_cleaners_title)
@@ -298,9 +290,6 @@ fun SubtitleCustomizer(
     }
 }
 
-/**
- * Visual Mock Video Player box displaying live subtitle preview.
- */
 @Composable
 fun SubtitleLivePreviewBox(
     style: SubtitleStyle,
@@ -328,13 +317,11 @@ fun SubtitleLivePreviewBox(
                     )
                 )
         ) {
-            // Video Scene Mock Elements
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(12.dp)
             ) {
-                // Top Info Tag
                 Surface(
                     shape = RoundedCornerShape(4.dp),
                     color = CloudStreamColors.Background.copy(alpha = 0.6f),
@@ -351,7 +338,6 @@ fun SubtitleLivePreviewBox(
                     )
                 }
 
-                // Subtitle Line rendered in real-time
                 val rawText = stringResource(Res.string.subtitlePreviewText)
                 val displayText = if (style.uppercase) rawText.uppercase() else rawText
 
@@ -365,37 +351,12 @@ fun SubtitleLivePreviewBox(
                     rawBgColor.alpha
                 }
                 val bgColor = if (rawBgColor.alpha == 0f && style.backgroundOpacity > 0f) {
-                    Color.Black.copy(alpha = bgAlpha)
+                    CloudStreamColors.Background.copy(alpha = bgAlpha)
                 } else {
                     rawBgColor.copy(alpha = bgAlpha)
                 }
 
-                val outlineWidthPx = style.outlineWidth.coerceAtLeast(0f)
-                val textShadow = when (style.edgeType) {
-                    SubtitleEdgeType.NONE -> null
-                    SubtitleEdgeType.DROP_SHADOW -> Shadow(
-                        color = edgeColor,
-                        offset = Offset(3f * outlineWidthPx.coerceAtLeast(0.5f), 3f * outlineWidthPx.coerceAtLeast(0.5f)),
-                        blurRadius = 4f * outlineWidthPx.coerceAtLeast(0.5f)
-                    )
-                    SubtitleEdgeType.OUTLINE -> if (outlineWidthPx > 0f) {
-                        Shadow(
-                            color = edgeColor,
-                            offset = Offset(0f, 0f),
-                            blurRadius = outlineWidthPx * 4f
-                        )
-                    } else null
-                    SubtitleEdgeType.RAISED -> Shadow(
-                        color = edgeColor,
-                        offset = Offset(-2f * outlineWidthPx.coerceAtLeast(0.5f), -2f * outlineWidthPx.coerceAtLeast(0.5f)),
-                        blurRadius = 2f * outlineWidthPx.coerceAtLeast(0.5f)
-                    )
-                    SubtitleEdgeType.DEPRESSED -> Shadow(
-                        color = edgeColor,
-                        offset = Offset(2f * outlineWidthPx.coerceAtLeast(0.5f), 2f * outlineWidthPx.coerceAtLeast(0.5f)),
-                        blurRadius = 2f * outlineWidthPx.coerceAtLeast(0.5f)
-                    )
-                }
+                val textShadow = computeSubtitleShadow(style.edgeType, edgeColor, style.outlineWidth)
 
                 Box(
                     modifier = Modifier
@@ -422,14 +383,11 @@ fun SubtitleLivePreviewBox(
     }
 }
 
-/**
- * Color picker row with circle swatches adhering to CloudStream colors.
- */
 @Composable
 fun ColorPickerRow(
     title: String,
     selectedColor: Color,
-    colors: List<Color>,
+    colors: ImmutableList<Color>,
     onColorSelected: (Color) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -477,16 +435,78 @@ fun ColorPickerRow(
                             modifier = Modifier.size(16.dp)
                         )
                     } else if (isSelected) {
+                        val checkTint = if (color.luminance() > 0.5f) {
+                            if (CloudStreamColors.Background.luminance() < 0.5f) CloudStreamColors.Background else CloudStreamColors.TextPrimary
+                        } else {
+                            CloudStreamColors.OnMediaScrim
+                        }
                         Icon(
                             imageVector = Icons.Default.Check,
                             contentDescription = stringResource(Res.string.selected),
-                            tint = if (color.luminance() > 0.5f) Color.Black else Color.White,
+                            tint = checkTint,
                             modifier = Modifier.size(16.dp)
                         )
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+fun ColorPickerRow(
+    title: String,
+    selectedColor: Color,
+    colors: List<Color>,
+    onColorSelected: (Color) -> Unit,
+    modifier: Modifier = Modifier
+) = ColorPickerRow(
+    title = title,
+    selectedColor = selectedColor,
+    colors = colors.toImmutableList(),
+    onColorSelected = onColorSelected,
+    modifier = modifier
+)
+
+private val EDGE_TYPE_LABELS: Map<SubtitleEdgeType, StringResource> = mapOf(
+    SubtitleEdgeType.NONE to Res.string.edgeNone,
+    SubtitleEdgeType.DROP_SHADOW to Res.string.edgeDropShadow,
+    SubtitleEdgeType.OUTLINE to Res.string.edgeOutline,
+    SubtitleEdgeType.RAISED to Res.string.edgeRaised,
+    SubtitleEdgeType.DEPRESSED to Res.string.edgeDepressed
+)
+
+private fun computeSubtitleShadow(
+    edgeType: SubtitleEdgeType,
+    edgeColor: Color,
+    outlineWidth: Float
+): Shadow? {
+    val outlineWidthPx = outlineWidth.coerceAtLeast(0f)
+    val factor = outlineWidthPx.coerceAtLeast(0.5f)
+    return when (edgeType) {
+        SubtitleEdgeType.NONE -> null
+        SubtitleEdgeType.DROP_SHADOW -> Shadow(
+            color = edgeColor,
+            offset = Offset(3f * factor, 3f * factor),
+            blurRadius = 4f * factor
+        )
+        SubtitleEdgeType.OUTLINE -> if (outlineWidthPx > 0f) {
+            Shadow(
+                color = edgeColor,
+                offset = Offset(0f, 0f),
+                blurRadius = outlineWidthPx * 4f
+            )
+        } else null
+        SubtitleEdgeType.RAISED -> Shadow(
+            color = edgeColor,
+            offset = Offset(-2f * factor, -2f * factor),
+            blurRadius = 2f * factor
+        )
+        SubtitleEdgeType.DEPRESSED -> Shadow(
+            color = edgeColor,
+            offset = Offset(2f * factor, 2f * factor),
+            blurRadius = 2f * factor
+        )
     }
 }
 
@@ -526,13 +546,8 @@ fun EdgeTypeSelector(
                         onTypeSelected(type)
                     }
             ) {
-                val label = when (type) {
-                    SubtitleEdgeType.NONE -> stringResource(Res.string.edgeNone)
-                    SubtitleEdgeType.DROP_SHADOW -> stringResource(Res.string.edgeDropShadow)
-                    SubtitleEdgeType.OUTLINE -> stringResource(Res.string.edgeOutline)
-                    SubtitleEdgeType.RAISED -> stringResource(Res.string.edgeRaised)
-                    SubtitleEdgeType.DEPRESSED -> stringResource(Res.string.edgeDepressed)
-                }
+                val labelRes = EDGE_TYPE_LABELS[type] ?: Res.string.edgeNone
+                val label = stringResource(labelRes)
                 Text(
                     text = label,
                     style = MaterialTheme.typography.body2.copy(
@@ -582,6 +597,30 @@ fun StyleToggleButton(
                     fontSize = 13.sp
                 ),
                 color = if (isActive) CloudStreamColors.Primary else CloudStreamColors.TextPrimary
+            )
+        }
+    }
+}
+
+@Preview
+@Composable
+private fun SubtitleCustomizerPreview() {
+    CloudStreamTheme {
+        SubtitleCustomizer(
+            style = SubtitleStyle(),
+            onStyleChanged = {}
+        )
+    }
+}
+
+@Preview
+@Composable
+private fun SubtitleCustomizerAmoledLightPreview() {
+    CloudStreamTheme(theme = com.lagradost.cloudstream3.shared.viewmodels.settings.AppTheme.AMOLED, isDarkMode = false) {
+        Box(modifier = Modifier.background(CloudStreamColors.Background).padding(16.dp)) {
+            SubtitleCustomizer(
+                style = SubtitleStyle(),
+                onStyleChanged = {}
             )
         }
     }

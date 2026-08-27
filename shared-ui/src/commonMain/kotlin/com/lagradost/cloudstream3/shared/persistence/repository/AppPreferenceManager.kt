@@ -2,14 +2,11 @@ package com.lagradost.cloudstream3.shared.persistence.repository
 
 import com.lagradost.cloudstream3.shared.persistence.dao.AppPreferenceDao
 import com.lagradost.cloudstream3.shared.persistence.driver.DatabaseDriverFactory
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.ImmutableSet
 
-/**
- * Centralized Single Source of Truth for application preferences in Kotlin Multiplatform.
- * Integrates with Room Multiplatform AppPreferenceDao and provides unified key constants
- * and typed suspending / synchronous getters and setters.
- */
 object AppPreferenceManager {
-    // Preference Keys
     const val KEY_APP_THEME = "app_theme_key"
     const val KEY_PRIMARY_COLOR = "primary_color_key"
     const val KEY_DARK_MODE = "dark_mode_key"
@@ -74,17 +71,13 @@ object AppPreferenceManager {
         _repository = repository
     }
 
-    // -------------------------------------------------------------------------
-    // Suspending API
-    // -------------------------------------------------------------------------
-
     suspend fun getInt(key: String, defaultValue: Int = 0): Int =
         currentRepository.getInt(key, defaultValue)
 
     suspend fun getBoolean(key: String, defaultValue: Boolean = false): Boolean =
         currentRepository.getBoolean(key, defaultValue)
 
-    suspend fun getStringSet(key: String, defaultValue: Set<String>? = null): Set<String>? =
+    suspend fun getStringSet(key: String, defaultValue: Set<String>? = null): ImmutableSet<String>? =
         currentRepository.getStringSet(key, defaultValue)
 
     suspend fun setInt(key: String, value: Int) =
@@ -96,10 +89,6 @@ object AppPreferenceManager {
     suspend fun setStringSet(key: String, value: Set<String>) =
         currentRepository.setStringSet(key, value)
 
-    // -------------------------------------------------------------------------
-    // Synchronous API
-    // -------------------------------------------------------------------------
-
     fun getStringSync(key: String, defaultValue: String? = null): String? =
         currentRepository.getStringSync(key, defaultValue)
 
@@ -109,7 +98,7 @@ object AppPreferenceManager {
     fun getBooleanSync(key: String, defaultValue: Boolean = false): Boolean =
         currentRepository.getBooleanSync(key, defaultValue)
 
-    fun getStringSetSync(key: String, defaultValue: Set<String>? = null): Set<String>? =
+    fun getStringSetSync(key: String, defaultValue: Set<String>? = null): ImmutableSet<String>? =
         currentRepository.getStringSetSync(key, defaultValue)
 
     fun setStringSync(key: String, value: String) =
@@ -130,9 +119,9 @@ object AppPreferenceManager {
     fun removeKeysSync(prefix: String): Int =
         currentRepository.removeKeysSync(prefix)
 
-    fun getKeysSync(prefix: String = ""): List<String> =
+    fun getKeysSync(prefix: String = ""): ImmutableList<String> =
         currentRepository.getKeysSync(prefix)
 
-    fun getAllSync(): Map<String, String> =
+    fun getAllSync(): ImmutableMap<String, String> =
         currentRepository.getAllSync()
 }

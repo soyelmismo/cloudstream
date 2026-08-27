@@ -73,6 +73,83 @@ class ApkInstaller(private val service: PackageInstallerService) {
         }
     }
 
+    private fun openNewSession(size: Long): Pair<Int, PackageInstaller.Session> {
+        val installParams =
+            PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            installParams.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+        }
+
+        val activeSession = packageInstaller.createSession(installParams)
+        installParams.setSize(size)
+        return Pair(activeSession, packageInstaller.openSession(activeSession))
+    }
+
+    private fun writeApkDataToSession(
+        session: PackageInstaller.Session,
+        packageName: String,
+        inputStream: InputStream,
+        size: Long,
+        installProgress: (bytesRead: Int) -> Unit
+    ) {
+        session.openWrite(packageName, 0, size).use { outputStream ->
+            val buffer = ByteArray(4 * 1024)
+            var bytesRead = inputStream.read(buffer)
+
+            while (bytesRead >= 0) {
+                outputStream.write(buffer, 0, bytesRead)
+                bytesRead = inputStream.read(buffer)
+                installProgress.invoke(bytesRead)
+            }
+
+            session.fsync(outputStream)
+            inputStream.close()
+        }
+    }
+
+    private fun buildIntentSender(activeSession: Int): IntentSender {
+        val installIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            Intent(service, PackageInstallerService::class.java).setAction(INSTALL_ACTION)
+        } else {
+            Intent(INSTALL_ACTION)
+        }
+
+        val installFlags = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> PendingIntent.FLAG_MUTABLE
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> PendingIntent.FLAG_IMMUTABLE
+            else -> 0
+        }
+
+        return PendingIntent.getBroadcast(
+            service, activeSession, installIntent, installFlags
+        ).intentSender
+    }
+
+    private fun dispatchInstallation(
+        context: Context,
+        session: PackageInstaller.Session,
+        intentSender: IntentSender,
+        installProgressStatus: (InstallProgressStatus) -> Unit
+    ) {
+        val canDelay = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                context.packageManager.canRequestPackageInstalls()
+
+        if (canDelay) {
+            delayedInstaller = DelayedInstaller(session, intentSender)
+            main {
+                Toast.makeText(
+                    context,
+                    txt(Res.string.delayed_update_notice).asString(context),
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        } else {
+            installProgressStatus.invoke(InstallProgressStatus.Installing)
+            session.commit(intentSender)
+        }
+    }
+
     fun installApk(
         context: Context,
         inputStream: InputStream,
@@ -84,72 +161,18 @@ class ApkInstaller(private val service: PackageInstallerService) {
         var activeSession: Int? = null
 
         try {
-            val installParams =
-                PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+            val (sessionId, session) = openNewSession(size)
+            activeSession = sessionId
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                installParams.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
-            }
-
-            activeSession = packageInstaller.createSession(installParams)
-            installParams.setSize(size)
-
-            val session = packageInstaller.openSession(activeSession)
             installProgressStatus.invoke(InstallProgressStatus.Downloading)
+            writeApkDataToSession(session, context.packageName, inputStream, size, installProgress)
 
-            session.openWrite(context.packageName, 0, size)
-                .use { outputStream ->
-                    val buffer = ByteArray(4 * 1024)
-                    var bytesRead = inputStream.read(buffer)
-
-                    while (bytesRead >= 0) {
-                        outputStream.write(buffer, 0, bytesRead)
-                        bytesRead = inputStream.read(buffer)
-                        installProgress.invoke(bytesRead)
-                    }
-
-                    session.fsync(outputStream)
-                    inputStream.close()
-                }
-
-            // We must create an explicit intent or it will fail on Android 15+
-            val installIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { 
-                Intent(service, PackageInstallerService::class.java)
-                    .setAction(INSTALL_ACTION) 
-            } else Intent(INSTALL_ACTION) 
-
-            val installFlags = when {
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> PendingIntent.FLAG_MUTABLE
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> PendingIntent.FLAG_IMMUTABLE
-                else -> 0
-            }
-
-            val intentSender = PendingIntent.getBroadcast(
-                service, activeSession, installIntent, installFlags
-            ).intentSender
-
-            // Use delayed installations on android 13 and only if "allow from unknown sources" is enabled
-            // if the app lacks installation permission it cannot ask for the permission when it's closed.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                context.packageManager.canRequestPackageInstalls()
-            ) {
-                // Save for later installation since it's more jarring to have the app exit abruptly
-                delayedInstaller = DelayedInstaller(session, intentSender)
-                main {
-                    // Use real toast since it should show even if app is exited
-                    Toast.makeText(context, txt(Res.string.delayed_update_notice).asString(context), Toast.LENGTH_LONG)
-                        .show()
-                }
-            } else {
-                installProgressStatus.invoke(InstallProgressStatus.Installing)
-                session.commit(intentSender)
-            }
+            val intentSender = buildIntentSender(sessionId)
+            dispatchInstallation(context, session, intentSender, installProgressStatus)
         } catch (e: Exception) {
             logError(e)
-
             service.unregisterReceiver(installActionReceiver)
             installProgressStatus.invoke(InstallProgressStatus.Failed)
-
             activeSession?.let { sessionId ->
                 packageInstaller.abandonSession(sessionId)
             }

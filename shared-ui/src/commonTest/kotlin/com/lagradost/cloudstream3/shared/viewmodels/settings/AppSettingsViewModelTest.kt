@@ -7,6 +7,12 @@ import com.lagradost.cloudstream3.shared.backup.BackupRestoreResult
 import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager
 import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceRepository
 import com.lagradost.cloudstream3.shared.syncproviders.AccountManager
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.ImmutableSet
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.collections.immutable.toImmutableSet
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -62,17 +68,17 @@ class FakeAppPreferenceRepository : AppPreferenceRepository {
         setString(key, value.toString())
     }
 
-    override suspend fun getStringSet(key: String, defaultValue: Set<String>?): Set<String>? {
-        val raw = data[key] ?: return defaultValue
-        return parseStringSet(raw, defaultValue)
+    override suspend fun getStringSet(key: String, defaultValue: Set<String>?): ImmutableSet<String>? {
+        val raw = data[key] ?: return defaultValue?.toImmutableSet()
+        return parseStringSet(raw, defaultValue)?.toImmutableSet()
     }
 
     override suspend fun setStringSet(key: String, value: Set<String>) {
         setString(key, json.encodeToString(value))
     }
 
-    override suspend fun getKeys(prefix: String): List<String> {
-        return data.keys.filter { it.startsWith(prefix) }.toList()
+    override suspend fun getKeys(prefix: String): ImmutableList<String> {
+        return data.keys.filter { it.startsWith(prefix) }.toImmutableList()
     }
 
     override suspend fun removeKeys(prefix: String): Int {
@@ -104,9 +110,9 @@ class FakeAppPreferenceRepository : AppPreferenceRepository {
         return str.toBooleanStrictOrNull() ?: (str.toIntOrNull()?.let { it != 0 } ?: defaultValue)
     }
 
-    override fun getStringSetSync(key: String, defaultValue: Set<String>?): Set<String>? {
-        val raw = data[key] ?: return defaultValue
-        return parseStringSet(raw, defaultValue)
+    override fun getStringSetSync(key: String, defaultValue: Set<String>?): ImmutableSet<String>? {
+        val raw = data[key] ?: return defaultValue?.toImmutableSet()
+        return parseStringSet(raw, defaultValue)?.toImmutableSet()
     }
 
     override fun setStringSync(key: String, value: String) {
@@ -131,8 +137,8 @@ class FakeAppPreferenceRepository : AppPreferenceRepository {
         flows.getOrPut(key) { MutableStateFlow(null) }.value = null
     }
 
-    override fun getKeysSync(prefix: String): List<String> =
-        data.keys.filter { it.startsWith(prefix) }.toList()
+    override fun getKeysSync(prefix: String): ImmutableList<String> =
+        data.keys.filter { it.startsWith(prefix) }.toImmutableList()
 
     override fun removeKeysSync(prefix: String): Int {
         val matching = data.keys.filter { it.startsWith(prefix) }.toList()
@@ -140,24 +146,35 @@ class FakeAppPreferenceRepository : AppPreferenceRepository {
         return matching.size
     }
 
-    override fun getAllSync(): Map<String, String> =
-        data.toMap()
+    override fun getAllSync(): ImmutableMap<String, String> =
+        data.toMap().toImmutableMap()
 
-    private fun parseStringSet(raw: String, defaultValue: Set<String>?): Set<String>? {
+    private fun parseRawCsvSet(raw: String, defaultValue: Set<String>?): Set<String>? {
+        return raw.removePrefix("[")
+            .removeSuffix("]")
+            .split(",")
+            .map { it.trim().trim('"', '\'') }
+            .filter { it.isNotBlank() }
+            .toSet()
+            .ifEmpty { defaultValue }
+    }
+
+    private fun parseJsonListOrSet(raw: String): Set<String>? {
         return try {
             json.decodeFromString<Set<String>>(raw)
-        } catch (_: Throwable) {
+        } catch (_: Exception) {
             try {
                 json.decodeFromString<List<String>>(raw).toSet()
-            } catch (_: Throwable) {
-                raw.removePrefix("[").removeSuffix("]")
-                    .split(",")
-                    .map { it.trim().trim('"', '\'') }
-                    .filter { it.isNotBlank() }
-                    .toSet()
-                    .ifEmpty { defaultValue }
+            } catch (_: Exception) {
+                null
             }
         }
+    }
+
+    private fun parseStringSet(raw: String, defaultValue: Set<String>?): Set<String>? {
+        val parsedJson = parseJsonListOrSet(raw)
+        if (parsedJson != null) return parsedJson
+        return parseRawCsvSet(raw, defaultValue)
     }
 }
 
@@ -233,13 +250,13 @@ class AppSettingsViewModelTest {
         )
         testScope.advanceUntilIdle()
 
-        viewModel.onEvent(AppSettingsEvent.SetTheme(AppTheme.DEFAULT))
+        viewModel.setTheme(AppTheme.DEFAULT)
         testScope.advanceUntilIdle()
 
         assertEquals(AppTheme.DEFAULT, viewModel.state.value.theme)
         assertEquals("Black", repository.getString(AppSettingsViewModel.KEY_APP_THEME))
 
-        viewModel.onEvent(AppSettingsEvent.SetTheme(AppTheme.DRACULA))
+        viewModel.setTheme(AppTheme.DRACULA)
         testScope.advanceUntilIdle()
 
         assertEquals(AppTheme.DRACULA, viewModel.state.value.theme)
@@ -258,7 +275,7 @@ class AppSettingsViewModelTest {
         )
         testScope.advanceUntilIdle()
 
-        viewModel.onEvent(AppSettingsEvent.SetDarkMode(false))
+        viewModel.setDarkMode(false)
         testScope.advanceUntilIdle()
 
         assertFalse(viewModel.state.value.isDarkMode)
@@ -277,13 +294,13 @@ class AppSettingsViewModelTest {
         )
         testScope.advanceUntilIdle()
 
-        viewModel.onEvent(AppSettingsEvent.SetDohProvider(DohProvider.CLOUDFLARE))
+        viewModel.setDohProvider(DohProvider.CLOUDFLARE)
         testScope.advanceUntilIdle()
 
         assertEquals(DohProvider.CLOUDFLARE, viewModel.state.value.dohProvider)
         assertEquals("2", repository.getString(AppSettingsViewModel.KEY_DOH_PROVIDER))
 
-        viewModel.onEvent(AppSettingsEvent.SetDohProvider(DohProvider.QUAD9))
+        viewModel.setDohProvider(DohProvider.QUAD9)
         testScope.advanceUntilIdle()
 
         assertEquals(DohProvider.QUAD9, viewModel.state.value.dohProvider)
@@ -303,12 +320,12 @@ class AppSettingsViewModelTest {
         testScope.advanceUntilIdle()
 
         val langs = listOf("es", "en", "ja")
-        viewModel.onEvent(AppSettingsEvent.SetLanguage(langs))
+        viewModel.setProviderLanguages(langs)
         testScope.advanceUntilIdle()
 
         assertEquals(langs, viewModel.state.value.preferredProviderLanguages)
 
-        viewModel.onEvent(AppSettingsEvent.SetAppLanguage("es"))
+        viewModel.setAppLanguage("es")
         testScope.advanceUntilIdle()
 
         assertEquals("es", viewModel.state.value.appLanguage)
@@ -338,7 +355,7 @@ class AppSettingsViewModelTest {
             encoding = "ISO-8859-1"
         )
 
-        viewModel.onEvent(AppSettingsEvent.SetDefaultSubtitleStyle(customStyle))
+        viewModel.setDefaultSubtitleStyle(customStyle)
         testScope.advanceUntilIdle()
 
         assertEquals(customStyle, viewModel.state.value.subtitleStyle)
@@ -359,25 +376,25 @@ class AppSettingsViewModelTest {
         testScope.advanceUntilIdle()
 
         // Set WiFi Quality
-        viewModel.onEvent(AppSettingsEvent.SetQualityWifi(1080))
+        viewModel.setQualityWifi(1080)
         testScope.advanceUntilIdle()
         assertEquals(1080, viewModel.state.value.qualityWifi)
         assertEquals(1080, repository.getInt(AppSettingsViewModel.KEY_QUALITY_WIFI))
 
         // Set Mobile Quality
-        viewModel.onEvent(AppSettingsEvent.SetQualityMobile(720))
+        viewModel.setQualityMobile(720)
         testScope.advanceUntilIdle()
         assertEquals(720, viewModel.state.value.qualityMobile)
         assertEquals(720, repository.getInt(AppSettingsViewModel.KEY_QUALITY_MOBILE))
 
         // Set Software Decoding mode
-        viewModel.onEvent(AppSettingsEvent.SetSoftwareDecoding(1))
+        viewModel.setSoftwareDecoding(1)
         testScope.advanceUntilIdle()
         assertEquals(1, viewModel.state.value.softwareDecoding)
         assertEquals(1, repository.getInt(AppSettingsViewModel.KEY_SOFTWARE_DECODING))
 
         // Set Subtitle Encoding
-        viewModel.onEvent(AppSettingsEvent.SetSubtitleEncoding("Windows-1252"))
+        viewModel.setSubtitleEncoding("Windows-1252")
         testScope.advanceUntilIdle()
         assertEquals("Windows-1252", viewModel.state.value.subtitleEncoding)
         assertEquals("Windows-1252", viewModel.state.value.subtitleStyle.encoding)
@@ -396,12 +413,12 @@ class AppSettingsViewModelTest {
         )
         testScope.advanceUntilIdle()
 
-        viewModel.onEvent(AppSettingsEvent.SetTheme(AppTheme.DEFAULT))
-        viewModel.onEvent(AppSettingsEvent.SetDohProvider(DohProvider.ADGUARD))
-        viewModel.onEvent(AppSettingsEvent.SetQualityWifi(2160))
-        viewModel.onEvent(AppSettingsEvent.SetQualityMobile(480))
-        viewModel.onEvent(AppSettingsEvent.SetSoftwareDecoding(0))
-        viewModel.onEvent(AppSettingsEvent.SetSubtitleEncoding("GBK"))
+        viewModel.setTheme(AppTheme.DEFAULT)
+        viewModel.setDohProvider(DohProvider.ADGUARD)
+        viewModel.setQualityWifi(2160)
+        viewModel.setQualityMobile(480)
+        viewModel.setSoftwareDecoding(0)
+        viewModel.setSubtitleEncoding("GBK")
         testScope.advanceUntilIdle()
 
         assertEquals(AppTheme.DEFAULT, viewModel.state.value.theme)
@@ -411,7 +428,7 @@ class AppSettingsViewModelTest {
         assertEquals(0, viewModel.state.value.softwareDecoding)
         assertEquals("GBK", viewModel.state.value.subtitleEncoding)
 
-        viewModel.onEvent(AppSettingsEvent.ResetToDefaults)
+        viewModel.resetToDefaults()
         testScope.advanceUntilIdle()
 
         assertEquals(AppTheme.SYSTEM, viewModel.state.value.theme)
@@ -445,31 +462,31 @@ class AppSettingsViewModelTest {
         assertFalse(viewModel.state.value.skipStartupAccountSelect)
 
         // Set Sync Watch Progress
-        viewModel.onEvent(AppSettingsEvent.SetSyncWatchProgress(false))
+        viewModel.setSyncWatchProgress(false)
         testScope.advanceUntilIdle()
         assertFalse(viewModel.state.value.syncWatchProgress)
         assertEquals("false", repository.getString(AppSettingsViewModel.KEY_SYNC_WATCH_PROGRESS))
 
         // Set Sync Scores
-        viewModel.onEvent(AppSettingsEvent.SetSyncScores(false))
+        viewModel.setSyncScores(false)
         testScope.advanceUntilIdle()
         assertFalse(viewModel.state.value.syncScores)
         assertEquals("false", repository.getString(AppSettingsViewModel.KEY_SYNC_SCORES))
 
         // Set Sync WiFi Only
-        viewModel.onEvent(AppSettingsEvent.SetSyncWifiOnly(true))
+        viewModel.setSyncWifiOnly(true)
         testScope.advanceUntilIdle()
         assertTrue(viewModel.state.value.syncWifiOnly)
         assertEquals("true", repository.getString(AppSettingsViewModel.KEY_SYNC_WIFI_ONLY))
 
         // Set Skip Startup Account Select
-        viewModel.onEvent(AppSettingsEvent.SetSkipStartupAccountSelect(true))
+        viewModel.setSkipStartupAccountSelect(true)
         testScope.advanceUntilIdle()
         assertTrue(viewModel.state.value.skipStartupAccountSelect)
         assertEquals("true", repository.getString(AppSettingsViewModel.KEY_SKIP_STARTUP_ACCOUNT_SELECT))
 
         // Reset to Defaults restores sync preferences
-        viewModel.onEvent(AppSettingsEvent.ResetToDefaults)
+        viewModel.resetToDefaults()
         testScope.advanceUntilIdle()
         assertTrue(viewModel.state.value.syncWatchProgress)
         assertTrue(viewModel.state.value.syncScores)
@@ -493,8 +510,8 @@ class AppSettingsViewModelTest {
         // Active accounts reflect AccountManager.accountsState
         assertEquals(AccountManager.accountsState.value, viewModel.state.value.activeAuthAccounts)
 
-        // Clear error event
-        viewModel.onEvent(AppSettingsEvent.ClearError)
+        // Clear error
+        viewModel.clearError()
         testScope.advanceUntilIdle()
         assertNull(viewModel.state.value.error)
     }
@@ -512,7 +529,7 @@ class AppSettingsViewModelTest {
         assertTrue(AppPreferenceManager.getBoolean("pref_bool"))
 
         AppPreferenceManager.setStringSet("pref_set", setOf("item1", "item2", "item3"))
-        assertEquals(setOf("item1", "item2", "item3"), AppPreferenceManager.getStringSet("pref_set"))
+        assertEquals(setOf("item1", "item2", "item3").toImmutableSet(), AppPreferenceManager.getStringSet("pref_set"))
 
         val keys = repository.getKeys("pref_")
         assertEquals(3, keys.size)
@@ -525,7 +542,7 @@ class AppSettingsViewModelTest {
         assertFalse(AppPreferenceManager.getBooleanSync("sync_bool"))
 
         AppPreferenceManager.setStringSetSync("sync_set", setOf("alpha", "beta"))
-        assertEquals(setOf("alpha", "beta"), AppPreferenceManager.getStringSetSync("sync_set"))
+        assertEquals(setOf("alpha", "beta").toImmutableSet(), AppPreferenceManager.getStringSetSync("sync_set"))
 
         val all = AppPreferenceManager.getAllSync()
         assertTrue(all.containsKey("sync_int"))
@@ -572,16 +589,16 @@ class AppSettingsViewModelTest {
         testScope.advanceUntilIdle()
 
         // Set non-default preferences
-        viewModel.onEvent(AppSettingsEvent.SetTheme(AppTheme.AMOLED))
-        viewModel.onEvent(AppSettingsEvent.SetAppLanguage("es"))
-        viewModel.onEvent(AppSettingsEvent.SetQualityWifi(1080))
+        viewModel.setTheme(AppTheme.AMOLED)
+        viewModel.setAppLanguage("es")
+        viewModel.setQualityWifi(1080)
         testScope.advanceUntilIdle()
 
         assertEquals(AppTheme.AMOLED, viewModel.state.value.theme)
         assertEquals("es", viewModel.state.value.appLanguage)
 
         // Create backup
-        viewModel.onEvent(AppSettingsEvent.CreateBackup(setOf(BackupCategory.SETTINGS)))
+        viewModel.createBackup(setOf(BackupCategory.SETTINGS))
         testScope.advanceUntilIdle()
 
         assertEquals(Res.string.backup_export_success_msg, viewModel.state.value.backupSuccessRes)
@@ -589,14 +606,14 @@ class AppSettingsViewModelTest {
         assertEquals(setOf(BackupCategory.SETTINGS), backupManager.lastCreatedCategories)
 
         // Reset to defaults
-        viewModel.onEvent(AppSettingsEvent.ResetToDefaults)
+        viewModel.resetToDefaults()
         testScope.advanceUntilIdle()
         assertEquals(AppTheme.SYSTEM, viewModel.state.value.theme)
         assertEquals("en", viewModel.state.value.appLanguage)
 
         // Restore backup
         val testBackupPayload = """{"version":2,"categories":["SETTINGS"],"settings":{"app_theme_key":"Amoled","locale_key":"es","quality_pref_key":"1080"}}"""
-        viewModel.onEvent(AppSettingsEvent.RestoreBackup(testBackupPayload))
+        viewModel.restoreBackup(testBackupPayload)
         testScope.advanceUntilIdle()
 
         assertEquals(Res.string.backup_restore_success_msg, viewModel.state.value.backupSuccessRes)
@@ -606,7 +623,7 @@ class AppSettingsViewModelTest {
         assertEquals(1080, viewModel.state.value.qualityWifi)
 
         // Clear backup message
-        viewModel.onEvent(AppSettingsEvent.ClearBackupMessage)
+        viewModel.clearBackupMessage()
         testScope.advanceUntilIdle()
         assertNull(viewModel.state.value.backupSuccessRes)
         assertNull(viewModel.state.value.backupErrorRes)
@@ -628,14 +645,14 @@ class AppSettingsViewModelTest {
         )
         testScope.advanceUntilIdle()
 
-        viewModel.onEvent(AppSettingsEvent.RestoreBackup("invalid_json"))
+        viewModel.restoreBackup("invalid_json")
         testScope.advanceUntilIdle()
 
         assertFalse(viewModel.state.value.isRestoring)
         assertNull(viewModel.state.value.backupSuccessRes)
         assertEquals(Res.string.backup_restore_error_invalid, viewModel.state.value.backupErrorRes)
 
-        viewModel.onEvent(AppSettingsEvent.ClearBackupMessage)
+        viewModel.clearBackupMessage()
         testScope.advanceUntilIdle()
         assertNull(viewModel.state.value.backupErrorRes)
     }

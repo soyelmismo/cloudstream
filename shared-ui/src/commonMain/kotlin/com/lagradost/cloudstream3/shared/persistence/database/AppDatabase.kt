@@ -25,10 +25,6 @@ import com.lagradost.cloudstream3.shared.persistence.entity.SubscriptionEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.SyncMappingEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.WatchProgressEntity
 
-/**
- * CloudStream Room Multiplatform Database definition.
- * Supports Android and JVM / Desktop targets with BundledSQLiteDriver.
- */
 @Database(
     entities = [
         AccountEntity::class,

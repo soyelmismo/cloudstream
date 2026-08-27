@@ -9,9 +9,6 @@ import androidx.room.Upsert
 import com.lagradost.cloudstream3.shared.persistence.entity.WatchProgressEntity
 import kotlinx.coroutines.flow.Flow
 
-/**
- * Data Access Object for video watch progress, duration, and watched state.
- */
 @Dao
 interface WatchProgressDao {
     @Query("SELECT * FROM watch_progress WHERE accountId = :accountId AND mediaId = :mediaId LIMIT 1")

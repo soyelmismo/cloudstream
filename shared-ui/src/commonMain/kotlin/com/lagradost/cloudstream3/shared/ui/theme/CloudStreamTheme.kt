@@ -18,7 +18,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.shared.viewmodels.settings.AppTheme
+import kotlinx.collections.immutable.ImmutableList
 import org.jetbrains.compose.resources.Font
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 typealias ExtendedColors = CloudstreamExtendedColors
 
@@ -241,13 +243,13 @@ object CloudStreamColors {
     val NsfwContent = AppColors.NsfwFilterContent
 
     // Gradients & Overlays
-    val CardOverlayGradient = AppColors.CardOverlayGradient
-    val ShimmerGradient = AppColors.ShimmerGradient
+    val CardOverlayGradient: ImmutableList<Color> = AppColors.CardOverlayGradient
+    val ShimmerGradient: ImmutableList<Color> = AppColors.ShimmerGradient
 
     // Subtitle Customizer Presets
-    val SubtitleTextPresets = AppColors.SubtitleTextColors
-    val SubtitleEdgePresets = AppColors.SubtitleEdgeColors
-    val SubtitleBackgroundPresets = AppColors.SubtitleBackgroundColors
+    val SubtitleTextPresets: ImmutableList<Color> = AppColors.SubtitleTextColors
+    val SubtitleEdgePresets: ImmutableList<Color> = AppColors.SubtitleEdgeColors
+    val SubtitleBackgroundPresets: ImmutableList<Color> = AppColors.SubtitleBackgroundColors
 
     // Audio / Sub Badges
     val DubBadge: Color
@@ -308,3 +310,24 @@ fun CloudStreamTheme(
         )
     }
 }
+
+@Preview
+@Composable
+private fun CloudStreamThemeDarkPreview() {
+    CloudStreamTheme(theme = AppTheme.DEFAULT, isDarkMode = true) {
+        androidx.compose.material.Surface(color = CloudStreamColors.Background) {
+            androidx.compose.material.Text("Dark Theme Preview", color = CloudStreamColors.TextPrimary)
+        }
+    }
+}
+
+@Preview
+@Composable
+private fun CloudStreamThemeAmoledLightPreview() {
+    CloudStreamTheme(theme = AppTheme.AMOLED, isDarkMode = false) {
+        androidx.compose.material.Surface(color = CloudStreamColors.Background) {
+            androidx.compose.material.Text("Amoled Light Preview", color = CloudStreamColors.TextPrimary)
+        }
+    }
+}
+

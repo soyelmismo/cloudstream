@@ -37,8 +37,12 @@ import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.ShowStatus
 import com.lagradost.cloudstream3.TvSeriesSearchResponse
 import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.shared.ui.theme.AppColors
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 import cloudstream.shared_ui.generated.resources.*
 
 /**
@@ -139,6 +143,27 @@ fun ProviderBadge(
     )
 }
 
+private data class QualityBadgeConfig(val text: String, val color: Color)
+
+private val QUALITY_CONFIG_MAP: Map<SearchQuality, QualityBadgeConfig> = mapOf(
+    SearchQuality.FourK to QualityBadgeConfig("4K", AppColors.Quality4K),
+    SearchQuality.UHD to QualityBadgeConfig("4K", AppColors.Quality4K),
+    SearchQuality.HD to QualityBadgeConfig("HD", AppColors.QualityHD),
+    SearchQuality.HDR to QualityBadgeConfig("HD", AppColors.QualityHD),
+    SearchQuality.BlueRay to QualityBadgeConfig("HD", AppColors.QualityHD),
+    SearchQuality.WebRip to QualityBadgeConfig("HD", AppColors.QualityHD),
+    SearchQuality.HQ to QualityBadgeConfig("HQ", AppColors.QualityHQ),
+    SearchQuality.Cam to QualityBadgeConfig("CAM", AppColors.QualityCAM),
+    SearchQuality.CamRip to QualityBadgeConfig("CAM", AppColors.QualityCAM),
+    SearchQuality.HdCam to QualityBadgeConfig("CAM", AppColors.QualityCAM),
+    SearchQuality.Telesync to QualityBadgeConfig("CAM", AppColors.QualityCAM),
+    SearchQuality.Telecine to QualityBadgeConfig("CAM", AppColors.QualityCAM),
+    SearchQuality.WorkPrint to QualityBadgeConfig("CAM", AppColors.QualityCAM),
+    SearchQuality.DVD to QualityBadgeConfig("SD", AppColors.QualitySD),
+    SearchQuality.SD to QualityBadgeConfig("SD", AppColors.QualitySD),
+    SearchQuality.SDR to QualityBadgeConfig("SD", AppColors.QualitySD)
+)
+
 /**
  * Quality badge displayed over media posters (e.g. 4K, HD, CAM, HQ, DVD).
  */
@@ -148,18 +173,11 @@ fun QualityBadge(
     modifier: Modifier = Modifier
 ) {
     if (quality == null) return
-
-    val (text, color) = when (quality) {
-        SearchQuality.FourK, SearchQuality.UHD -> "4K" to CloudStreamColors.Quality4K
-        SearchQuality.HD, SearchQuality.HDR, SearchQuality.BlueRay, SearchQuality.WebRip -> "HD" to CloudStreamColors.QualityHD
-        SearchQuality.HQ -> "HQ" to CloudStreamColors.QualityHQ
-        SearchQuality.Cam, SearchQuality.CamRip, SearchQuality.HdCam, SearchQuality.Telesync, SearchQuality.Telecine, SearchQuality.WorkPrint -> "CAM" to CloudStreamColors.QualityCAM
-        SearchQuality.DVD, SearchQuality.SD, SearchQuality.SDR -> "SD" to CloudStreamColors.QualitySD
-    }
+    val config = QUALITY_CONFIG_MAP[quality] ?: return
 
     MediaBadge(
-        text = text,
-        backgroundColor = color,
+        text = config.text,
+        backgroundColor = config.color,
         modifier = modifier
     )
 }
@@ -205,6 +223,20 @@ fun DubSubBadges(
     }
 }
 
+private val TV_TYPE_RES_MAP: Map<TvType, StringResource> = mapOf(
+    TvType.Movie to Res.string.typeMovie,
+    TvType.TvSeries to Res.string.typeTvSeries,
+    TvType.Anime to Res.string.typeAnime,
+    TvType.OVA to Res.string.type_ova,
+    TvType.AnimeMovie to Res.string.typeAnimeMovie,
+    TvType.Live to Res.string.typeLive,
+    TvType.Torrent to Res.string.typeTorrent,
+    TvType.AsianDrama to Res.string.type_asian_drama,
+    TvType.Cartoon to Res.string.type_cartoon,
+    TvType.Documentary to Res.string.type_documentary,
+    TvType.NSFW to Res.string.type_nsfw
+)
+
 /**
  * Content type badge (e.g. Movie, TV, Anime, Live, Torrent).
  */
@@ -215,20 +247,8 @@ fun TypeBadge(
 ) {
     if (type == null) return
 
-    val text = when (type) {
-        TvType.Movie -> stringResource(Res.string.typeMovie)
-        TvType.TvSeries -> stringResource(Res.string.typeTvSeries)
-        TvType.Anime -> stringResource(Res.string.typeAnime)
-        TvType.OVA -> stringResource(Res.string.type_ova)
-        TvType.AnimeMovie -> stringResource(Res.string.typeAnimeMovie)
-        TvType.Live -> stringResource(Res.string.typeLive)
-        TvType.Torrent -> stringResource(Res.string.typeTorrent)
-        TvType.AsianDrama -> stringResource(Res.string.type_asian_drama)
-        TvType.Cartoon -> stringResource(Res.string.type_cartoon)
-        TvType.Documentary -> stringResource(Res.string.type_documentary)
-        TvType.NSFW -> stringResource(Res.string.type_nsfw)
-        else -> type.name
-    }
+    val res = TV_TYPE_RES_MAP[type]
+    val text = if (res != null) stringResource(res) else type.name
 
     MediaBadge(
         text = text,
@@ -256,6 +276,16 @@ fun YearBadge(
     )
 }
 
+private data class WatchStatusConfig(val textRes: StringResource, val color: Color)
+
+private val WATCH_STATUS_MAP: Map<Int, WatchStatusConfig> = mapOf(
+    1 to WatchStatusConfig(Res.string.statusWatching, AppColors.SyncStatusWatching),
+    2 to WatchStatusConfig(Res.string.statusCompleted, AppColors.SyncStatusCompleted),
+    3 to WatchStatusConfig(Res.string.statusOnHold, AppColors.SyncStatusPaused),
+    4 to WatchStatusConfig(Res.string.statusDropped, AppColors.SyncStatusDropped),
+    5 to WatchStatusConfig(Res.string.statusPlanToWatch, AppColors.SyncStatusPlanToWatch)
+)
+
 /**
  * Watch status badge overlay (e.g. green pill for "Watching", blue pill for "Completed", etc.)
  */
@@ -265,28 +295,11 @@ fun WatchStatusBadge(
     modifier: Modifier = Modifier
 ) {
     if (watchType == null || watchType == 0) return
-
-    val text = when (watchType) {
-        1 -> stringResource(Res.string.statusWatching)
-        2 -> stringResource(Res.string.statusCompleted)
-        3 -> stringResource(Res.string.statusOnHold)
-        4 -> stringResource(Res.string.statusDropped)
-        5 -> stringResource(Res.string.statusPlanToWatch)
-        else -> return
-    }
-
-    val color = when (watchType) {
-        1 -> CloudStreamColors.Success
-        2 -> CloudStreamColors.Secondary
-        3 -> CloudStreamColors.Warning
-        4 -> CloudStreamColors.Error
-        5 -> CloudStreamColors.Primary
-        else -> return
-    }
+    val config = WATCH_STATUS_MAP[watchType] ?: return
 
     MediaBadge(
-        text = text,
-        backgroundColor = color,
+        text = stringResource(config.textRes),
+        backgroundColor = config.color,
         textColor = CloudStreamColors.OnMediaScrim,
         modifier = modifier
     )
@@ -388,3 +401,22 @@ fun ContentRatingBadge(
         modifier = modifier
     )
 }
+
+@Preview
+@Composable
+private fun MediaBadgesPreview() {
+    CloudStreamTheme {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            QualityBadge(quality = SearchQuality.FourK)
+            TypeBadge(type = TvType.Movie)
+            YearBadge(year = 2024)
+            ScoreBadge(score = 8.8)
+            ShowStatusBadge(status = ShowStatus.Ongoing)
+            WatchStatusBadge(watchType = 1)
+        }
+    }
+}
+

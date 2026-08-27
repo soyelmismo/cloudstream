@@ -33,7 +33,6 @@ import com.lagradost.cloudstream3.shared.ui.components.designsystem.CloudStreamT
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.PrimaryButton
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.SecondaryButton
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
-import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginsSettingsEvent
 import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginsSettingsViewModel
 import org.jetbrains.compose.resources.stringResource
 import cloudstream.shared_ui.generated.resources.*
@@ -50,7 +49,7 @@ fun AddRepositoryDialog(
     AddRepositoryDialog(
         onDismiss = onDismiss,
         onAddRepository = { url, name ->
-            viewModel.handleEvent(PluginsSettingsEvent.AddRepository(url, name))
+            viewModel.addRepository(url, name ?: "")
         },
         modifier = modifier
     )
@@ -71,11 +70,9 @@ fun AddRepositoryDialog(
     var repoName by remember { mutableStateOf("") }
     var hasAttemptedSubmit by remember { mutableStateOf(false) }
 
-    val normalizedUrl = remember(repoUrl) {
-        PluginsSettingsViewModel.normalizeRepoUrl(repoUrl)
-    }
+    val normalizedUrl = remember(repoUrl) { repoUrl.trim() }
     val isValidUrl = remember(normalizedUrl) {
-        PluginsSettingsViewModel.isValidRepoUrl(normalizedUrl)
+        normalizedUrl.isNotBlank() && (normalizedUrl.startsWith("http://") || normalizedUrl.startsWith("https://") || normalizedUrl.contains("."))
     }
     val showError = hasAttemptedSubmit && !isValidUrl
 

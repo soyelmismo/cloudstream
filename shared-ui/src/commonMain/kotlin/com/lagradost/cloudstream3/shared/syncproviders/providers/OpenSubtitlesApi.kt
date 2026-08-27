@@ -97,6 +97,70 @@ class OpenSubtitlesApi : SubtitleAPI() {
         )
     }
 
+    private fun buildQueryParams(query: AbstractSubtitleEntities.SubtitleSearch): String {
+        val builder = StringBuilder()
+        query.year?.takeIf { it > 0 }?.let { builder.append("&year=$it") }
+        query.epNumber?.takeIf { it > 0 }?.let { builder.append("&episode_number=$it") }
+        query.seasonNumber?.takeIf { it > 0 }?.let { builder.append("&season_number=$it") }
+        return builder.toString()
+    }
+
+    private fun buildSearchUrl(query: AbstractSubtitleEntities.SubtitleSearch): String {
+        val langTag = fromCodeToOpenSubtitlesTag(query.lang) ?: query.lang.orEmpty()
+        val imdbId = query.imdbId?.removePrefix("tt")?.toIntOrNull() ?: 0
+        val params = buildQueryParams(query)
+        return if (imdbId > 0) {
+            "$HOST/subtitles?imdb_id=$imdbId&languages=$langTag$params"
+        } else {
+            "$HOST/subtitles?query=${query.query}&languages=$langTag$params"
+        }
+    }
+
+    private fun resolveSubtitleName(
+        attr: ResultAttributes,
+        featDetails: ResultFeatureDetails?,
+        fallbackQuery: String?
+    ): String {
+        val filename = attr.files?.firstNotNullOfOrNull { it.fileName }
+        return filename
+            ?: featDetails?.movieName
+            ?: featDetails?.title
+            ?: featDetails?.parentTitle
+            ?: attr.release
+            ?: fallbackQuery.orEmpty()
+    }
+
+    private fun mapResultDataToEntities(
+        item: ResultData,
+        query: AbstractSubtitleEntities.SubtitleSearch
+    ): List<AbstractSubtitleEntities.SubtitleEntity> {
+        val attr = item.attributes ?: return emptyList()
+        val files = attr.files ?: return emptyList()
+        val featureDetails = attr.featDetails
+        val name = resolveSubtitleName(attr, featureDetails, query.query)
+        val langTagIETF = fromCodeToLangTagIETF(attr.language).orEmpty()
+        val resEpNum = featureDetails?.episodeNumber ?: query.epNumber
+        val resSeasonNum = featureDetails?.seasonNumber ?: query.seasonNumber
+        val year = featureDetails?.year ?: query.year
+        val type = if ((resSeasonNum ?: 0) > 0) TvType.TvSeries else TvType.Movie
+        val isHearingImpaired = attr.hearingImpaired ?: false
+
+        return files.map { file ->
+            AbstractSubtitleEntities.SubtitleEntity(
+                idPrefix = this.idPrefix,
+                name = name,
+                lang = langTagIETF,
+                data = file.fileId?.toString().orEmpty(),
+                type = type,
+                source = this.name,
+                epNumber = resEpNum,
+                seasonNumber = resSeasonNum,
+                year = year,
+                isHearingImpaired = isHearingImpaired
+            )
+        }
+    }
+
     /**
      * Fetch subtitles using token authenticated on previous method (see authorize).
      * Returns list of Subtitles which user can select to download (see load).
@@ -106,22 +170,7 @@ class OpenSubtitlesApi : SubtitleAPI() {
         query: AbstractSubtitleEntities.SubtitleSearch
     ): List<AbstractSubtitleEntities.SubtitleEntity>? {
         throwIfCantDoRequest()
-        val langOpenSubTag = fromCodeToOpenSubtitlesTag(query.lang) ?: query.lang ?: ""
-
-        val imdbId = query.imdbId?.replace("tt", "")?.toIntOrNull() ?: 0
-        val queryText = query.query
-        val epNum = query.epNumber ?: 0
-        val seasonNum = query.seasonNumber ?: 0
-        val yearNum = query.year ?: 0
-        val epQuery = if (epNum > 0) "&episode_number=$epNum" else ""
-        val seasonQuery = if (seasonNum > 0) "&season_number=$seasonNum" else ""
-        val yearQuery = if (yearNum > 0) "&year=$yearNum" else ""
-
-        val searchQueryUrl = when (imdbId > 0) {
-            // Use imdb_id to search if its valid
-            true -> "$HOST/subtitles?imdb_id=$imdbId&languages=${langOpenSubTag}$yearQuery$epQuery$seasonQuery"
-            false -> "$HOST/subtitles?query=${queryText}&languages=${langOpenSubTag}$yearQuery$epQuery$seasonQuery"
-        }
+        val searchQueryUrl = buildSearchUrl(query)
 
         val req = app.get(
             url = searchQueryUrl,
@@ -132,51 +181,14 @@ class OpenSubtitlesApi : SubtitleAPI() {
         debugPrint { "OpenSubtitles searchQueryUrl => $searchQueryUrl" }
         debugPrint { "OpenSubtitles Search Req => ${req.text}" }
         if (!req.isSuccessful) {
-            if (req.code == 429)
+            if (req.code == 429) {
                 throwGotTooManyRequests()
+            }
             return null
         }
 
-        val results = mutableListOf<AbstractSubtitleEntities.SubtitleEntity>()
-
-        AppUtils.tryParseJson<Results>(req.text)?.let {
-            it.data?.forEach { item ->
-                val attr = item.attributes ?: return@forEach
-                val featureDetails = attr.featDetails
-                // Use filename as name, if its valid
-                val filename = attr.files?.firstNotNullOfOrNull { subfile ->
-                    subfile.fileName
-                }
-                // Use any valid name/title in hierarchy
-                val name = filename ?: featureDetails?.movieName ?: featureDetails?.title
-                ?: featureDetails?.parentTitle ?: attr.release ?: query.query
-                val langTagIETF = fromCodeToLangTagIETF(attr.language) ?: ""
-                val resEpNum = featureDetails?.episodeNumber ?: query.epNumber
-                val resSeasonNum = featureDetails?.seasonNumber ?: query.seasonNumber
-                val year = featureDetails?.year ?: query.year
-                val type = if ((resSeasonNum ?: 0) > 0) TvType.TvSeries else TvType.Movie
-                val isHearingImpaired = attr.hearingImpaired ?: false
-
-                item.attributes?.files?.forEach { file ->
-                    val resultData = file.fileId?.toString() ?: ""
-                    results.add(
-                        AbstractSubtitleEntities.SubtitleEntity(
-                            idPrefix = this.idPrefix,
-                            name = name,
-                            lang = langTagIETF,
-                            data = resultData,
-                            type = type,
-                            source = this.name,
-                            epNumber = resEpNum,
-                            seasonNumber = resSeasonNum,
-                            year = year,
-                            isHearingImpaired = isHearingImpaired
-                        )
-                    )
-                }
-            }
-        }
-        return results
+        val parsedData = AppUtils.tryParseJson<Results>(req.text)?.data ?: return emptyList()
+        return parsedData.flatMap { item -> mapResultDataToEntities(item, query) }
     }
 
     /**

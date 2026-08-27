@@ -67,13 +67,14 @@ import com.lagradost.cloudstream3.shared.ui.components.designsystem.SubtitleText
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.TitleText
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
 import com.lagradost.cloudstream3.shared.viewmodels.account.AccountViewModel
-import com.lagradost.cloudstream3.shared.viewmodels.onboarding.OnboardingEvent
 import com.lagradost.cloudstream3.shared.viewmodels.onboarding.OnboardingState
 import com.lagradost.cloudstream3.shared.viewmodels.onboarding.OnboardingStep
 import com.lagradost.cloudstream3.shared.viewmodels.onboarding.OnboardingViewModel
 import com.lagradost.cloudstream3.shared.viewmodels.onboarding.StarterRepoOption
 import com.lagradost.cloudstream3.shared.viewmodels.settings.AppTheme
 import com.lagradost.cloudstream3.shared.viewmodels.settings.DohProvider
+
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 /**
  * Onboarding setup wizard providing first-run configuration.
@@ -90,6 +91,44 @@ fun OnboardingScreen(
         onComplete()
     }
 
+    OnboardingScreenContent(
+        state = state,
+        onNextStep = viewModel::nextStep,
+        onPreviousStep = viewModel::previousStep,
+        onSelectLanguage = viewModel::selectLanguage,
+        onSelectLayoutMode = viewModel::selectLayoutMode,
+        onSelectTheme = viewModel::selectTheme,
+        onSelectDohProvider = viewModel::selectDohProvider,
+        onToggleStarterRepo = viewModel::toggleStarterRepo,
+        onSetProfileName = viewModel::setProfileName,
+        onSetProfileAvatar = viewModel::setProfileAvatar,
+        onCompleteOnboarding = viewModel::completeOnboarding,
+        onSkipOnboarding = viewModel::skipOnboarding,
+        onComplete = onComplete,
+        modifier = modifier
+    )
+}
+
+/**
+ * Stateless Onboarding setup wizard content.
+ */
+@Composable
+fun OnboardingScreenContent(
+    state: OnboardingState,
+    onNextStep: () -> Unit,
+    onPreviousStep: () -> Unit,
+    onSelectLanguage: (String) -> Unit,
+    onSelectLayoutMode: (String) -> Unit,
+    onSelectTheme: (AppTheme) -> Unit,
+    onSelectDohProvider: (DohProvider) -> Unit,
+    onToggleStarterRepo: (String) -> Unit,
+    onSetProfileName: (String) -> Unit,
+    onSetProfileAvatar: (Int) -> Unit,
+    onCompleteOnboarding: () -> Unit,
+    onSkipOnboarding: () -> Unit,
+    onComplete: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
     ProvideAppLocale(languageCode = state.selectedLanguage) {
         Box(
             modifier = modifier
@@ -103,13 +142,11 @@ fun OnboardingScreen(
                 verticalArrangement = Arrangement.SpaceBetween,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Top Step Progress Indicator
                 StepProgressHeader(
                     currentStep = state.currentStep,
                     totalSteps = OnboardingStep.entries.size
                 )
 
-                // Animated Step Content
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -129,42 +166,41 @@ fun OnboardingScreen(
                         when (step) {
                             OnboardingStep.WELCOME_LANGUAGE -> WelcomeLanguageStep(
                                 state = state,
-                                onLanguageSelected = { viewModel.onEvent(OnboardingEvent.SelectLanguage(it)) }
+                                onLanguageSelected = onSelectLanguage
                             )
 
                             OnboardingStep.LAYOUT_THEME -> LayoutThemeStep(
                                 state = state,
-                                onLayoutSelected = { viewModel.onEvent(OnboardingEvent.SelectLayoutMode(it)) },
-                                onThemeSelected = { viewModel.onEvent(OnboardingEvent.SelectTheme(it)) }
+                                onLayoutSelected = onSelectLayoutMode,
+                                onThemeSelected = onSelectTheme
                             )
 
                             OnboardingStep.PLUGINS_REPOSITORIES -> PluginsSetupStep(
                                 state = state,
-                                onToggleRepo = { viewModel.onEvent(OnboardingEvent.ToggleStarterRepo(it)) }
+                                onToggleRepo = onToggleStarterRepo
                             )
 
                             OnboardingStep.DNS_SECURITY -> DnsSecurityStep(
                                 state = state,
-                                onDohSelected = { viewModel.onEvent(OnboardingEvent.SelectDohProvider(it)) }
+                                onDohSelected = onSelectDohProvider
                             )
 
                             OnboardingStep.PROFILE_SETUP -> ProfileSetupStep(
                                 state = state,
-                                onNameChange = { viewModel.onEvent(OnboardingEvent.SetProfileName(it)) },
-                                onAvatarChange = { viewModel.onEvent(OnboardingEvent.SetProfileAvatar(it)) }
+                                onNameChange = onSetProfileName,
+                                onAvatarChange = onSetProfileAvatar
                             )
                         }
                     }
                 }
 
-                // Bottom Navigation Actions
                 WizardNavigationFooter(
                     currentStep = state.currentStep,
                     isLastStep = state.currentStep == OnboardingStep.PROFILE_SETUP,
-                    onPrevious = { viewModel.onEvent(OnboardingEvent.PreviousStep) },
-                    onNext = { viewModel.onEvent(OnboardingEvent.NextStep) },
-                    onSkip = { viewModel.onEvent(OnboardingEvent.SkipOnboarding) },
-                    onFinish = { viewModel.onEvent(OnboardingEvent.CompleteOnboarding) }
+                    onPrevious = onPreviousStep,
+                    onNext = onNextStep,
+                    onSkip = onSkipOnboarding,
+                    onFinish = onCompleteOnboarding
                 )
             }
         }
@@ -742,5 +778,27 @@ private fun WizardNavigationFooter(
         )
     }
 }
+
+@Preview
+@Composable
+private fun OnboardingScreenPreview() {
+    com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme {
+        OnboardingScreenContent(
+            state = OnboardingState(),
+            onNextStep = {},
+            onPreviousStep = {},
+            onSelectLanguage = {},
+            onSelectLayoutMode = {},
+            onSelectTheme = {},
+            onSelectDohProvider = {},
+            onToggleStarterRepo = {},
+            onSetProfileName = {},
+            onSetProfileAvatar = {},
+            onCompleteOnboarding = {},
+            onSkipOnboarding = {}
+        )
+    }
+}
+
 
 

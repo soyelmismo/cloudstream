@@ -41,6 +41,7 @@ import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerAspectRatio
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerAudioTrack
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerQuality
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerSubtitleTrack
+import kotlinx.collections.immutable.ImmutableList
 import kotlinx.serialization.Serializable
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
@@ -50,7 +51,7 @@ import org.jetbrains.compose.resources.stringResource
  */
 @Composable
 fun PlayerQualityDialog(
-    qualities: List<PlayerQuality>,
+    qualities: ImmutableList<PlayerQuality>,
     selectedQuality: PlayerQuality?,
     onSelectQuality: (PlayerQuality) -> Unit,
     onDismiss: () -> Unit
@@ -141,7 +142,7 @@ fun PlayerQualityDialog(
  */
 @Composable
 fun PlayerSubtitleDialog(
-    subtitles: List<PlayerSubtitleTrack>,
+    subtitles: ImmutableList<PlayerSubtitleTrack>,
     selectedSubtitle: PlayerSubtitleTrack?,
     onSelectSubtitle: (PlayerSubtitleTrack?) -> Unit,
     onDismiss: () -> Unit
@@ -261,7 +262,7 @@ fun PlayerSubtitleDialog(
  */
 @Composable
 fun PlayerSubtitleTracksDialog(
-    subtitles: List<PlayerSubtitleTrack>,
+    subtitles: ImmutableList<PlayerSubtitleTrack>,
     selectedSubtitle: PlayerSubtitleTrack?,
     onSelectSubtitle: (PlayerSubtitleTrack?) -> Unit,
     onDismiss: () -> Unit
@@ -281,7 +282,9 @@ fun PlayerSpeedDialog(
     onSelectSpeed: (Float) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val speedOptions = listOf(0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 2.5f, 3.0f)
+    val speedOptions = remember {
+        listOf(0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f)
+    }
 
     ActionDialog(
         onDismissRequest = onDismiss,
@@ -289,7 +292,7 @@ fun PlayerSpeedDialog(
         icon = {
             Icon(
                 painter = painterResource(Res.drawable.ic_baseline_speed_24),
-                contentDescription = stringResource(Res.string.speed),
+                contentDescription = stringResource(Res.string.playback_speed),
                 tint = CloudStreamColors.Primary,
                 modifier = Modifier.size(24.dp)
             )
@@ -305,12 +308,11 @@ fun PlayerSpeedDialog(
                     .heightIn(max = 340.dp)
             ) {
                 items(speedOptions) { speed ->
-                    val isSelected = (currentSpeed - speed).let { if (it < 0) -it else it } < 0.01f
-                    val label = if (speed == 1.0f) stringResource(Res.string.speed_normal) else "${speed}x"
+                    val isSelected = speed == currentSpeed
 
                     SelectableOptionCard(
                         isSelected = isSelected,
-                        title = label,
+                        title = if (speed == 1.0f) stringResource(Res.string.speed_normal) else "${speed}x",
                         onClick = {
                             onSelectSpeed(speed)
                             onDismiss()
@@ -341,7 +343,7 @@ fun PlayerPlaybackSpeedDialog(
  */
 @Composable
 fun PlayerAudioTrackDialog(
-    audioTracks: List<PlayerAudioTrack>,
+    audioTracks: ImmutableList<PlayerAudioTrack>,
     selectedAudioTrack: PlayerAudioTrack?,
     onSelectAudioTrack: (PlayerAudioTrack) -> Unit,
     onDismiss: () -> Unit
@@ -403,7 +405,7 @@ fun PlayerAudioTrackDialog(
  */
 @Composable
 fun PlayerAudioTracksDialog(
-    audioTracks: List<PlayerAudioTrack>,
+    audioTracks: ImmutableList<PlayerAudioTrack>,
     selectedAudioTrack: PlayerAudioTrack?,
     onSelectAudioTrack: (PlayerAudioTrack) -> Unit,
     onDismiss: () -> Unit

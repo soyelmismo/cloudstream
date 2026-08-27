@@ -10,12 +10,8 @@ import com.lagradost.cloudstream3.shared.persistence.entity.DownloadEpisodeEntit
 import com.lagradost.cloudstream3.shared.persistence.entity.DownloadHeaderEntity
 import kotlinx.coroutines.flow.Flow
 
-/**
- * Data Access Object for cached download headers and episode metadata.
- */
 @Dao
 interface DownloadCacheDao {
-    // Headers
     @Query("SELECT * FROM download_headers WHERE id = :id LIMIT 1")
     suspend fun getHeader(id: Int): DownloadHeaderEntity?
 
@@ -34,7 +30,6 @@ interface DownloadCacheDao {
     @Query("DELETE FROM download_headers WHERE id = :id")
     suspend fun deleteHeader(id: Int)
 
-    // Episodes
     @Query("SELECT * FROM download_episodes WHERE id = :id LIMIT 1")
     suspend fun getEpisode(id: Int): DownloadEpisodeEntity?
 

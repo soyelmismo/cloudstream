@@ -35,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -49,17 +50,20 @@ import com.lagradost.cloudstream3.shared.ui.components.designsystem.GhostButton
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.SecondaryButton
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.SelectableOptionCard
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import com.lagradost.cloudstream3.shared.viewmodels.result.ResultEpisode
 import com.lagradost.cloudstream3.shared.viewmodels.result.ResultEvent
 import com.lagradost.cloudstream3.shared.viewmodels.result.ResultState
 import com.lagradost.cloudstream3.utils.ExtractorLink
+import com.lagradost.cloudstream3.utils.ExtractorLinkType
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
-/**
- * Categorization of audio language / dubbing for stream links.
- */
 enum class AudioCategory(val labelRes: StringResource) {
     ALL(Res.string.audio_filter_all),
     LATINO(Res.string.audio_filter_latino),
@@ -68,50 +72,95 @@ enum class AudioCategory(val labelRes: StringResource) {
     SUBTITLED(Res.string.audio_filter_subbed);
 }
 
-/**
- * Detects the [AudioCategory] of an [ExtractorLink] based on its name, source, and audio track URLs.
- */
-fun ExtractorLink.detectAudioCategory(): AudioCategory {
-    val searchContent = buildString {
-        append(name).append(' ')
-        append(source).append(' ')
-        for (track in audioTracks) {
+private data class AudioMatcher(
+    val category: AudioCategory,
+    val keywords: List<String>,
+    val regex: Regex
+)
+
+private val AUDIO_MATCHERS: List<AudioMatcher> = listOf(
+    AudioMatcher(
+        AudioCategory.LATINO,
+        listOf("latino", "latam"),
+        Regex("""\b(lat)\b""", RegexOption.IGNORE_CASE)
+    ),
+    AudioMatcher(
+        AudioCategory.CASTELLANO,
+        listOf("castellano", "español", "espanol"),
+        Regex("""\b(cast|spa|esp)\b""", RegexOption.IGNORE_CASE)
+    ),
+    AudioMatcher(
+        AudioCategory.ENGLISH,
+        listOf("english"),
+        Regex("""\b(eng|dub|dubbed)\b""", RegexOption.IGNORE_CASE)
+    ),
+    AudioMatcher(
+        AudioCategory.SUBTITLED,
+        listOf("subtitulado", "subbed", "vose"),
+        Regex("""\b(sub|vos)\b""", RegexOption.IGNORE_CASE)
+    )
+)
+
+private fun matchesAudio(content: String, matcher: AudioMatcher): Boolean {
+    return matcher.keywords.any { content.contains(it) } || matcher.regex.containsMatchIn(content)
+}
+
+private fun buildSearchContent(link: ExtractorLink): String {
+    return buildString {
+        append(link.name).append(' ')
+        append(link.source).append(' ')
+        for (track in link.audioTracks) {
             append(track.url).append(' ')
         }
     }.lowercase()
-
-    return when {
-        searchContent.contains("latino") ||
-                searchContent.contains("latam") ||
-                Regex("""\b(lat)\b""", RegexOption.IGNORE_CASE).containsMatchIn(searchContent) -> AudioCategory.LATINO
-
-        searchContent.contains("castellano") ||
-                searchContent.contains("español") ||
-                searchContent.contains("espanol") ||
-                Regex("""\b(cast|spa|esp)\b""", RegexOption.IGNORE_CASE).containsMatchIn(searchContent) -> AudioCategory.CASTELLANO
-
-        searchContent.contains("english") ||
-                Regex("""\b(eng|dub|dubbed)\b""", RegexOption.IGNORE_CASE).containsMatchIn(searchContent) -> AudioCategory.ENGLISH
-
-        searchContent.contains("subtitulado") ||
-                searchContent.contains("subbed") ||
-                searchContent.contains("vose") ||
-                Regex("""\b(sub|vos)\b""", RegexOption.IGNORE_CASE).containsMatchIn(searchContent) -> AudioCategory.SUBTITLED
-
-        else -> AudioCategory.ALL
-    }
 }
 
-/**
- * Modal dialog for Link Extraction and streaming sources selection.
- * Handles loading progress, quality badges, audio category filters, subtitle selection,
- * error retries, and direct playback initiation using [ActionDialog].
- */
+fun ExtractorLink.detectAudioCategory(): AudioCategory {
+    val searchContent = buildSearchContent(this)
+    return AUDIO_MATCHERS.firstOrNull { matchesAudio(searchContent, it) }?.category ?: AudioCategory.ALL
+}
+
+fun computeAvailableAudioCategories(links: ImmutableList<ExtractorLink>): ImmutableList<AudioCategory> {
+    if (links.isEmpty()) return persistentListOf()
+    val detected = links.map { it.detectAudioCategory() }.toSet()
+    val hasSpecific = detected.any { it != AudioCategory.ALL }
+    if (!hasSpecific && detected.size <= 1) return persistentListOf()
+
+    val specificCategories = AudioCategory.entries.filter { it != AudioCategory.ALL && detected.contains(it) }
+    return (persistentListOf(AudioCategory.ALL) + specificCategories).toImmutableList()
+}
+
+fun getExtractorQualityColor(quality: Int): Color = when {
+    quality >= 2160 -> CloudStreamColors.Quality4K
+    quality >= 1080 -> CloudStreamColors.QualityHD
+    quality >= 720 -> CloudStreamColors.QualityHQ
+    else -> CloudStreamColors.QualitySD
+}
+
+@Composable
+fun getExtractorQualityText(quality: Int): String = when {
+    quality >= 2160 -> "4K"
+    quality > 0 -> "${quality}p"
+    else -> stringResource(Res.string.quality_auto)
+}
+
+private fun buildResultLinksSubtitle(
+    targetEpisode: ResultEpisode?,
+    isMovie: Boolean,
+    movieTitle: String,
+    selectLinkText: String,
+    episodeText: String
+): String {
+    if (targetEpisode != null) return targetEpisode.name ?: "$episodeText ${targetEpisode.episode}"
+    if (isMovie) return movieTitle
+    return selectLinkText
+}
+
 @Composable
 fun ResultLinksDialog(
     state: ResultState,
     targetEpisode: ResultEpisode?,
-    onPlayLink: (ExtractorLink, List<ExtractorLink>, List<SubtitleFile>, SubtitleFile?) -> Unit,
+    onPlayLink: (ExtractorLink, ImmutableList<ExtractorLink>, ImmutableList<SubtitleFile>, SubtitleFile?) -> Unit,
     onEvent: (ResultEvent) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -119,34 +168,25 @@ fun ResultLinksDialog(
     var selectedSubtitle by remember { mutableStateOf<SubtitleFile?>(null) }
 
     val availableAudioCategories = remember(state.extractedLinks) {
-        val detected = state.extractedLinks.map { it.detectAudioCategory() }.toSet()
-        if (detected.any { it != AudioCategory.ALL } || detected.size > 1) {
-            listOf(AudioCategory.ALL) + AudioCategory.entries.filter { it != AudioCategory.ALL && detected.contains(it) }
-        } else {
-            emptyList()
-        }
+        computeAvailableAudioCategories(state.extractedLinks)
     }
 
     val filteredLinks = remember(state.extractedLinks, selectedAudioCategory) {
         if (selectedAudioCategory == AudioCategory.ALL) {
             state.extractedLinks
         } else {
-            state.extractedLinks.filter { it.detectAudioCategory() == selectedAudioCategory }
+            state.extractedLinks.filter { it.detectAudioCategory() == selectedAudioCategory }.toImmutableList()
         }
     }
 
     val selectLinkText = stringResource(Res.string.selectLink)
     val episodeText = stringResource(Res.string.episode)
-    val titleText = when {
-        targetEpisode != null -> targetEpisode.name ?: "$episodeText ${targetEpisode.episode}"
-        state.isMovie -> state.title
-        else -> selectLinkText
-    }
+    val subtitleText = buildResultLinksSubtitle(targetEpisode, state.isMovie, state.title, selectLinkText, episodeText)
 
     ActionDialog(
         onDismissRequest = onDismiss,
         title = selectLinkText,
-        subtitle = titleText,
+        subtitle = subtitleText,
         showCloseButton = true,
         content = {
             Column(
@@ -154,168 +194,211 @@ fun ResultLinksDialog(
                     .fillMaxWidth()
                     .heightIn(max = 440.dp)
             ) {
-                // Loading Progress State
                 if (state.isExtractingLinks) {
                     ExtractionLoadingBanner(progressCount = state.linksLoadingProgress)
                     Spacer(modifier = Modifier.height(12.dp))
                 }
 
-                // Extraction Error State
                 if (!state.linksLoadingError.isNullOrBlank()) {
                     ExtractionErrorBanner(
                         error = state.linksLoadingError,
-                        onRetry = {
-                            onEvent(ResultEvent.ReloadLinks(targetEpisode))
-                        }
+                        onRetry = { onEvent(ResultEvent.ReloadLinks(targetEpisode)) }
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                 }
 
-                // Audio Categories Filter Chips (if multiple categories exist)
                 if (availableAudioCategories.size > 1 && state.extractedLinks.isNotEmpty()) {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp)
-                    ) {
-                        items(availableAudioCategories) { category ->
-                            CloudStreamFilterChip(
-                                labelRes = category.labelRes,
-                                isSelected = selectedAudioCategory == category,
-                                onClick = { selectedAudioCategory = category }
-                            )
-                        }
-                    }
-                }
-
-                // Extracted Links List
-                if (state.extractedLinks.isNotEmpty()) {
-                    Text(
-                        text = "${stringResource(Res.string.selectLink)} (${filteredLinks.size})",
-                        style = MaterialTheme.typography.caption.copy(
-                            fontWeight = FontWeight.Bold,
-                            color = CloudStreamColors.TextSecondary
-                        ),
-                        modifier = Modifier.padding(bottom = 6.dp)
+                    AudioCategorySelector(
+                        categories = availableAudioCategories,
+                        selectedCategory = selectedAudioCategory,
+                        onSelectCategory = { selectedAudioCategory = it }
                     )
-
-                    if (filteredLinks.isNotEmpty()) {
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(1f, fill = false)
-                        ) {
-                            items(filteredLinks) { link ->
-                                ExtractorLinkItem(
-                                    link = link,
-                                    onClick = {
-                                        onPlayLink(link, state.extractedLinks, state.extractedSubtitles, selectedSubtitle)
-                                        onDismiss()
-                                    }
-                                )
-                            }
-                        }
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 16.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            BodyMutedText(
-                                text = stringResource(Res.string.noLinksFound)
-                            )
-                        }
-                    }
-                } else if (!state.isExtractingLinks && state.linksLoadingError.isNullOrBlank()) {
-                    // Empty State
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        BodyMutedText(
-                            text = stringResource(Res.string.noLinksFound)
-                        )
-                    }
                 }
 
-                // Subtitles Information & Initial Subtitle Selector
+                if (state.extractedLinks.isNotEmpty()) {
+                    ExtractedLinksList(
+                        links = filteredLinks,
+                        onLinkClick = { link ->
+                            onPlayLink(link, state.extractedLinks, state.extractedSubtitles, selectedSubtitle)
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                } else if (!state.isExtractingLinks && state.linksLoadingError.isNullOrBlank()) {
+                    EmptyLinksBanner(modifier = Modifier.padding(vertical = 24.dp))
+                }
+
                 if (state.extractedSubtitles.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Divider(color = CloudStreamColors.SurfaceVariant)
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.padding(bottom = 6.dp)
-                    ) {
-                        Icon(
-                            painter = painterResource(Res.drawable.ic_outline_subtitles_24),
-                            contentDescription = stringResource(Res.string.subtitles),
-                            tint = CloudStreamColors.SubBadge,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = stringResource(Res.string.initial_subtitle),
-                            style = MaterialTheme.typography.caption.copy(
-                                color = CloudStreamColors.TextSecondary,
-                                fontWeight = FontWeight.Bold
-                            )
-                        )
-                    }
-
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        item {
-                            CloudStreamFilterChip(
-                                label = stringResource(Res.string.subtitle_none),
-                                isSelected = selectedSubtitle == null,
-                                onClick = { selectedSubtitle = null }
-                            )
-                        }
-                        items(state.extractedSubtitles) { sub ->
-                            CloudStreamFilterChip(
-                                label = sub.lang,
-                                isSelected = selectedSubtitle == sub,
-                                onClick = { selectedSubtitle = sub }
-                            )
-                        }
-                    }
+                    SubtitleSelector(
+                        subtitles = state.extractedSubtitles,
+                        selectedSubtitle = selectedSubtitle,
+                        onSelectSubtitle = { selectedSubtitle = it }
+                    )
                 }
             }
         },
         buttons = {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (state.isExtractingLinks) {
-                    GhostButton(
-                        text = stringResource(Res.string.cancel),
-                        onClick = { onEvent(ResultEvent.ClearLinks) },
-                        contentColor = CloudStreamColors.Error
-                    )
-                } else {
-                    Spacer(modifier = Modifier.width(1.dp))
-                }
+            ResultLinksDialogButtons(
+                isExtracting = state.isExtractingLinks,
+                onCancelExtraction = { onEvent(ResultEvent.ClearLinks) },
+                onDismiss = onDismiss
+            )
+        }
+    )
+}
 
-                SecondaryButton(
-                    text = stringResource(Res.string.close),
-                    onClick = onDismiss
+@Composable
+fun AudioCategorySelector(
+    categories: ImmutableList<AudioCategory>,
+    selectedCategory: AudioCategory,
+    onSelectCategory: (AudioCategory) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+    ) {
+        items(categories) { category ->
+            CloudStreamFilterChip(
+                labelRes = category.labelRes,
+                isSelected = selectedCategory == category,
+                onClick = { onSelectCategory(category) }
+            )
+        }
+    }
+}
+
+@Composable
+fun ExtractedLinksList(
+    links: ImmutableList<ExtractorLink>,
+    onLinkClick: (ExtractorLink) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = "${stringResource(Res.string.selectLink)} (${links.size})",
+            style = MaterialTheme.typography.caption.copy(
+                fontWeight = FontWeight.Bold,
+                color = CloudStreamColors.TextSecondary
+            ),
+            modifier = Modifier.padding(bottom = 6.dp)
+        )
+
+        if (links.isNotEmpty()) {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(links) { link ->
+                    ExtractorLinkItem(
+                        link = link,
+                        onClick = { onLinkClick(link) }
+                    )
+                }
+            }
+        } else {
+            EmptyLinksBanner()
+        }
+    }
+}
+
+@Composable
+fun EmptyLinksBanner(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 20.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        BodyMutedText(text = stringResource(Res.string.noLinksFound))
+    }
+}
+
+@Composable
+fun SubtitleSelector(
+    subtitles: ImmutableList<SubtitleFile>,
+    selectedSubtitle: SubtitleFile?,
+    onSelectSubtitle: (SubtitleFile?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Spacer(modifier = Modifier.height(10.dp))
+        Divider(color = CloudStreamColors.SurfaceVariant)
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.padding(bottom = 6.dp)
+        ) {
+            Icon(
+                painter = painterResource(Res.drawable.ic_outline_subtitles_24),
+                contentDescription = stringResource(Res.string.subtitles),
+                tint = CloudStreamColors.SubBadge,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = stringResource(Res.string.initial_subtitle),
+                style = MaterialTheme.typography.caption.copy(
+                    color = CloudStreamColors.TextSecondary,
+                    fontWeight = FontWeight.Bold
+                )
+            )
+        }
+
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            item {
+                CloudStreamFilterChip(
+                    label = stringResource(Res.string.subtitle_none),
+                    isSelected = selectedSubtitle == null,
+                    onClick = { onSelectSubtitle(null) }
+                )
+            }
+            items(subtitles) { sub ->
+                CloudStreamFilterChip(
+                    label = sub.lang,
+                    isSelected = selectedSubtitle == sub,
+                    onClick = { onSelectSubtitle(sub) }
                 )
             }
         }
-    )
+    }
+}
+
+@Composable
+private fun ResultLinksDialogButtons(
+    isExtracting: Boolean,
+    onCancelExtraction: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (isExtracting) {
+            GhostButton(
+                text = stringResource(Res.string.cancel),
+                onClick = onCancelExtraction,
+                contentColor = CloudStreamColors.Error
+            )
+        } else {
+            Spacer(modifier = Modifier.width(1.dp))
+        }
+
+        SecondaryButton(
+            text = stringResource(Res.string.close),
+            onClick = onDismiss
+        )
+    }
 }
 
 @Composable
@@ -426,20 +509,6 @@ fun ExtractorLinkItem(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val qualityBadgeColor = when {
-        link.quality >= 2160 -> CloudStreamColors.Quality4K
-        link.quality >= 1080 -> CloudStreamColors.QualityHD
-        link.quality >= 720 -> CloudStreamColors.QualityHQ
-        link.quality >= 480 -> CloudStreamColors.QualitySD
-        else -> CloudStreamColors.QualitySD
-    }
-
-    val qualityText = when {
-        link.quality >= 2160 -> "4K"
-        link.quality > 0 -> "${link.quality}p"
-        else -> stringResource(Res.string.quality_auto)
-    }
-
     SelectableOptionCard(
         title = link.name.ifBlank { link.source },
         subtitle = "${link.source} • ${link.type.name}",
@@ -447,8 +516,8 @@ fun ExtractorLinkItem(
         onClick = onClick,
         leadingContent = {
             MediaBadge(
-                text = qualityText,
-                backgroundColor = qualityBadgeColor
+                text = getExtractorQualityText(link.quality),
+                backgroundColor = getExtractorQualityColor(link.quality)
             )
         },
         trailingContent = {
@@ -469,4 +538,32 @@ fun ExtractorLinkItem(
         modifier = modifier
     )
 }
+
+@Preview
+@Composable
+private fun ResultLinksDialogPreview() {
+    CloudStreamTheme {
+        ResultLinksDialog(
+            state = ResultState(
+                title = "Inception",
+                isMovie = true,
+                extractedLinks = persistentListOf(
+                    ExtractorLink(
+                        source = "Server 1",
+                        name = "Server 1 HD",
+                        url = "https://example.com/1",
+                        referer = "",
+                        quality = 1080,
+                        type = ExtractorLinkType.VIDEO
+                    )
+                )
+            ),
+            targetEpisode = null,
+            onPlayLink = { _, _, _, _ -> },
+            onEvent = {},
+            onDismiss = {}
+        )
+    }
+}
+
 

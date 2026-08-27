@@ -64,6 +64,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,7 +83,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.SectionHeader
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.SelectableOptionCard
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import com.lagradost.cloudstream3.shared.ui.theme.CloudstreamTheme
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 /**
  * Common Card container for settings groups.
@@ -434,7 +439,7 @@ fun SettingsSliderItem(
 @Composable
 fun <T> SettingsChoiceDialog(
     title: String,
-    items: List<T>,
+    items: ImmutableList<T>,
     selectedItem: T,
     itemLabel: (T) -> String,
     onItemSelected: (T) -> Unit,
@@ -469,9 +474,29 @@ fun <T> SettingsChoiceDialog(
     )
 }
 
+@Composable
+fun <T> SettingsChoiceDialog(
+    title: String,
+    items: List<T>,
+    selectedItem: T,
+    itemLabel: (T) -> String,
+    onItemSelected: (T) -> Unit,
+    onDismissRequest: () -> Unit,
+    itemSubtitle: ((T) -> String?)? = null
+) = SettingsChoiceDialog(
+    title = title,
+    items = items.toImmutableList(),
+    selectedItem = selectedItem,
+    itemLabel = itemLabel,
+    onItemSelected = onItemSelected,
+    onDismissRequest = onDismissRequest,
+    itemSubtitle = itemSubtitle
+)
+
 /**
  * Settings Navigation Category Model for Responsive Dual-Pane / Tab layouts.
  */
+@Immutable
 data class SettingsCategory(
     val id: String,
     val title: String,
@@ -486,7 +511,7 @@ data class SettingsCategory(
  */
 @Composable
 fun ResponsiveSettingsScaffold(
-    categories: List<SettingsCategory>,
+    categories: ImmutableList<SettingsCategory>,
     selectedCategoryId: String?,
     onSelectCategory: (String?) -> Unit,
     topBarTitle: String = stringResource(Res.string.settings_title),
@@ -771,3 +796,35 @@ fun ResponsiveSettingsScaffold(
         }
     }
 }
+
+@Composable
+fun ResponsiveSettingsScaffold(
+    categories: List<SettingsCategory>,
+    selectedCategoryId: String?,
+    onSelectCategory: (String?) -> Unit,
+    topBarTitle: String = stringResource(Res.string.settings_title),
+    onBackClick: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    content: @Composable (selectedCategory: SettingsCategory) -> Unit
+) = ResponsiveSettingsScaffold(
+    categories = categories.toImmutableList(),
+    selectedCategoryId = selectedCategoryId,
+    onSelectCategory = onSelectCategory,
+    topBarTitle = topBarTitle,
+    onBackClick = onBackClick,
+    modifier = modifier,
+    content = content
+)
+
+@Preview
+@Composable
+private fun SettingsComponentsPreview() {
+    CloudStreamTheme {
+        SettingsCard {
+            SettingsSectionHeader(title = "General Settings")
+            SettingsItemRow(title = "Item 1", subtitle = "Item 1 description")
+            SettingsSwitchItem(title = "Toggle Feature", checked = true, onCheckedChange = {})
+        }
+    }
+}
+

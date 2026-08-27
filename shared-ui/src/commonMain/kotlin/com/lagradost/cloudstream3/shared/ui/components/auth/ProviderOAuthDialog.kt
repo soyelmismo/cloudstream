@@ -51,8 +51,11 @@ import com.lagradost.cloudstream3.shared.ui.components.designsystem.CloudStreamT
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.GhostButton
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.PrimaryButton
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
+import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 /**
  * Standardized OAuth Authorization Dialog for Compose Multiplatform.
@@ -71,14 +74,46 @@ fun ProviderOAuthDialog(
     modifier: Modifier = Modifier
 ) {
     val uriHandler = LocalUriHandler.current
-    var pastedUrlOrToken by remember { mutableStateOf("") }
+    ProviderOAuthDialog(
+        providerName = repo.name,
+        providerIcon = repo.icon,
+        authUrl = authUrl,
+        onOpenBrowser = {
+            try {
+                uriHandler.openUri(authUrl)
+            } catch (_: Throwable) {
+                repo.openOAuth2Page()
+            }
+        },
+        isLoading = isLoading,
+        errorMessage = errorMessage,
+        onCompleteLogin = onCompleteLogin,
+        onDismiss = onDismiss,
+        modifier = modifier
+    )
+}
 
+/**
+ * Standalone decoupled overload of [ProviderOAuthDialog].
+ */
+@Composable
+fun ProviderOAuthDialog(
+    providerName: String,
+    providerIcon: DrawableResource? = null,
+    authUrl: String,
+    onOpenBrowser: () -> Unit,
+    isLoading: Boolean = false,
+    errorMessage: String? = null,
+    onCompleteLogin: (String) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var pastedUrlOrToken by remember { mutableStateOf("") }
     val isInputValid = pastedUrlOrToken.isNotBlank()
 
     fun submit() {
-        if (isInputValid && !isLoading) {
-            onCompleteLogin(pastedUrlOrToken.trim())
-        }
+        if (!isInputValid || isLoading) return
+        onCompleteLogin(pastedUrlOrToken.trim())
     }
 
     CloudStreamDialog(
@@ -109,17 +144,17 @@ fun ProviderOAuthDialog(
                             .border(1.dp, CloudStreamColors.Primary.copy(alpha = 0.3f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (repo.icon != null) {
+                        if (providerIcon != null) {
                             Icon(
-                                painter = painterResource(repo.icon!!),
-                                contentDescription = repo.name,
+                                painter = painterResource(providerIcon),
+                                contentDescription = providerName,
                                 tint = CloudStreamColors.Primary,
                                 modifier = Modifier.size(24.dp)
                             )
                         } else {
                             Icon(
                                 imageVector = Icons.Default.Person,
-                                contentDescription = repo.name,
+                                contentDescription = providerName,
                                 tint = CloudStreamColors.Primary,
                                 modifier = Modifier.size(24.dp)
                             )
@@ -128,7 +163,7 @@ fun ProviderOAuthDialog(
 
                     Column {
                         Text(
-                            text = repo.name,
+                            text = providerName,
                             style = MaterialTheme.typography.h6.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = CloudStreamColors.TextPrimary,
@@ -175,13 +210,7 @@ fun ProviderOAuthDialog(
             // Re-open browser button
             GhostButton(
                 textRes = Res.string.auth_reopen_browser,
-                onClick = {
-                    try {
-                        uriHandler.openUri(authUrl)
-                    } catch (_: Throwable) {
-                        repo.openOAuth2Page()
-                    }
-                },
+                onClick = onOpenBrowser,
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Default.OpenInBrowser,
@@ -282,3 +311,18 @@ fun ProviderOAuthDialog(
         }
     }
 }
+
+@Preview
+@Composable
+private fun ProviderOAuthDialogPreview() {
+    CloudStreamTheme {
+        ProviderOAuthDialog(
+            providerName = "Test OAuth Provider",
+            authUrl = "https://example.com/oauth",
+            onOpenBrowser = {},
+            onCompleteLogin = {},
+            onDismiss = {}
+        )
+    }
+}
+

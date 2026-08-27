@@ -137,16 +137,14 @@ abstract class VideoClickAction : ExternalPlayerAction {
         return result.getOrThrow()
     }
 
-    /** Internally uses activityResultLauncher,
-     * use this when the activity has a result like watched position */
+    /**
+     * Launches an activity for result (e.g. watched position) using the active MainActivity.
+     */
     @Throws
-    suspend fun launchResult(intent : Intent?, options : ActivityOptionsCompat? = null) {
-        if (intent == null) {
-            return
-        }
-
+    suspend fun launchResult(intent: Intent?, options: ActivityOptionsCompat? = null) {
+        if (intent == null) return
         uiThread {
-            MainActivity.activityResultLauncher?.launch(intent,options)
+            MainActivity.launchResult(intent, options)
         }
     }
 

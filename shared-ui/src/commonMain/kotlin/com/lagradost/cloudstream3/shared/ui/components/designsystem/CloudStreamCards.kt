@@ -40,12 +40,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
-
-// =============================================================================
-// 1. SELECTABLE OPTION CARD (SLOT / CUSTOM CONTENT)
-// =============================================================================
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 /**
  * Standardized Selectable Option Card for CloudStream selection lists, dialogs, and settings.
@@ -133,10 +131,6 @@ fun SelectableOptionCard(
         )
     }
 }
-
-// =============================================================================
-// 2. SELECTABLE OPTION CARD (CANONICAL IMPLEMENTATION & STRING RESOURCE OVERLOAD)
-// =============================================================================
 
 /**
  * Standardized Selectable Option Card with String title and optional subtitle, icons, and actions.
@@ -270,3 +264,27 @@ fun SelectableOptionCard(
     enabled = enabled,
     interactionSource = interactionSource
 )
+
+@Preview
+@Composable
+private fun SelectableOptionCardPreview() {
+    CloudStreamTheme {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SelectableOptionCard(
+                title = "Selected Option Card",
+                subtitle = "Active configuration option description",
+                isSelected = true,
+                onClick = {}
+            )
+            SelectableOptionCard(
+                title = "Unselected Option Card",
+                subtitle = "Inactive configuration option description",
+                isSelected = false,
+                onClick = {}
+            )
+        }
+    }
+}

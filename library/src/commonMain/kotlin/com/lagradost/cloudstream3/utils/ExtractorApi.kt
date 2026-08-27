@@ -736,12 +736,10 @@ constructor(
 
     @JsonIgnore
     fun getAllHeaders(): Map<String, String> {
-        if (referer.isBlank()) {
+        if (referer.isBlank() || headers.keys.any { it.equals("referer", ignoreCase = true) }) {
             return headers
-        } else if (headers.keys.none { it.equals("referer", ignoreCase = true) }) {
-            return headers + mapOf("referer" to referer)
         }
-        return headers
+        return headers + ("referer" to referer)
     }
 
     @Suppress("DEPRECATION")
@@ -924,9 +922,47 @@ suspend fun loadExtractor(
 }
 
 
+private fun findPrefixExtractor(compareUrl: String): ExtractorApi? {
+    for (index in extractorApis.lastIndex downTo 0) {
+        val extractor = extractorApis[index]
+        if (compareUrl.startsWith(extractor.mainUrl.replace(schemaStripRegex, ""))) {
+            return extractor
+        }
+    }
+    return null
+}
+
+private fun findFuzzyExtractor(currentUrl: String): ExtractorApi? {
+    for (index in extractorApis.lastIndex downTo 0) {
+        val extractor = extractorApis[index]
+        if (Levenshtein.partialRatio(extractor.mainUrl, currentUrl) > 80) {
+            return extractor
+        }
+    }
+    return null
+}
+
+private suspend fun tryRunExtractor(
+    extractor: ExtractorApi,
+    currentUrl: String,
+    referer: String?,
+    subtitleCallback: (SubtitleFile) -> Unit,
+    callback: (ExtractorLink) -> Unit
+): Boolean {
+    try {
+        extractor.getUrl(currentUrl, referer, subtitleCallback, callback)
+    } catch (e: Exception) {
+        logError(e)
+        if (e is CancellationException) {
+            throw e
+        }
+    }
+    return true
+}
+
 /**
  * Tries to load the appropriate extractor based on link, returns true if any extractor is loaded.
- * */
+ */
 @Throws(CancellationException::class)
 suspend fun loadExtractor(
     url: String,
@@ -934,51 +970,13 @@ suspend fun loadExtractor(
     subtitleCallback: (SubtitleFile) -> Unit,
     callback: (ExtractorLink) -> Unit
 ): Boolean {
-    // Ensure this coroutine has not timed out
     coroutineScope { ensureActive() }
 
     val currentUrl = unshortenLinkSafe(url)
     val compareUrl = currentUrl.lowercase().replace(schemaStripRegex, "")
 
-    // Iterate in reverse order so the new registered ExtractorApi takes priority
-    for (index in extractorApis.lastIndex downTo 0) {
-        val extractor = extractorApis[index]
-        if (compareUrl.startsWith(extractor.mainUrl.replace(schemaStripRegex, ""))) {
-            try {
-                extractor.getUrl(currentUrl, referer, subtitleCallback, callback)
-            } catch (e: Exception) {
-                logError(e)
-                // Rethrow if we have timed out
-                if (e is CancellationException) {
-                    throw e
-                }
-            }
-            return true
-        }
-    }
-
-    // this is to match mirror domains - like example.com, example.net
-    for (index in extractorApis.lastIndex downTo 0) {
-        val extractor = extractorApis[index]
-        if (Levenshtein.partialRatio(
-                extractor.mainUrl,
-                currentUrl
-            ) > 80
-        ) {
-            try {
-                extractor.getUrl(currentUrl, referer, subtitleCallback, callback)
-            } catch (e: Exception) {
-                logError(e)
-                // Rethrow if we have timed out
-                if (e is CancellationException) {
-                    throw e
-                }
-            }
-            return true
-        }
-    }
-
-    return false
+    val extractor = findPrefixExtractor(compareUrl) ?: findFuzzyExtractor(currentUrl) ?: return false
+    return tryRunExtractor(extractor, currentUrl, referer, subtitleCallback, callback)
 }
 
 val extractorApis: AtomicMutableList<ExtractorApi> = atomicListOf(

@@ -9,9 +9,6 @@ import androidx.room.Upsert
 import com.lagradost.cloudstream3.shared.persistence.entity.AccountEntity
 import kotlinx.coroutines.flow.Flow
 
-/**
- * Data Access Object for Account management.
- */
 @Dao
 interface AccountDao {
     @Query("SELECT * FROM accounts ORDER BY keyIndex ASC")

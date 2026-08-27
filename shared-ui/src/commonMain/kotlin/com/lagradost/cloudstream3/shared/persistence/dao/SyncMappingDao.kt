@@ -9,9 +9,6 @@ import androidx.room.Upsert
 import com.lagradost.cloudstream3.shared.persistence.entity.SyncMappingEntity
 import kotlinx.coroutines.flow.Flow
 
-/**
- * Data Access Object for external synchronization mappings (e.g. MAL, AniList, Simkl, Trakt).
- */
 @Dao
 interface SyncMappingDao {
     @Query("SELECT * FROM sync_mappings WHERE accountId = :accountId AND mediaId = :mediaId AND syncPrefix = :syncPrefix LIMIT 1")

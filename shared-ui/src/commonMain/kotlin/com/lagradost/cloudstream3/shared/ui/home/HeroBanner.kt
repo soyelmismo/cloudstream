@@ -28,6 +28,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import org.jetbrains.compose.resources.stringResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -53,7 +54,7 @@ import com.lagradost.cloudstream3.shared.ui.components.designsystem.SecondaryBut
 import com.lagradost.cloudstream3.shared.ui.focus.dpadFocusable
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
 import kotlinx.coroutines.delay
-import org.jetbrains.compose.resources.stringResource
+import kotlinx.collections.immutable.ImmutableList
 
 /**
  * Modern Featured Hero Banner with streaming-service aesthetics (Netflix / HBO / AppleTV style).
@@ -69,7 +70,7 @@ import org.jetbrains.compose.resources.stringResource
  */
 @Composable
 fun HeroBanner(
-    items: List<SearchResponse>,
+    items: ImmutableList<SearchResponse>,
     onItemClick: (SearchResponse) -> Unit,
     onPlayClick: ((SearchResponse) -> Unit)? = null,
     modifier: Modifier = Modifier,

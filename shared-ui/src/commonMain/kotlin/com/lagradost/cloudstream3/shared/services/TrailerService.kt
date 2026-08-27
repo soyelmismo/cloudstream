@@ -119,47 +119,75 @@ object TrailerService {
         }
 
         runCatchingTrailer("General trailer extraction") {
-            // 1. YouTube specific handler
-            if (isYouTubeUrl(normalizedUrl)) {
-                runCatchingTrailer("YouTube extractor") {
-                    YoutubeExtractor().getUrl(
-                        url = normalizedUrl,
-                        referer = referer,
-                        subtitleCallback = subtitleCallback,
-                        callback = wrappedLinkCallback
-                    )
-                }
+            if (tryExtractYouTube(normalizedUrl, referer, subtitleCallback, wrappedLinkCallback)) {
+                return@runCatchingTrailer
             }
-
-            // 2. Generic registered extractors via loadExtractor
-            if (!foundLinks) {
-                runCatchingTrailer("loadExtractor") {
-                    val handled = loadExtractor(
-                        url = normalizedUrl,
-                        referer = referer,
-                        subtitleCallback = subtitleCallback,
-                        callback = wrappedLinkCallback
-                    )
-                    if (handled) foundLinks = true
-                }
+            if (tryExtractGeneric(normalizedUrl, referer, subtitleCallback, wrappedLinkCallback)) {
+                return@runCatchingTrailer
             }
-
-            // 3. Fallback direct stream link if URL is a direct web link
-            if (!foundLinks && (normalizedUrl.startsWith("http://") || normalizedUrl.startsWith("https://"))) {
-                val direct = newExtractorLink(
-                    source = "Trailer",
-                    name = "Trailer Stream",
-                    url = normalizedUrl,
-                    type = INFER_TYPE
-                ) {
-                    this.referer = referer ?: ""
-                    this.quality = Qualities.Unknown.value
-                    this.headers = headers
-                }
-                wrappedLinkCallback(direct)
-            }
+            tryExtractDirectFallback(normalizedUrl, referer, headers, wrappedLinkCallback)
         }
 
         return foundLinks
+    }
+
+    private suspend fun tryExtractYouTube(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        linkCallback: (ExtractorLink) -> Unit
+    ): Boolean {
+        if (!isYouTubeUrl(url)) return false
+        var extracted = false
+        runCatchingTrailer("YouTube extractor") {
+            YoutubeExtractor().getUrl(
+                url = url,
+                referer = referer,
+                subtitleCallback = subtitleCallback,
+                callback = {
+                    extracted = true
+                    linkCallback(it)
+                }
+            )
+        }
+        return extracted
+    }
+
+    private suspend fun tryExtractGeneric(
+        url: String,
+        referer: String?,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        linkCallback: (ExtractorLink) -> Unit
+    ): Boolean {
+        var handled = false
+        runCatchingTrailer("loadExtractor") {
+            handled = loadExtractor(
+                url = url,
+                referer = referer,
+                subtitleCallback = subtitleCallback,
+                callback = linkCallback
+            )
+        }
+        return handled
+    }
+
+    private suspend fun tryExtractDirectFallback(
+        url: String,
+        referer: String?,
+        headers: Map<String, String>,
+        linkCallback: (ExtractorLink) -> Unit
+    ) {
+        if (!url.startsWith("http://") && !url.startsWith("https://")) return
+        val direct = newExtractorLink(
+            source = "Trailer",
+            name = "Trailer Stream",
+            url = url,
+            type = INFER_TYPE
+        ) {
+            this.referer = referer ?: ""
+            this.quality = Qualities.Unknown.value
+            this.headers = headers
+        }
+        linkCallback(direct)
     }
 }

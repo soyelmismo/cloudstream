@@ -47,9 +47,14 @@ import com.lagradost.cloudstream3.shared.ui.components.designsystem.DangerButton
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.GhostButton
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.OutlinedActionButton
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 /**
  * Standardized Provider Account Management Dialog for Compose Multiplatform.
@@ -62,7 +67,7 @@ import org.jetbrains.compose.resources.stringResource
 fun ProviderAccountDialog(
     api: AuthAPI,
     currentUser: AuthUser?,
-    accounts: List<AuthData> = emptyList(),
+    accounts: ImmutableList<AuthData> = persistentListOf(),
     onSelectAccount: (AuthData) -> Unit,
     onAddAccount: () -> Unit,
     onLogout: (AuthUser) -> Unit,
@@ -82,6 +87,27 @@ fun ProviderAccountDialog(
     )
 }
 
+@Composable
+fun ProviderAccountDialog(
+    api: AuthAPI,
+    currentUser: AuthUser?,
+    accounts: List<AuthData>,
+    onSelectAccount: (AuthData) -> Unit,
+    onAddAccount: () -> Unit,
+    onLogout: (AuthUser) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) = ProviderAccountDialog(
+    api = api,
+    currentUser = currentUser,
+    accounts = accounts.toImmutableList(),
+    onSelectAccount = onSelectAccount,
+    onAddAccount = onAddAccount,
+    onLogout = onLogout,
+    onDismiss = onDismiss,
+    modifier = modifier
+)
+
 /**
  * Convenience overload of [ProviderAccountDialog] taking an [AuthRepo].
  */
@@ -98,7 +124,7 @@ fun ProviderAccountDialog(
         providerName = repo.name,
         providerIcon = repo.icon,
         currentUser = repo.authUser(),
-        accounts = repo.accounts.toList(),
+        accounts = repo.accounts.toImmutableList(),
         onSelectAccount = onSelectAccount,
         onAddAccount = onAddAccount,
         onLogout = onLogout,
@@ -115,7 +141,7 @@ fun ProviderAccountDialog(
     providerName: String,
     providerIcon: DrawableResource? = null,
     currentUser: AuthUser?,
-    accounts: List<AuthData> = emptyList(),
+    accounts: ImmutableList<AuthData> = persistentListOf(),
     onSelectAccount: (AuthData) -> Unit,
     onAddAccount: () -> Unit,
     onLogout: (AuthUser) -> Unit,
@@ -131,9 +157,6 @@ fun ProviderAccountDialog(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // =============================================================
-            // 1. HEADER SECTION
-            // =============================================================
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -205,9 +228,6 @@ fun ProviderAccountDialog(
                 }
             }
 
-            // =============================================================
-            // 2. ACTIVE ACCOUNT HERO CARD
-            // =============================================================
             Surface(
                 shape = RoundedCornerShape(14.dp),
                 color = CloudStreamColors.SurfaceVariant,
@@ -288,9 +308,6 @@ fun ProviderAccountDialog(
                 }
             }
 
-            // =============================================================
-            // 3. SAVED ACCOUNTS LIST (Switch Accounts)
-            // =============================================================
             val otherAccounts = accounts.filter { it.user.id != currentUser?.id }
 
             Column(
@@ -369,9 +386,6 @@ fun ProviderAccountDialog(
                 }
             }
 
-            // =============================================================
-            // 4. ADD ANOTHER ACCOUNT ACTION
-            // =============================================================
             OutlinedActionButton(
                 textRes = Res.string.add_account,
                 onClick = onAddAccount,
@@ -388,9 +402,6 @@ fun ProviderAccountDialog(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // =============================================================
-            // 5. ACTION BUTTONS (Logout & Close)
-            // =============================================================
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -422,6 +433,29 @@ fun ProviderAccountDialog(
         }
     }
 }
+
+@Composable
+fun ProviderAccountDialog(
+    providerName: String,
+    providerIcon: DrawableResource? = null,
+    currentUser: AuthUser?,
+    accounts: List<AuthData>,
+    onSelectAccount: (AuthData) -> Unit,
+    onAddAccount: () -> Unit,
+    onLogout: (AuthUser) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) = ProviderAccountDialog(
+    providerName = providerName,
+    providerIcon = providerIcon,
+    currentUser = currentUser,
+    accounts = accounts.toImmutableList(),
+    onSelectAccount = onSelectAccount,
+    onAddAccount = onAddAccount,
+    onLogout = onLogout,
+    onDismiss = onDismiss,
+    modifier = modifier
+)
 
 /**
  * Visual Avatar representation for [AuthUser].
@@ -505,3 +539,19 @@ private fun AccountAvatar(
         }
     }
 }
+
+@Preview
+@Composable
+private fun ProviderAccountDialogPreview() {
+    CloudStreamTheme {
+        ProviderAccountDialog(
+            providerName = "Test Provider",
+            currentUser = AuthUser(id = 1, name = "Test User"),
+            onSelectAccount = {},
+            onAddAccount = {},
+            onLogout = {},
+            onDismiss = {}
+        )
+    }
+}
+

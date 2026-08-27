@@ -10,6 +10,9 @@ import com.lagradost.cloudstream3.shared.player.PlayerEvent
 import com.lagradost.cloudstream3.shared.player.PlayerState
 import com.lagradost.cloudstream3.shared.player.VideoPlayer
 import com.lagradost.cloudstream3.utils.Qualities
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -117,12 +120,12 @@ class FakeWatchProgressRepository : WatchProgressRepository {
         return MutableStateFlow(progressMap[accountId to mediaId])
     }
 
-    override suspend fun getAllProgress(accountId: Int): List<WatchProgressEntity> {
-        return progressMap.filterKeys { it.first == accountId }.values.toList()
+    override suspend fun getAllProgress(accountId: Int): ImmutableList<WatchProgressEntity> {
+        return progressMap.filterKeys { it.first == accountId }.values.toImmutableList()
     }
 
-    override fun getAllProgressFlow(accountId: Int): Flow<List<WatchProgressEntity>> {
-        return MutableStateFlow(progressMap.filterKeys { it.first == accountId }.values.toList())
+    override fun getAllProgressFlow(accountId: Int): Flow<ImmutableList<WatchProgressEntity>> {
+        return MutableStateFlow(progressMap.filterKeys { it.first == accountId }.values.toImmutableList())
     }
 
     override suspend fun setProgress(
@@ -162,12 +165,12 @@ class FakeResumeWatchingRepository : ResumeWatchingRepository {
         return MutableStateFlow(resumeMap[accountId to parentId])
     }
 
-    override suspend fun getAllResumeWatching(accountId: Int): List<ResumeWatchingEntity> {
-        return resumeMap.filterKeys { it.first == accountId }.values.toList()
+    override suspend fun getAllResumeWatching(accountId: Int): ImmutableList<ResumeWatchingEntity> {
+        return resumeMap.filterKeys { it.first == accountId }.values.toImmutableList()
     }
 
-    override fun getAllResumeWatchingFlow(accountId: Int): Flow<List<ResumeWatchingEntity>> {
-        return MutableStateFlow(resumeMap.filterKeys { it.first == accountId }.values.toList())
+    override fun getAllResumeWatchingFlow(accountId: Int): Flow<ImmutableList<ResumeWatchingEntity>> {
+        return MutableStateFlow(resumeMap.filterKeys { it.first == accountId }.values.toImmutableList())
     }
 
     override suspend fun setResumeWatching(
@@ -214,20 +217,20 @@ class FakeBookmarkRepository : BookmarkRepository {
         return MutableStateFlow(bookmarkMap[accountId to id])
     }
 
-    override suspend fun getAllBookmarks(accountId: Int): List<BookmarkEntity> {
-        return bookmarkMap.filterKeys { it.first == accountId }.values.toList()
+    override suspend fun getAllBookmarks(accountId: Int): ImmutableList<BookmarkEntity> {
+        return bookmarkMap.filterKeys { it.first == accountId }.values.toImmutableList()
     }
 
-    override fun getAllBookmarksFlow(accountId: Int): Flow<List<BookmarkEntity>> {
-        return MutableStateFlow(bookmarkMap.filterKeys { it.first == accountId }.values.toList())
+    override fun getAllBookmarksFlow(accountId: Int): Flow<ImmutableList<BookmarkEntity>> {
+        return MutableStateFlow(bookmarkMap.filterKeys { it.first == accountId }.values.toImmutableList())
     }
 
-    override suspend fun getBookmarksByWatchType(accountId: Int, watchType: Int): List<BookmarkEntity> {
-        return bookmarkMap.filterKeys { it.first == accountId }.values.filter { it.watchType == watchType }
+    override suspend fun getBookmarksByWatchType(accountId: Int, watchType: Int): ImmutableList<BookmarkEntity> {
+        return bookmarkMap.filterKeys { it.first == accountId }.values.filter { it.watchType == watchType }.toImmutableList()
     }
 
-    override fun getBookmarksByWatchTypeFlow(accountId: Int, watchType: Int): Flow<List<BookmarkEntity>> {
-        return MutableStateFlow(bookmarkMap.filterKeys { it.first == accountId }.values.filter { it.watchType == watchType })
+    override fun getBookmarksByWatchTypeFlow(accountId: Int, watchType: Int): Flow<ImmutableList<BookmarkEntity>> {
+        return MutableStateFlow(bookmarkMap.filterKeys { it.first == accountId }.values.filter { it.watchType == watchType }.toImmutableList())
     }
 
     override suspend fun saveBookmark(bookmark: BookmarkEntity) {
@@ -454,11 +457,11 @@ class PlayerControllerViewModelTest {
             progressSaveIntervalMs = 0L
         )
 
-        val ep1 = PlayerEpisode(id = 101, name = "Episode 1", qualities = listOf(PlayerQuality(url = "https://example.com/1.mp4", quality = 1080)))
-        val ep2 = PlayerEpisode(id = 102, name = "Episode 2", qualities = listOf(PlayerQuality(url = "https://example.com/2.mp4", quality = 1080)))
-        val ep3 = PlayerEpisode(id = 103, name = "Episode 3", qualities = listOf(PlayerQuality(url = "https://example.com/3.mp4", quality = 1080)))
+        val ep1 = PlayerEpisode(id = 101, name = "Episode 1", qualities = persistentListOf(PlayerQuality(url = "https://example.com/1.mp4", quality = 1080)))
+        val ep2 = PlayerEpisode(id = 102, name = "Episode 2", qualities = persistentListOf(PlayerQuality(url = "https://example.com/2.mp4", quality = 1080)))
+        val ep3 = PlayerEpisode(id = 103, name = "Episode 3", qualities = persistentListOf(PlayerQuality(url = "https://example.com/3.mp4", quality = 1080)))
 
-        viewModel.onEvent(PlayerUiEvent.LoadPlaylist(playlist = listOf(ep1, ep2, ep3), startIndex = 0))
+        viewModel.onEvent(PlayerUiEvent.LoadPlaylist(playlist = persistentListOf(ep1, ep2, ep3), startIndex = 0))
         testDispatcher.scheduler.advanceUntilIdle()
 
         assertEquals(101, viewModel.currentState.currentEpisodeId)
@@ -545,7 +548,7 @@ class PlayerControllerViewModelTest {
         val ep = PlayerEpisode(
             id = 555,
             name = "Test Movie",
-            qualities = listOf(PlayerQuality(url = "https://example.com/movie.mp4", quality = 1080))
+            qualities = persistentListOf(PlayerQuality(url = "https://example.com/movie.mp4", quality = 1080))
         )
 
         viewModel.onEvent(PlayerUiEvent.LoadEpisode(episode = ep, accountId = 1))
@@ -608,7 +611,7 @@ class PlayerControllerViewModelTest {
         val epResume = PlayerEpisode(
             id = 777,
             name = "Resume Ep",
-            qualities = listOf(PlayerQuality(url = "https://example.com/resumable.mp4", quality = 1080))
+            qualities = persistentListOf(PlayerQuality(url = "https://example.com/resumable.mp4", quality = 1080))
         )
 
         newViewModel.onEvent(PlayerUiEvent.LoadEpisode(episode = epResume, accountId = 2))
@@ -636,7 +639,7 @@ class PlayerControllerViewModelTest {
         val ep = PlayerEpisode(
             id = 888,
             name = "Periodic Test Ep",
-            qualities = listOf(PlayerQuality(url = "https://example.com/video.mp4", quality = 1080))
+            qualities = persistentListOf(PlayerQuality(url = "https://example.com/video.mp4", quality = 1080))
         )
 
         viewModel.onEvent(PlayerUiEvent.LoadEpisode(episode = ep, accountId = 1))
@@ -682,8 +685,8 @@ class PlayerControllerViewModelTest {
         val ep = PlayerEpisode(
             id = 999,
             name = "Test Ep",
-            qualities = listOf(q1, q2),
-            subtitles = listOf(sub1, sub2)
+            qualities = persistentListOf(q1, q2),
+            subtitles = persistentListOf(sub1, sub2)
         )
 
         viewModel.onEvent(PlayerUiEvent.LoadEpisode(episode = ep, accountId = 1))
@@ -960,7 +963,7 @@ class PlayerControllerViewModelTest {
         )
 
         // Episode loaded without initial qualities (as happens during Quick Play from Home / Continue Watching)
-        val ep = PlayerEpisode(id = 999, name = "Test Ep", qualities = emptyList())
+        val ep = PlayerEpisode(id = 999, name = "Test Ep", qualities = persistentListOf())
         viewModel.onEvent(PlayerUiEvent.LoadEpisode(episode = ep, accountId = 1))
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -976,8 +979,8 @@ class PlayerControllerViewModelTest {
 
         viewModel.onEvent(
             PlayerUiEvent.UpdateQualitiesAndSubtitles(
-                qualities = listOf(q480, q2160, q720, q1080, qAuto),
-                subtitles = emptyList()
+                qualities = persistentListOf(q480, q2160, q720, q1080, qAuto),
+                subtitles = persistentListOf()
             )
         )
         testDispatcher.scheduler.advanceUntilIdle()
@@ -1006,7 +1009,7 @@ class PlayerControllerViewModelTest {
             progressSaveIntervalMs = 0L
         )
 
-        val ep = PlayerEpisode(id = 1001, name = "Test Ep 2", qualities = emptyList())
+        val ep = PlayerEpisode(id = 1001, name = "Test Ep 2", qualities = persistentListOf())
         viewModel.onEvent(PlayerUiEvent.LoadEpisode(episode = ep, accountId = 1))
         testDispatcher.scheduler.advanceUntilIdle()
 
@@ -1017,8 +1020,8 @@ class PlayerControllerViewModelTest {
 
         viewModel.onEvent(
             PlayerUiEvent.UpdateQualitiesAndSubtitles(
-                qualities = listOf(qUnknownSd, qUnknown4k, qUnknownFhd, qUnknownHd),
-                subtitles = emptyList()
+                qualities = persistentListOf(qUnknownSd, qUnknown4k, qUnknownFhd, qUnknownHd),
+                subtitles = persistentListOf()
             )
         )
         testDispatcher.scheduler.advanceUntilIdle()
@@ -1049,7 +1052,7 @@ class PlayerControllerViewModelTest {
         val ep = PlayerEpisode(
             id = 1002,
             name = "Test Ep 3",
-            qualities = listOf(q360, q720, q1080)
+            qualities = persistentListOf(q360, q720, q1080)
         )
 
         viewModel.onEvent(PlayerUiEvent.LoadEpisode(episode = ep, accountId = 1))

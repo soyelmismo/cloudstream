@@ -16,10 +16,16 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.getString
 import kotlin.math.max
 
+private const val AV_TRANSPORT_SERVICE_TYPE = "urn:schemas-upnp-org:service:AVTransport:1"
+private const val SOAP_ACTION_SET_URI = "$AV_TRANSPORT_SERVICE_TYPE#SetAVTransportURI"
+private const val SOAP_ACTION_PREFIX = "$AV_TRANSPORT_SERVICE_TYPE#"
+private const val SSDP_HEADER_LOCATION = "location"
+private const val SSDP_HEADER_USN = "usn"
+
+private data class SsdpHeaders(val location: String?, val usn: String?)
+
 /**
  * Unified UPnP / DLNA and SSDP Casting Client in [commonMain].
- * Centralizes SSDP response parsing, XML metadata resolution, DIDL-Lite generation,
- * AVTransport SOAP commands, and remote playback session state.
  */
 class UPnPCastClient(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
@@ -54,7 +60,6 @@ class UPnPCastClient(
                     discoverSsdpDevices()
                     onCustomDiscovery?.invoke()
                 } catch (_: Throwable) {
-                    // Graceful fallback on restricted or offline network
                 }
                 delay(12000)
             }
@@ -104,7 +109,7 @@ class UPnPCastClient(
                     val setUriSoap = buildSetAvTransportUriSoap(media)
                     UPnPTransport.sendSoap(
                         controlUrl = controlUrl,
-                        soapAction = "urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI",
+                        soapAction = SOAP_ACTION_SET_URI,
                         xmlPayload = setUriSoap
                     )
 
@@ -149,7 +154,7 @@ class UPnPCastClient(
                 if (controlUrl != null) {
                     UPnPTransport.sendSoap(
                         controlUrl = controlUrl,
-                        soapAction = "urn:schemas-upnp-org:service:AVTransport:1#$soapActionName",
+                        soapAction = "$SOAP_ACTION_PREFIX$soapActionName",
                         xmlPayload = xmlPayload
                     )
                 }
@@ -227,28 +232,32 @@ class UPnPCastClient(
         }
     }
 
-    private suspend fun parseSsdpResponse(response: String, senderHost: String) {
-        val lines = response.lines()
+    private fun parseSsdpHeaders(rawResponse: String): SsdpHeaders {
         var location: String? = null
         var usn: String? = null
-
-        for (line in lines) {
-            val lower = line.lowercase()
-            if (lower.startsWith("location:")) {
-                location = line.substring(9).trim()
-            } else if (lower.startsWith("usn:")) {
-                usn = line.substring(4).trim()
+        for (line in rawResponse.lines()) {
+            val colonIdx = line.indexOf(':')
+            if (colonIdx == -1) continue
+            val key = line.substring(0, colonIdx).trim().lowercase()
+            val value = line.substring(colonIdx + 1).trim()
+            when (key) {
+                SSDP_HEADER_LOCATION -> location = value
+                SSDP_HEADER_USN -> usn = value
             }
         }
+        return SsdpHeaders(location, usn)
+    }
 
-        if (location != null && usn != null) {
-            val deviceId = usn.substringBefore("::").ifEmpty { location }
-            val alreadyKnown = synchronized(devicesLock) {
-                discoveredDevicesMap.containsKey(deviceId)
-            }
-            if (!alreadyKnown) {
-                fetchDeviceDescription(location, deviceId, senderHost)
-            }
+    private suspend fun parseSsdpResponse(response: String, senderHost: String) {
+        val (location, usn) = parseSsdpHeaders(response)
+        if (location == null || usn == null) return
+
+        val deviceId = usn.substringBefore("::").ifEmpty { location }
+        val isNewDevice = synchronized(devicesLock) {
+            !discoveredDevicesMap.containsKey(deviceId)
+        }
+        if (isNewDevice) {
+            fetchDeviceDescription(location, deviceId, senderHost)
         }
     }
 
@@ -315,7 +324,7 @@ class UPnPCastClient(
         fun buildSetAvTransportUriSoap(media: CastMediaItem): String {
             return buildSoapEnvelope(
                 """
-                <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+                <u:SetAVTransportURI xmlns:u="$AV_TRANSPORT_SERVICE_TYPE">
                     <InstanceID>0</InstanceID>
                     <CurrentURI>${escapeXml(media.url)}</CurrentURI>
                     <CurrentURIMetaData>${buildDidlMetadata(media)}</CurrentURIMetaData>
@@ -327,7 +336,7 @@ class UPnPCastClient(
         fun buildPlaySoap(): String {
             return buildSoapEnvelope(
                 """
-                <u:Play xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+                <u:Play xmlns:u="$AV_TRANSPORT_SERVICE_TYPE">
                     <InstanceID>0</InstanceID>
                     <Speed>1</Speed>
                 </u:Play>
@@ -338,7 +347,7 @@ class UPnPCastClient(
         fun buildPauseSoap(): String {
             return buildSoapEnvelope(
                 """
-                <u:Pause xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+                <u:Pause xmlns:u="$AV_TRANSPORT_SERVICE_TYPE">
                     <InstanceID>0</InstanceID>
                 </u:Pause>
                 """.trimIndent()
@@ -348,7 +357,7 @@ class UPnPCastClient(
         fun buildSeekSoap(relTimeStr: String): String {
             return buildSoapEnvelope(
                 """
-                <u:Seek xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+                <u:Seek xmlns:u="$AV_TRANSPORT_SERVICE_TYPE">
                     <InstanceID>0</InstanceID>
                     <Unit>REL_TIME</Unit>
                     <Target>$relTimeStr</Target>
@@ -360,7 +369,7 @@ class UPnPCastClient(
         fun buildStopSoap(): String {
             return buildSoapEnvelope(
                 """
-                <u:Stop xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+                <u:Stop xmlns:u="$AV_TRANSPORT_SERVICE_TYPE">
                     <InstanceID>0</InstanceID>
                 </u:Stop>
                 """.trimIndent()
@@ -411,8 +420,7 @@ class UPnPCastClient(
         }
 
         fun extractAvTransportControlUrl(xml: String): String? {
-            val serviceType = "urn:schemas-upnp-org:service:AVTransport:1"
-            val serviceIndex = xml.indexOf(serviceType)
+            val serviceIndex = xml.indexOf(AV_TRANSPORT_SERVICE_TYPE)
             if (serviceIndex == -1) return null
 
             val block = xml.substring(serviceIndex, (serviceIndex + 500).coerceAtMost(xml.length))
@@ -420,17 +428,19 @@ class UPnPCastClient(
         }
 
         fun resolveControlUrl(baseUrl: String, controlPath: String?): String? {
-            if (controlPath == null) return null
-            if (controlPath.startsWith("http://") || controlPath.startsWith("https://")) {
+            if (controlPath.isNullOrBlank()) return null
+            if (controlPath.startsWith("http://", ignoreCase = true) || controlPath.startsWith("https://", ignoreCase = true)) {
                 return controlPath
             }
+            return buildAbsoluteUrl(baseUrl, controlPath)
+        }
+
+        private fun buildAbsoluteUrl(baseUrl: String, path: String): String {
             val schemeEnd = baseUrl.indexOf("://")
-            if (schemeEnd == -1) return controlPath
-            val scheme = baseUrl.substring(0, schemeEnd + 3)
-            val withoutScheme = baseUrl.substring(schemeEnd + 3)
-            val hostAndPort = withoutScheme.substringBefore("/")
-            val path = if (controlPath.startsWith("/")) controlPath else "/$controlPath"
-            return "$scheme$hostAndPort$path"
+            if (schemeEnd == -1) return path
+            val schemeAndHost = baseUrl.substring(0, schemeEnd + 3) + baseUrl.substring(schemeEnd + 3).substringBefore('/')
+            val normalizedPath = if (path.startsWith('/')) path else "/$path"
+            return "$schemeAndHost$normalizedPath"
         }
 
         fun parsePortFromUrl(urlStr: String): Int {
@@ -440,7 +450,7 @@ class UPnPCastClient(
             if (hostPort.contains(":")) {
                 return hostPort.substringAfter(":").toIntOrNull() ?: 80
             }
-            return if (urlStr.startsWith("https://")) 443 else 80
+            return if (urlStr.startsWith("https://", ignoreCase = true)) 443 else 80
         }
     }
 }

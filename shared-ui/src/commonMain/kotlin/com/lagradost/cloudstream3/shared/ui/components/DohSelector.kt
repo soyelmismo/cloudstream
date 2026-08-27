@@ -48,9 +48,11 @@ import com.lagradost.cloudstream3.shared.ui.components.designsystem.CloudStreamT
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.SecondaryButton
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.SelectableOptionCard
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import com.lagradost.cloudstream3.shared.viewmodels.settings.DohProvider
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 /**
  * Visual DoH (DNS over HTTPS) provider selector adhering to CloudStream Design System.
@@ -259,15 +261,31 @@ fun DohChoiceDialog(
     )
 }
 
+private val BADGE_RES_MAP: Map<DohProvider, StringResource> = mapOf(
+    DohProvider.CLOUDFLARE to Res.string.doh_badge_fast_privacy,
+    DohProvider.GOOGLE to Res.string.doh_badge_reliable,
+    DohProvider.ADGUARD to Res.string.doh_badge_adblocking,
+    DohProvider.QUAD9 to Res.string.doh_badge_malware,
+    DohProvider.CANADIAN_SHIELD to Res.string.doh_badge_privacy_shield,
+    DohProvider.DNS_SB to Res.string.doh_badge_no_logs,
+    DohProvider.DNS_WATCH to Res.string.doh_badge_neutrality,
+    DohProvider.NONE to Res.string.doh_badge_default
+)
+
 private fun getBadgeResForProvider(provider: DohProvider): StringResource {
-    return when (provider) {
-        DohProvider.CLOUDFLARE -> Res.string.doh_badge_fast_privacy
-        DohProvider.GOOGLE -> Res.string.doh_badge_reliable
-        DohProvider.ADGUARD -> Res.string.doh_badge_adblocking
-        DohProvider.QUAD9 -> Res.string.doh_badge_malware
-        DohProvider.CANADIAN_SHIELD -> Res.string.doh_badge_privacy_shield
-        DohProvider.DNS_SB -> Res.string.doh_badge_no_logs
-        DohProvider.DNS_WATCH -> Res.string.doh_badge_neutrality
-        DohProvider.NONE -> Res.string.doh_badge_default
+    return BADGE_RES_MAP[provider] ?: Res.string.doh_badge_default
+}
+
+@Preview
+@Composable
+private fun DohSelectorPreview() {
+    CloudStreamTheme {
+        Surface(color = CloudStreamColors.Background) {
+            DohSelector(
+                selectedProvider = DohProvider.CLOUDFLARE,
+                onProviderSelected = {}
+            )
+        }
     }
 }
+

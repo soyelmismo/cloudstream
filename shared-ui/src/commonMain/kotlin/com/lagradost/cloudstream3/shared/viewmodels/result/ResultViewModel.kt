@@ -41,11 +41,13 @@ import com.lagradost.cloudstream3.shared.persistence.repository.ResumeWatchingRe
 import com.lagradost.cloudstream3.shared.persistence.repository.SubscriptionRepository
 import com.lagradost.cloudstream3.shared.persistence.repository.SyncMappingRepository
 import com.lagradost.cloudstream3.shared.persistence.repository.WatchProgressRepository
-import com.lagradost.cloudstream3.utils.ExtractorLink
-import com.lagradost.cloudstream3.utils.INFER_TYPE
-import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.loadExtractor
-import com.lagradost.cloudstream3.utils.newExtractorLink
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentMapOf
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toImmutableMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -54,25 +56,34 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.coroutines.CoroutineContext
 
-/**
- * Extension function to calculate a consistent unique Integer ID for a LoadResponse.
- */
 fun LoadResponse.getId(): Int {
     val mainUrl = APIHolder.getApiFromNameNull(apiName)?.mainUrl ?: ""
     return uniqueUrl.replace(mainUrl, "").replace("/", "").hashCode()
 }
 
-/**
- * ResultViewModel for Media Details screen in Kotlin Multiplatform (MVI Architecture).
- *
- * Handles:
- * - Media metadata, synopsis, poster, background, cast, score, trailers.
- * - Seasons and episodes grouping, dub status selection, episode filtering.
- * - Reactive Room persistence integration (Bookmarks, Favorites, Subscriptions, Watch Progress, Resume Watching, Sync Mappings).
- * - External synchronization (AniList, MyAnimeList, Simkl, Kitsu).
- * - Streaming links and subtitles extraction.
- * - StateFlow immutable state updates with MviViewModel.
- */
+private data class ResolvedResumeState(
+    val resumeData: ResumeWatchingEntity?,
+    val lastWatchedEp: ResultEpisode?,
+    val lastProgress: WatchProgressEntity?,
+    val resolvedSelectedEp: ResultEpisode?
+)
+
+private data class InitialResultData(
+    val mediaId: Int,
+    val episodesMap: ImmutableMap<EpisodeIndexer, ImmutableList<ResultEpisode>>,
+    val availableSeasons: ImmutableList<ResultSeason>,
+    val availableDubStatuses: ImmutableList<DubStatus>,
+    val initialSeason: Int,
+    val initialDubStatus: DubStatus,
+    val filteredEpisodes: ImmutableList<ResultEpisode>,
+    val allEpisodes: List<ResultEpisode>,
+    val resumeState: ResolvedResumeState,
+    val bookmark: BookmarkEntity,
+    val favorite: FavoriteEntity?,
+    val subscription: SubscriptionEntity?,
+    val initialSyncStates: ImmutableMap<SyncService, ExternalSyncEntry>
+)
+
 class ResultViewModel(
     private val bookmarkRepository: BookmarkRepository,
     private val watchProgressRepository: WatchProgressRepository,
@@ -89,13 +100,74 @@ class ResultViewModel(
 
     override fun handleEvent(event: ResultEvent) {
         when (event) {
+            is ResultEvent.LoadResult,
+            is ResultEvent.Refresh,
+            is ResultEvent.SelectSeason,
+            is ResultEvent.SelectDubStatus,
+            is ResultEvent.SelectEpisode,
+            is ResultEvent.ClearError -> handleNavigationEvent(event)
+
+            is ResultEvent.ToggleBookmark,
+            is ResultEvent.SetBookmark,
+            is ResultEvent.ToggleFavorite,
+            is ResultEvent.SetFavorite,
+            is ResultEvent.ToggleSubscription,
+            is ResultEvent.SetSubscription -> handleLibraryEvent(event)
+
+            is ResultEvent.SetWatchState,
+            is ResultEvent.UpdateWatchProgress,
+            is ResultEvent.OpenEpisodeMenu,
+            is ResultEvent.CloseEpisodeMenu,
+            is ResultEvent.MarkEpisodesUpTo,
+            is ResultEvent.CopyEpisodeLink,
+            is ResultEvent.ReloadLinks,
+            is ResultEvent.ClearLinks -> handleEpisodeEvent(event)
+
+            is ResultEvent.UpdateSyncStatus,
+            is ResultEvent.UpdateSyncScore,
+            is ResultEvent.SetSyncScoreScale,
+            is ResultEvent.UpdateSyncEpisode,
+            is ResultEvent.SelectSyncService,
+            is ResultEvent.SaveSyncData,
+            is ResultEvent.UnlinkSyncService -> handleSyncEvent(event)
+
+            is ResultEvent.OpenTrailer,
+            is ResultEvent.LoadTrailer,
+            is ResultEvent.SelectTrailerQuality,
+            is ResultEvent.CloseTrailer -> handleTrailerEvent(event)
+        }
+    }
+
+    private fun handleNavigationEvent(event: ResultEvent) {
+        when (event) {
             is ResultEvent.LoadResult -> loadResult(event.url, event.apiName, event.restart, event.autoResume)
+            is ResultEvent.Refresh -> {
+                val url = currentState.url ?: return
+                val apiName = currentState.apiName ?: return
+                loadResult(url, apiName, restart = true)
+            }
+            is ResultEvent.SelectSeason -> selectSeason(event.season)
+            is ResultEvent.SelectDubStatus -> selectDubStatus(event.dubStatus)
+            is ResultEvent.SelectEpisode -> selectEpisode(event.episode)
+            is ResultEvent.ClearError -> clearError(event.linksOnly)
+            else -> Unit
+        }
+    }
+
+    private fun handleLibraryEvent(event: ResultEvent) {
+        when (event) {
             is ResultEvent.ToggleBookmark -> toggleBookmark(event.watchType)
             is ResultEvent.SetBookmark -> setBookmark(event.watchType)
             is ResultEvent.ToggleFavorite -> setFavorite(!currentState.isFavorite)
             is ResultEvent.SetFavorite -> setFavorite(event.isFavorite)
             is ResultEvent.ToggleSubscription -> setSubscription(!currentState.isSubscribed)
             is ResultEvent.SetSubscription -> setSubscription(event.isSubscribed)
+            else -> Unit
+        }
+    }
+
+    private fun handleEpisodeEvent(event: ResultEvent) {
+        when (event) {
             is ResultEvent.SetWatchState -> setWatchState(event.episodeId, event.watchState)
             is ResultEvent.UpdateWatchProgress -> updateWatchProgress(
                 event.episodeId,
@@ -103,31 +175,22 @@ class ResultViewModel(
                 event.duration,
                 event.watchState
             )
-            is ResultEvent.SelectSeason -> selectSeason(event.season)
-            is ResultEvent.SelectDubStatus -> selectDubStatus(event.dubStatus)
-            is ResultEvent.SelectEpisode -> selectEpisode(event.episode)
-            is ResultEvent.Refresh -> {
-                val url = currentState.url ?: return
-                val apiName = currentState.apiName ?: return
-                loadResult(url, apiName, restart = true)
-            }
             is ResultEvent.OpenEpisodeMenu -> updateState {
-                copy(
-                    isEpisodeMenuOpen = true,
-                    selectedMenuEpisode = event.episode
-                )
+                copy(isEpisodeMenuOpen = true, selectedMenuEpisode = event.episode)
             }
             is ResultEvent.CloseEpisodeMenu -> updateState {
-                copy(
-                    isEpisodeMenuOpen = false,
-                    selectedMenuEpisode = null
-                )
+                copy(isEpisodeMenuOpen = false, selectedMenuEpisode = null)
             }
             is ResultEvent.MarkEpisodesUpTo -> markEpisodesUpTo(event.episodeId, event.season)
             is ResultEvent.CopyEpisodeLink -> copyEpisodeLink(event.episode)
             is ResultEvent.ReloadLinks -> reloadLinks(event.episode, event.isCasting, event.clearCache)
             is ResultEvent.ClearLinks -> clearLinks()
-            is ResultEvent.ClearError -> clearError(event.linksOnly)
+            else -> Unit
+        }
+    }
+
+    private fun handleSyncEvent(event: ResultEvent) {
+        when (event) {
             is ResultEvent.UpdateSyncStatus -> updateSyncStatus(event.service, event.status)
             is ResultEvent.UpdateSyncScore -> updateSyncScore(event.service, event)
             is ResultEvent.SetSyncScoreScale -> setSyncScoreScale(event.service, event.scale)
@@ -135,16 +198,281 @@ class ResultViewModel(
             is ResultEvent.SelectSyncService -> updateState { copy(selectedSyncService = event.service) }
             is ResultEvent.SaveSyncData -> saveSyncData(event)
             is ResultEvent.UnlinkSyncService -> unlinkSyncService(event.service)
+            else -> Unit
+        }
+    }
+
+    private fun handleTrailerEvent(event: ResultEvent) {
+        when (event) {
             is ResultEvent.OpenTrailer -> openTrailer(event.trailerIndex)
             is ResultEvent.LoadTrailer -> loadTrailer(event.trailerIndex)
             is ResultEvent.SelectTrailerQuality -> updateState { copy(selectedTrailerQuality = event.link) }
             is ResultEvent.CloseTrailer -> closeTrailer()
+            else -> Unit
         }
     }
 
-    /**
-     * Loads media details from the provider.
-     */
+    private fun buildAvailableSeasons(
+        response: LoadResponse,
+        episodesMap: Map<EpisodeIndexer, List<ResultEpisode>>,
+        distinctSeasons: List<Int>
+    ): ImmutableList<ResultSeason> {
+        val seasonNames = (response as? EpisodeResponse)?.seasonNames
+        return distinctSeasons.map { s ->
+            val sData = seasonNames?.firstOrNull { it.season == s }
+            val count = episodesMap.filterKeys { it.season == s }.values.flatten().size
+            ResultSeason(
+                season = s,
+                name = sData?.name,
+                displaySeason = sData?.displaySeason ?: s,
+                episodeCount = count
+            )
+        }.toImmutableList()
+    }
+
+    private fun resolveInitialEpisodes(
+        episodesMap: Map<EpisodeIndexer, List<ResultEpisode>>,
+        initialDubStatus: DubStatus,
+        initialSeason: Int
+    ): ImmutableList<ResultEpisode> {
+        return (episodesMap[EpisodeIndexer(initialDubStatus, initialSeason)]
+            ?: episodesMap.entries.firstOrNull { it.key.season == initialSeason }?.value
+            ?: episodesMap.entries.firstOrNull { it.key.dubStatus == initialDubStatus }?.value
+            ?: episodesMap.values.firstOrNull { it.isNotEmpty() }
+            ?: episodesMap.values.flatten()).toImmutableList()
+    }
+
+    private suspend fun resolveResumePosition(
+        mediaId: Int,
+        allEpisodes: List<ResultEpisode>
+    ): ResolvedResumeState {
+        val resumeData = resumeWatchingRepository?.getResumeWatching(accountId, mediaId)
+        val lastWatchedEp = resumeData?.episodeId?.let { id -> allEpisodes.firstOrNull { it.id == id } }
+            ?: allEpisodes.firstOrNull { it.position > 0 }
+            ?: allEpisodes.firstOrNull()
+
+        val lastProgress = lastWatchedEp?.let { ep ->
+            watchProgressRepository.getProgress(accountId, ep.id)
+        } ?: watchProgressRepository.getProgress(accountId, mediaId)
+
+        val resolvedSelectedEp = lastWatchedEp?.let { ep ->
+            if (lastProgress != null && (lastProgress.position > 0 || lastProgress.duration > 0 || lastProgress.watchState > 0)) {
+                ep.copy(
+                    position = lastProgress.position,
+                    duration = lastProgress.duration,
+                    videoWatchState = lastProgress.watchState
+                )
+            } else {
+                ep
+            }
+        }
+
+        return ResolvedResumeState(resumeData, lastWatchedEp, lastProgress, resolvedSelectedEp)
+    }
+
+    private suspend fun ensureBookmarksExist(mediaId: Int, response: LoadResponse): BookmarkEntity {
+        val existing = bookmarkRepository.getBookmark(accountId, mediaId)
+        if (existing != null) return existing
+
+        val now = APIHolder.unixTimeMS
+        val newBookmark = BookmarkEntity(
+            accountId = accountId,
+            id = mediaId,
+            name = response.name,
+            url = response.url,
+            apiName = response.apiName,
+            type = response.type,
+            posterUrl = response.posterUrl ?: response.backgroundPosterUrl,
+            year = response.year,
+            watchType = 0,
+            bookmarkedTime = now,
+            latestUpdatedTime = now,
+            plot = response.plot,
+            score = response.score?.toDouble(10)
+        )
+        bookmarkRepository.saveBookmark(newBookmark)
+        return newBookmark
+    }
+
+    private fun resolveResponseSyncId(service: SyncService, syncData: Map<String, String>): String? {
+        return syncData[service.idPrefix]
+            ?: syncData[service.serviceName.lowercase()]
+            ?: syncData[service.name.lowercase()]
+    }
+
+    private fun resolveInitialSyncStatus(isLinked: Boolean, totalEpisodes: Int?, watchedCount: Int): ExternalSyncStatus {
+        if (!isLinked) return ExternalSyncStatus.None
+        if (totalEpisodes != null && watchedCount >= totalEpisodes) return ExternalSyncStatus.Completed
+        if (watchedCount > 0) return ExternalSyncStatus.Watching
+        return ExternalSyncStatus.PlanToWatch
+    }
+
+    private fun buildSyncEntry(
+        service: SyncService,
+        response: LoadResponse,
+        storedMapping: SyncMappingEntity?,
+        totalEpisodeCount: Int?,
+        watchedCount: Int
+    ): ExternalSyncEntry {
+        val responseSyncId = resolveResponseSyncId(service, response.syncData)
+        val effectiveId = storedMapping?.remoteUrl ?: responseSyncId
+        val isLinked = !effectiveId.isNullOrBlank()
+        val initialStatus = resolveInitialSyncStatus(isLinked, totalEpisodeCount, watchedCount)
+
+        return ExternalSyncEntry(
+            service = service,
+            syncId = effectiveId,
+            isLinked = isLinked,
+            status = initialStatus,
+            score = response.score?.toInt(10)?.coerceIn(1, 10),
+            rawScore = response.score,
+            scoreScale = service.defaultScale,
+            watchedEpisodes = watchedCount,
+            maxEpisodes = totalEpisodeCount,
+            lastUpdated = storedMapping?.updatedAt ?: 0L
+        )
+    }
+
+    private suspend fun initializeSyncTrackers(
+        mediaId: Int,
+        response: LoadResponse,
+        totalEpisodeCount: Int?,
+        watchedCount: Int
+    ): ImmutableMap<SyncService, ExternalSyncEntry> {
+        val storedMappings = syncMappingRepository?.getSyncMappings(accountId, mediaId) ?: emptyList()
+        return SyncService.entries.associateWith { service ->
+            val storedMapping = storedMappings.firstOrNull { it.syncPrefix.equals(service.idPrefix, ignoreCase = true) }
+            buildSyncEntry(service, response, storedMapping, totalEpisodeCount, watchedCount)
+        }.toImmutableMap()
+    }
+
+    private suspend fun handleAutoResume(
+        mediaId: Int,
+        lastWatchedEp: ResultEpisode?,
+        resolvedSelectedEp: ResultEpisode?,
+        allEpisodes: List<ResultEpisode>,
+        lastProgress: WatchProgressEntity?
+    ) {
+        val targetEp = lastWatchedEp ?: resolvedSelectedEp ?: allEpisodes.firstOrNull() ?: return
+        val resumePos = lastProgress?.position ?: targetEp.position.takeIf { it > 0 }
+        emitEffect(
+            ResultEffect.AutoPlayEpisode(
+                episode = targetEp,
+                resumePosition = resumePos,
+                parentId = mediaId
+            )
+        )
+        reloadLinks(targetEp, isCasting = false)
+    }
+
+    private suspend fun fetchLoadResponse(url: String, apiName: String): LoadResponse? {
+        val api = APIHolder.getApiFromNameNull(apiName) ?: APIHolder.getApiFromUrlNull(url) ?: return null
+        return try {
+            api.load(url)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logError(e)
+            null
+        }
+    }
+
+    private suspend fun resolveInitialResultData(response: LoadResponse): InitialResultData {
+        val mediaId = response.getId()
+        val episodesMap = buildEpisodesMap(response, mediaId)
+        val distinctSeasons = episodesMap.keys.map { it.season }.distinct().sorted()
+        val availableSeasons = buildAvailableSeasons(response, episodesMap, distinctSeasons)
+
+        val availableDubStatuses = episodesMap.keys.map { it.dubStatus }.distinct().toImmutableList()
+        val initialDubStatus = availableDubStatuses.firstOrNull { it == DubStatus.Subbed }
+            ?: availableDubStatuses.firstOrNull()
+            ?: DubStatus.None
+        val initialSeason = distinctSeasons.firstOrNull { it > 0 } ?: distinctSeasons.firstOrNull() ?: 0
+        val filteredEpisodes = resolveInitialEpisodes(episodesMap, initialDubStatus, initialSeason)
+
+        val allEps = episodesMap.values.flatten()
+        val resumeState = resolveResumePosition(mediaId, allEps)
+        val bookmark = ensureBookmarksExist(mediaId, response)
+        val favorite = favoriteRepository.getFavorite(accountId, mediaId)
+        val subscription = subscriptionRepository?.getSubscription(accountId, mediaId)
+
+        val totalEpisodeCount: Int? = if (response.isEpisodeBased()) {
+            allEps.size.takeIf { it > 0 }
+        } else null
+        val watchedCount = allEps.count { it.isWatched || it.videoWatchState == 2 }
+        val initialSyncStates = initializeSyncTrackers(mediaId, response, totalEpisodeCount, watchedCount)
+
+        return InitialResultData(
+            mediaId = mediaId,
+            episodesMap = episodesMap,
+            availableSeasons = availableSeasons,
+            availableDubStatuses = availableDubStatuses,
+            initialSeason = initialSeason,
+            initialDubStatus = initialDubStatus,
+            filteredEpisodes = filteredEpisodes,
+            allEpisodes = allEps,
+            resumeState = resumeState,
+            bookmark = bookmark,
+            favorite = favorite,
+            subscription = subscription,
+            initialSyncStates = initialSyncStates
+        )
+    }
+
+    private fun applyLoadedResultState(
+        url: String,
+        apiName: String,
+        response: LoadResponse,
+        data: InitialResultData
+    ) {
+        updateState {
+            copy(
+                isLoading = false,
+                error = null,
+                url = url,
+                apiName = apiName,
+                mediaId = data.mediaId,
+                loadResponse = response,
+                title = response.name,
+                synopsis = response.plot,
+                posterUrl = response.posterUrl,
+                backgroundPosterUrl = response.backgroundPosterUrl,
+                logoUrl = response.logoUrl,
+                year = response.year,
+                rating = response.score,
+                tags = response.tags?.toImmutableList() ?: persistentListOf(),
+                actors = response.actors?.toImmutableList() ?: persistentListOf(),
+                tvType = response.type,
+                duration = response.duration,
+                comingSoon = response.comingSoon,
+                showStatus = (response as? EpisodeResponse)?.showStatus,
+                contentRating = response.contentRating,
+                trailers = response.trailers.toImmutableList(),
+                recommendations = response.recommendations?.toImmutableList() ?: persistentListOf(),
+                syncData = response.syncData.toImmutableMap(),
+                posterHeaders = response.posterHeaders?.toImmutableMap(),
+                isMovie = response.isMovie(),
+                isAnime = response.isAnimeBased(),
+                isEpisodeBased = response.isEpisodeBased(),
+                availableSeasons = data.availableSeasons,
+                availableDubStatuses = data.availableDubStatuses,
+                selectedSeason = data.initialSeason,
+                selectedDubStatus = data.initialDubStatus,
+                episodesByIndexer = data.episodesMap,
+                episodes = data.filteredEpisodes,
+                selectedEpisode = data.resumeState.resolvedSelectedEp,
+                isBookmarked = data.bookmark.watchType > 0,
+                bookmarkWatchType = data.bookmark.watchType,
+                isFavorite = data.favorite != null,
+                isSubscribed = data.subscription != null,
+                lastWatchedEpisode = data.resumeState.resolvedSelectedEp,
+                lastWatchedProgress = data.resumeState.lastProgress,
+                resumeWatching = data.resumeState.resumeData,
+                externalSyncStates = data.initialSyncStates
+            )
+        }
+    }
+
     private fun loadResult(url: String, apiName: String, restart: Boolean = false, autoResume: Boolean = false) {
         if (!restart && !autoResume && currentState.loadResponse != null && currentState.url == url && currentState.apiName == apiName) {
             return
@@ -161,225 +489,36 @@ class ResultViewModel(
             }
 
             try {
-                val api = APIHolder.getApiFromNameNull(apiName)
-                    ?: APIHolder.getApiFromUrlNull(url)
-                if (api == null) {
-                    updateState {
-                        copy(
-                            isLoading = false,
-                            error = txt(Res.string.result_error_api_not_found, apiName)
-                        )
-                    }
-                    return@job
-                }
-
-                val response = try {
-                    api.load(url)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    logError(e)
-                    null
-                }
-
+                val response = fetchLoadResponse(url, apiName)
                 if (response == null) {
+                    val isProviderMissing = APIHolder.getApiFromNameNull(apiName) == null && APIHolder.getApiFromUrlNull(url) == null
+                    val errorRes = if (isProviderMissing) {
+                        txt(Res.string.result_error_api_not_found, apiName)
+                    } else {
+                        txt(Res.string.result_error_load_details_failed)
+                    }
                     updateState {
                         copy(
                             isLoading = false,
-                            error = txt(Res.string.result_error_load_details_failed)
+                            error = errorRes
                         )
                     }
                     return@job
                 }
 
-                val mediaId = response.getId()
-
-                // Process Episodes and Indexing
-                val episodesMap = buildEpisodesMap(response, mediaId)
-                val distinctSeasons = episodesMap.keys.map { it.season }.distinct().sorted()
-                val seasonNames = (response as? EpisodeResponse)?.seasonNames
-                val availableSeasons = distinctSeasons.map { s ->
-                    val sData = seasonNames?.firstOrNull { it.season == s }
-                    val count = episodesMap.filterKeys { it.season == s }.values.flatten().size
-                    ResultSeason(
-                        season = s,
-                        name = sData?.name,
-                        displaySeason = sData?.displaySeason ?: s,
-                        episodeCount = count
-                    )
-                }
-
-                val availableDubStatuses = episodesMap.keys.map { it.dubStatus }.distinct()
-                val initialDubStatus = availableDubStatuses.firstOrNull { it == DubStatus.Subbed }
-                    ?: availableDubStatuses.firstOrNull()
-                    ?: DubStatus.None
-                val initialSeason = distinctSeasons.firstOrNull { it > 0 } ?: distinctSeasons.firstOrNull() ?: 0
-
-                val filteredEpisodes = episodesMap[EpisodeIndexer(initialDubStatus, initialSeason)]
-                    ?: episodesMap.entries.firstOrNull { it.key.season == initialSeason }?.value
-                    ?: episodesMap.entries.firstOrNull { it.key.dubStatus == initialDubStatus }?.value
-                    ?: episodesMap.values.firstOrNull { it.isNotEmpty() }
-                    ?: episodesMap.values.flatten()
-
-                // Check initial progress / resume watching
-                val resumeData = resumeWatchingRepository?.getResumeWatching(accountId, mediaId)
-                val allEps = episodesMap.values.flatten()
-                val lastWatchedEp = resumeData?.episodeId?.let { id -> allEps.firstOrNull { it.id == id } }
-                    ?: allEps.firstOrNull { it.position > 0 }
-                    ?: allEps.firstOrNull()
-
-                val lastProgress = lastWatchedEp?.let { ep ->
-                    watchProgressRepository.getProgress(accountId, ep.id)
-                } ?: watchProgressRepository.getProgress(accountId, mediaId)
-
-                val resolvedSelectedEp = lastWatchedEp?.let { ep ->
-                    if (lastProgress != null && (lastProgress.position > 0 || lastProgress.duration > 0 || lastProgress.watchState > 0)) {
-                        ep.copy(
-                            position = lastProgress.position,
-                            duration = lastProgress.duration,
-                            videoWatchState = lastProgress.watchState
-                        )
-                    } else {
-                        ep
-                    }
-                }
-
-                // Check Initial Bookmark & Favorite & Subscription
-                var bookmark = bookmarkRepository.getBookmark(accountId, mediaId)
-                if (bookmark == null) {
-                    val now = APIHolder.unixTimeMS
-                    val newBookmark = BookmarkEntity(
-                        accountId = accountId,
-                        id = mediaId,
-                        name = response.name,
-                        url = response.url,
-                        apiName = response.apiName,
-                        type = response.type,
-                        posterUrl = response.posterUrl ?: response.backgroundPosterUrl,
-                        year = response.year,
-                        watchType = 0,
-                        bookmarkedTime = now,
-                        latestUpdatedTime = now,
-                        plot = response.plot,
-                        score = response.score?.toDouble(10)
-                    )
-                    bookmarkRepository.saveBookmark(newBookmark)
-                    bookmark = newBookmark
-                }
-
-                val favorite = favoriteRepository.getFavorite(accountId, mediaId)
-                val subscription = subscriptionRepository?.getSubscription(accountId, mediaId)
-
-                // Calculate episode counts and watched count for External Sync
-                val totalEpisodeCount: Int? = if (response.isEpisodeBased()) {
-                    allEps.size.takeIf { it > 0 }
-                } else null
-                val watchedCount = allEps.count { it.isWatched || it.videoWatchState == 2 }
-
-                // Check stored sync mappings
-                val storedMappings = syncMappingRepository?.getSyncMappings(accountId, mediaId) ?: emptyList()
-                val initialSyncStates = SyncService.entries.associateWith { service ->
-                    val storedMapping = storedMappings.firstOrNull { it.syncPrefix.equals(service.idPrefix, ignoreCase = true) }
-                    val responseSyncId = response.syncData[service.idPrefix]
-                        ?: response.syncData[service.serviceName.lowercase()]
-                        ?: response.syncData[service.name.lowercase()]
-
-                    val effectiveId = storedMapping?.remoteUrl ?: responseSyncId
-                    val isLinked = !effectiveId.isNullOrBlank()
-                    val initialStatus = when {
-                        !isLinked -> ExternalSyncStatus.None
-                        totalEpisodeCount != null && watchedCount >= totalEpisodeCount -> ExternalSyncStatus.Completed
-                        watchedCount > 0 -> ExternalSyncStatus.Watching
-                        else -> ExternalSyncStatus.PlanToWatch
-                    }
-
-                    val defaultScale = when (service) {
-                        SyncService.AniList -> TrackerScoreScale.Point10Decimal
-                        SyncService.MyAnimeList -> TrackerScoreScale.Point10Decimal
-                        SyncService.Trakt -> TrackerScoreScale.Point10Decimal
-                        SyncService.Simkl -> TrackerScoreScale.Point10Decimal
-                        SyncService.Kitsu -> TrackerScoreScale.Point100
-                    }
-
-                    ExternalSyncEntry(
-                        service = service,
-                        syncId = effectiveId,
-                        isLinked = isLinked,
-                        status = initialStatus,
-                        score = response.score?.toInt(10)?.coerceIn(1, 10),
-                        rawScore = response.score,
-                        scoreScale = defaultScale,
-                        watchedEpisodes = watchedCount,
-                        maxEpisodes = totalEpisodeCount,
-                        lastUpdated = storedMapping?.updatedAt ?: 0L
-                    )
-                }
-
-                updateState {
-                    copy(
-                        isLoading = false,
-                        error = null,
-                        url = url,
-                        apiName = apiName,
-                        mediaId = mediaId,
-                        loadResponse = response,
-                        title = response.name,
-                        synopsis = response.plot,
-                        posterUrl = response.posterUrl,
-                        backgroundPosterUrl = response.backgroundPosterUrl,
-                        logoUrl = response.logoUrl,
-                        year = response.year,
-                        rating = response.score,
-                        tags = response.tags ?: emptyList(),
-                        actors = response.actors ?: emptyList(),
-                        tvType = response.type,
-                        duration = response.duration,
-                        comingSoon = response.comingSoon,
-                        showStatus = (response as? EpisodeResponse)?.showStatus,
-                        contentRating = response.contentRating,
-                        trailers = response.trailers,
-                        recommendations = response.recommendations ?: emptyList(),
-                        syncData = response.syncData,
-                        posterHeaders = response.posterHeaders,
-                        isMovie = response.isMovie(),
-                        isAnime = response.isAnimeBased(),
-                        isEpisodeBased = response.isEpisodeBased(),
-                        availableSeasons = availableSeasons,
-                        availableDubStatuses = availableDubStatuses,
-                        selectedSeason = initialSeason,
-                        selectedDubStatus = initialDubStatus,
-                        episodesByIndexer = episodesMap,
-                        episodes = filteredEpisodes,
-                        selectedEpisode = resolvedSelectedEp,
-                        isBookmarked = bookmark.watchType > 0,
-                        bookmarkWatchType = bookmark.watchType,
-                        isFavorite = favorite != null,
-                        isSubscribed = subscription != null,
-                        lastWatchedEpisode = resolvedSelectedEp,
-                        lastWatchedProgress = lastProgress,
-                        resumeWatching = resumeData,
-                        externalSyncStates = initialSyncStates
-                    )
-                }
-
-                // Start observing reactive Room KMP flows
-                observeRepositories(mediaId)
+                val data = resolveInitialResultData(response)
+                applyLoadedResultState(url, apiName, response, data)
+                observeRepositories(data.mediaId)
 
                 if (autoResume) {
-                    val targetEp = lastWatchedEp ?: resolvedSelectedEp ?: allEps.firstOrNull()
-                    if (targetEp != null) {
-                        val resumePos = lastProgress?.position ?: targetEp.position.takeIf { it > 0 }
-                        emitEffect(
-                            ResultEffect.AutoPlayEpisode(
-                                episode = targetEp,
-                                resumePosition = resumePos,
-                                parentId = mediaId
-                            )
-                        )
-                        reloadLinks(targetEp, isCasting = false)
-                    }
+                    handleAutoResume(
+                        mediaId = data.mediaId,
+                        lastWatchedEp = data.resumeState.lastWatchedEp,
+                        resolvedSelectedEp = data.resumeState.resolvedSelectedEp,
+                        allEpisodes = data.allEpisodes,
+                        lastProgress = data.resumeState.lastProgress
+                    )
                 }
-
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -439,143 +578,182 @@ class ResultViewModel(
         )
     }
 
-    /**
-     * Builds the map of EpisodeIndexer to list of ResultEpisodes for all response types.
-     */
-    private suspend fun buildEpisodesMap(
-        response: LoadResponse,
+    private suspend fun parseAnimeEpisodes(
+        response: AnimeLoadResponse,
         mediaId: Int
     ): Map<EpisodeIndexer, List<ResultEpisode>> {
         val map = mutableMapOf<EpisodeIndexer, MutableList<ResultEpisode>>()
+        for ((dubStatus, episodeList) in response.episodes) {
+            val existingIds = HashSet<Int>()
+            for ((index, ep) in episodeList.withIndex()) {
+                val epNum = ep.episode ?: (index + 1)
+                val seasonNum = ep.season ?: 1
+                val epId = mediaId + epNum + dubStatus.id * 1_000_000 + (seasonNum * 10_000)
 
-        when (response) {
-            is AnimeLoadResponse -> {
-                for ((dubStatus, episodeList) in response.episodes) {
-                    val existingIds = HashSet<Int>()
-                    for ((index, ep) in episodeList.withIndex()) {
-                        val epNum = ep.episode ?: (index + 1)
-                        val seasonNum = ep.season ?: 1
-                        val epId = mediaId + epNum + dubStatus.id * 1_000_000 + (seasonNum * 10_000)
-
-                        if (existingIds.add(epId)) {
-                            val seasonData = response.seasonNames?.firstOrNull { it.season == ep.season }
-                            val totalIndex = ep.season?.let { s ->
-                                response.getTotalEpisodeIndex(epNum, s)
-                            }
-                            val resultEp = buildSingleEpisode(
-                                response = response,
-                                mediaId = mediaId,
-                                id = epId,
-                                name = ep.name,
-                                poster = ep.posterUrl ?: response.posterUrl,
-                                episode = epNum,
-                                seasonIndex = ep.season,
-                                season = seasonData?.displaySeason ?: ep.season,
-                                data = ep.data,
-                                index = index,
-                                score = ep.score,
-                                description = ep.description,
-                                totalEpisodeIndex = totalIndex,
-                                airDate = ep.date,
-                                runTime = ep.runTime,
-                                seasonData = seasonData
-                            )
-                            val indexer = EpisodeIndexer(dubStatus, seasonNum)
-                            map.getOrPut(indexer) { mutableListOf() }.add(resultEp)
-                        }
-                    }
+                if (existingIds.add(epId)) {
+                    val seasonData = response.seasonNames?.firstOrNull { it.season == ep.season }
+                    val totalIndex = ep.season?.let { s -> response.getTotalEpisodeIndex(epNum, s) }
+                    val resultEp = buildSingleEpisode(
+                        response = response,
+                        mediaId = mediaId,
+                        id = epId,
+                        name = ep.name,
+                        poster = ep.posterUrl ?: response.posterUrl,
+                        episode = epNum,
+                        seasonIndex = ep.season,
+                        season = seasonData?.displaySeason ?: ep.season,
+                        data = ep.data,
+                        index = index,
+                        score = ep.score,
+                        description = ep.description,
+                        totalEpisodeIndex = totalIndex,
+                        airDate = ep.date,
+                        runTime = ep.runTime,
+                        seasonData = seasonData
+                    )
+                    val indexer = EpisodeIndexer(dubStatus, seasonNum)
+                    map.getOrPut(indexer) { mutableListOf() }.add(resultEp)
                 }
-            }
-
-            is TvSeriesLoadResponse -> {
-                val existingIds = HashSet<Int>()
-                val sorted = response.episodes.sortedBy {
-                    (it.season?.times(10_000) ?: 0) + (it.episode ?: 0)
-                }
-
-                for ((index, ep) in sorted.withIndex()) {
-                    val epNum = ep.episode ?: (index + 1)
-                    val seasonNum = ep.season ?: 1
-                    val epId = mediaId + (seasonNum * 100_000) + epNum + 1
-
-                    if (existingIds.add(epId)) {
-                        val seasonData = response.seasonNames?.firstOrNull { it.season == ep.season }
-                        val totalIndex = ep.season?.let { s ->
-                            response.getTotalEpisodeIndex(epNum, s)
-                        }
-                        val resultEp = buildSingleEpisode(
-                            response = response,
-                            mediaId = mediaId,
-                            id = epId,
-                            name = ep.name,
-                            poster = ep.posterUrl ?: response.posterUrl,
-                            episode = epNum,
-                            seasonIndex = ep.season,
-                            season = seasonData?.displaySeason ?: ep.season,
-                            data = ep.data,
-                            index = index,
-                            score = ep.score,
-                            description = ep.description,
-                            totalEpisodeIndex = totalIndex,
-                            airDate = ep.date,
-                            runTime = ep.runTime,
-                            seasonData = seasonData
-                        )
-                        val indexer = EpisodeIndexer(DubStatus.None, seasonNum)
-                        map.getOrPut(indexer) { mutableListOf() }.add(resultEp)
-                    }
-                }
-            }
-
-            is MovieLoadResponse -> {
-                val movieEp = buildSingleEpisode(
-                    response = response,
-                    mediaId = mediaId,
-                    data = response.dataUrl,
-                    runTime = response.duration?.times(60)
-                )
-                map[EpisodeIndexer(DubStatus.None, 0)] = mutableListOf(movieEp)
-            }
-
-            is LiveStreamLoadResponse -> {
-                val streamEp = buildSingleEpisode(
-                    response = response,
-                    mediaId = mediaId,
-                    data = response.dataUrl
-                )
-                map[EpisodeIndexer(DubStatus.None, 0)] = mutableListOf(streamEp)
-            }
-
-            is TorrentLoadResponse -> {
-                val torrentEp = buildSingleEpisode(
-                    response = response,
-                    mediaId = mediaId,
-                    data = response.torrent ?: response.magnet ?: "",
-                    runTime = response.duration?.times(60)
-                )
-                map[EpisodeIndexer(DubStatus.None, 0)] = mutableListOf(torrentEp)
-            }
-
-            else -> {
-                val fallbackEp = buildSingleEpisode(
-                    response = response,
-                    mediaId = mediaId,
-                    data = response.url,
-                    runTime = response.duration?.times(60)
-                )
-                map[EpisodeIndexer(DubStatus.None, 0)] = mutableListOf(fallbackEp)
             }
         }
-
         return map
     }
 
-    /**
-     * Reactively observes Room KMP flows for this media item.
-     */
+    private suspend fun parseTvEpisodes(
+        response: TvSeriesLoadResponse,
+        mediaId: Int
+    ): Map<EpisodeIndexer, List<ResultEpisode>> {
+        val map = mutableMapOf<EpisodeIndexer, MutableList<ResultEpisode>>()
+        val existingIds = HashSet<Int>()
+        val sorted = response.episodes.sortedBy {
+            (it.season?.times(10_000) ?: 0) + (it.episode ?: 0)
+        }
+
+        for ((index, ep) in sorted.withIndex()) {
+            val epNum = ep.episode ?: (index + 1)
+            val seasonNum = ep.season ?: 1
+            val epId = mediaId + (seasonNum * 100_000) + epNum + 1
+
+            if (existingIds.add(epId)) {
+                val seasonData = response.seasonNames?.firstOrNull { it.season == ep.season }
+                val totalIndex = ep.season?.let { s -> response.getTotalEpisodeIndex(epNum, s) }
+                val resultEp = buildSingleEpisode(
+                    response = response,
+                    mediaId = mediaId,
+                    id = epId,
+                    name = ep.name,
+                    poster = ep.posterUrl ?: response.posterUrl,
+                    episode = epNum,
+                    seasonIndex = ep.season,
+                    season = seasonData?.displaySeason ?: ep.season,
+                    data = ep.data,
+                    index = index,
+                    score = ep.score,
+                    description = ep.description,
+                    totalEpisodeIndex = totalIndex,
+                    airDate = ep.date,
+                    runTime = ep.runTime,
+                    seasonData = seasonData
+                )
+                val indexer = EpisodeIndexer(DubStatus.None, seasonNum)
+                map.getOrPut(indexer) { mutableListOf() }.add(resultEp)
+            }
+        }
+        return map
+    }
+
+    private suspend fun parseMovieEpisode(
+        response: MovieLoadResponse,
+        mediaId: Int
+    ): Map<EpisodeIndexer, List<ResultEpisode>> {
+        val movieEp = buildSingleEpisode(
+            response = response,
+            mediaId = mediaId,
+            data = response.dataUrl,
+            runTime = response.duration?.times(60)
+        )
+        return mapOf(EpisodeIndexer(DubStatus.None, 0) to listOf(movieEp))
+    }
+
+    private suspend fun parseLiveStreamEpisode(
+        response: LiveStreamLoadResponse,
+        mediaId: Int
+    ): Map<EpisodeIndexer, List<ResultEpisode>> {
+        val streamEp = buildSingleEpisode(
+            response = response,
+            mediaId = mediaId,
+            data = response.dataUrl
+        )
+        return mapOf(EpisodeIndexer(DubStatus.None, 0) to listOf(streamEp))
+    }
+
+    private suspend fun parseTorrentEpisode(
+        response: TorrentLoadResponse,
+        mediaId: Int
+    ): Map<EpisodeIndexer, List<ResultEpisode>> {
+        val torrentEp = buildSingleEpisode(
+            response = response,
+            mediaId = mediaId,
+            data = response.torrent ?: response.magnet ?: "",
+            runTime = response.duration?.times(60)
+        )
+        return mapOf(EpisodeIndexer(DubStatus.None, 0) to listOf(torrentEp))
+    }
+
+    private suspend fun parseFallbackEpisode(
+        response: LoadResponse,
+        mediaId: Int
+    ): Map<EpisodeIndexer, List<ResultEpisode>> {
+        val fallbackEp = buildSingleEpisode(
+            response = response,
+            mediaId = mediaId,
+            data = response.url,
+            runTime = response.duration?.times(60)
+        )
+        return mapOf(EpisodeIndexer(DubStatus.None, 0) to listOf(fallbackEp))
+    }
+
+    private suspend fun buildEpisodesMap(
+        response: LoadResponse,
+        mediaId: Int
+    ): ImmutableMap<EpisodeIndexer, ImmutableList<ResultEpisode>> {
+        val rawMap = when (response) {
+            is AnimeLoadResponse -> parseAnimeEpisodes(response, mediaId)
+            is TvSeriesLoadResponse -> parseTvEpisodes(response, mediaId)
+            is MovieLoadResponse -> parseMovieEpisode(response, mediaId)
+            is LiveStreamLoadResponse -> parseLiveStreamEpisode(response, mediaId)
+            is TorrentLoadResponse -> parseTorrentEpisode(response, mediaId)
+            else -> parseFallbackEpisode(response, mediaId)
+        }
+
+        return rawMap.mapValues { it.value.toImmutableList() }.toImmutableMap()
+    }
+
+    private suspend fun resolveResumeStateForEpisode(
+        resume: ResumeWatchingEntity?,
+        mediaId: Int
+    ): Triple<ResultEpisode?, ResultEpisode?, WatchProgressEntity?> {
+        val allEps = currentState.episodesByIndexer.values.flatten()
+        val lastEp = resume?.episodeId?.let { id -> allEps.firstOrNull { it.id == id } }
+            ?: (if (allEps.size == 1) allEps.firstOrNull() else null)
+        val progress = lastEp?.let { watchProgressRepository.getProgress(accountId, it.id) }
+            ?: watchProgressRepository.getProgress(accountId, mediaId)
+        val epWithProgress = lastEp?.let { ep ->
+            if (progress != null && (progress.position > 0 || progress.duration > 0 || progress.watchState > 0)) {
+                ep.copy(
+                    position = progress.position,
+                    duration = progress.duration,
+                    videoWatchState = progress.watchState
+                )
+            } else {
+                ep
+            }
+        }
+        return Triple(lastEp, epWithProgress, progress)
+    }
+
     private fun observeRepositories(mediaId: Int) {
         launchSafeJob(key = "observe_persistence") {
-            // Bookmark Flow
             launch {
                 bookmarkRepository.getBookmarkFlow(accountId, mediaId).collect { bookmark ->
                     updateState {
@@ -587,7 +765,6 @@ class ResultViewModel(
                 }
             }
 
-            // Favorite Flow
             launch {
                 favoriteRepository.getFavoriteFlow(accountId, mediaId).collect { favorite ->
                     updateState {
@@ -598,7 +775,6 @@ class ResultViewModel(
                 }
             }
 
-            // Subscription Flow
             subscriptionRepository?.let { subRepo ->
                 launch {
                     subRepo.getSubscriptionFlow(accountId, mediaId).collect { sub ->
@@ -611,26 +787,10 @@ class ResultViewModel(
                 }
             }
 
-            // Resume Watching Flow
             resumeWatchingRepository?.let { resumeRepo ->
                 launch {
                     resumeRepo.getResumeWatchingFlow(accountId, mediaId).collect { resume ->
-                        val allEps = currentState.episodesByIndexer.values.flatten()
-                        val lastEp = resume?.episodeId?.let { id -> allEps.firstOrNull { it.id == id } }
-                            ?: (if (allEps.size == 1) allEps.firstOrNull() else null)
-                        val progress = lastEp?.let { watchProgressRepository.getProgress(accountId, it.id) }
-                            ?: watchProgressRepository.getProgress(accountId, mediaId)
-                        val epWithProgress = lastEp?.let { ep ->
-                            if (progress != null && (progress.position > 0 || progress.duration > 0 || progress.watchState > 0)) {
-                                ep.copy(
-                                    position = progress.position,
-                                    duration = progress.duration,
-                                    videoWatchState = progress.watchState
-                                )
-                            } else {
-                                ep
-                            }
-                        }
+                        val (_, epWithProgress, progress) = resolveResumeStateForEpisode(resume, mediaId)
                         updateState {
                             copy(
                                 resumeWatching = resume,
@@ -645,9 +805,6 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Toggles bookmark state (sets to Watching (1) or deletes).
-     */
     private fun toggleBookmark(watchType: Int?) {
         launch {
             val mediaId = currentState.mediaId ?: return@launch
@@ -656,9 +813,6 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Sets or deletes a bookmark in BookmarkRepository.
-     */
     private fun setBookmark(watchType: Int) {
         launch {
             val mediaId = currentState.mediaId ?: return@launch
@@ -666,13 +820,13 @@ class ResultViewModel(
             val existing = bookmarkRepository.getBookmark(accountId, mediaId)
             val now = APIHolder.unixTimeMS
 
-            if (watchType <= 0) {
-                if (existing != null) {
-                    bookmarkRepository.saveBookmark(existing.copy(watchType = 0, latestUpdatedTime = now))
-                }
-            } else if (existing != null) {
-                bookmarkRepository.saveBookmark(existing.copy(watchType = watchType, latestUpdatedTime = now))
-            } else if (response != null) {
+            if (existing != null) {
+                val targetWatchType = if (watchType <= 0) 0 else watchType
+                bookmarkRepository.saveBookmark(existing.copy(watchType = targetWatchType, latestUpdatedTime = now))
+                return@launch
+            }
+
+            if (response != null && watchType > 0) {
                 val entity = BookmarkEntity(
                     accountId = accountId,
                     id = mediaId,
@@ -693,9 +847,6 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Sets favorite status in FavoriteRepository.
-     */
     private fun setFavorite(isFavorite: Boolean) {
         launch {
             val mediaId = currentState.mediaId ?: return@launch
@@ -719,9 +870,6 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Sets subscription status in SubscriptionRepository.
-     */
     private fun setSubscription(isSubscribed: Boolean) {
         launch {
             val subRepo = subscriptionRepository ?: return@launch
@@ -747,9 +895,6 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Sets the watch state of an episode.
-     */
     private fun setWatchState(episodeId: Int, watchState: Int) {
         launch {
             val ep = currentState.episodesByIndexer.values.flatten().firstOrNull { it.id == episodeId }
@@ -759,11 +904,6 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Pure state transition helper that updates episodes matching [matchingIds] with new positions,
-     * durations, and watch states, while maintaining consistency across filtered episode lists,
-     * selection states, last watched references, watch progress entities, and external sync counters.
-     */
     private fun ResultState.updateEpisodesWatchState(
         matchingIds: Set<Int>,
         watchState: Int,
@@ -780,15 +920,15 @@ class ResultViewModel(
                         videoWatchState = watchState
                     )
                 } else ep
-            }
-        }
+            }.toImmutableList()
+        }.toImmutableMap()
 
         val currentSelectedDub = selectedDubStatus
         val currentSelectedSeason = selectedSeason ?: 0
-        val updatedFiltered = updatedMap[EpisodeIndexer(currentSelectedDub, currentSelectedSeason)]
+        val updatedFiltered = (updatedMap[EpisodeIndexer(currentSelectedDub, currentSelectedSeason)]
             ?: updatedMap.entries.firstOrNull { it.key.season == currentSelectedSeason }?.value
             ?: updatedMap.values.firstOrNull()
-            ?: emptyList()
+            ?: persistentListOf()).toImmutableList()
 
         val currentSelectedEp = if (selectedEpisode != null && selectedEpisode.id in matchingIds) {
             val (pos, dur) = resolveProgress(selectedEpisode)
@@ -824,7 +964,7 @@ class ResultViewModel(
             } else {
                 entry
             }
-        }
+        }.toImmutableMap()
 
         return copy(
             episodesByIndexer = updatedMap,
@@ -836,9 +976,49 @@ class ResultViewModel(
         )
     }
 
-    /**
-     * Updates playback progress and watch state for an episode.
-     */
+    private suspend fun ensureBookmarkUpdated(currentEp: ResultEpisode?, parentId: Int, now: Long) {
+        val response = currentState.loadResponse
+        val existingBookmark = bookmarkRepository.getBookmark(accountId, parentId)
+        if (existingBookmark != null) {
+            bookmarkRepository.saveBookmark(existingBookmark.copy(latestUpdatedTime = now))
+            return
+        }
+
+        if (response != null) {
+            val newBookmark = BookmarkEntity(
+                accountId = accountId,
+                id = parentId,
+                name = response.name,
+                url = response.url,
+                apiName = response.apiName,
+                type = response.type,
+                posterUrl = response.posterUrl ?: response.backgroundPosterUrl,
+                year = response.year,
+                watchType = 0,
+                bookmarkedTime = now,
+                latestUpdatedTime = now,
+                plot = response.plot,
+                score = response.score?.toDouble(10)
+            )
+            bookmarkRepository.saveBookmark(newBookmark)
+        } else if (currentEp != null) {
+            val newBookmark = BookmarkEntity(
+                accountId = accountId,
+                id = parentId,
+                name = currentEp.name ?: currentEp.headerName,
+                url = currentState.url ?: currentEp.data,
+                apiName = currentEp.apiName,
+                type = currentEp.tvType,
+                posterUrl = currentEp.poster,
+                watchType = 0,
+                bookmarkedTime = now,
+                latestUpdatedTime = now,
+                plot = currentEp.description
+            )
+            bookmarkRepository.saveBookmark(newBookmark)
+        }
+    }
+
     private fun updateWatchProgress(
         episodeId: Int,
         position: Long,
@@ -872,7 +1052,6 @@ class ResultViewModel(
                 )
             }
 
-            // Update resume watching parent state and bookmark metadata
             val currentEp = currentState.episodesByIndexer.values.flatten().firstOrNull { it.id == episodeId }
             val parentId = currentState.mediaId ?: currentEp?.parentId ?: episodeId
             val now = APIHolder.unixTimeMS
@@ -889,49 +1068,10 @@ class ResultViewModel(
                 )
             )
 
-            val response = currentState.loadResponse
-            val existingBookmark = bookmarkRepository.getBookmark(accountId, parentId)
-            if (existingBookmark != null) {
-                bookmarkRepository.saveBookmark(existingBookmark.copy(latestUpdatedTime = now))
-            } else if (response != null) {
-                val newBookmark = BookmarkEntity(
-                    accountId = accountId,
-                    id = parentId,
-                    name = response.name,
-                    url = response.url,
-                    apiName = response.apiName,
-                    type = response.type,
-                    posterUrl = response.posterUrl ?: response.backgroundPosterUrl,
-                    year = response.year,
-                    watchType = 0,
-                    bookmarkedTime = now,
-                    latestUpdatedTime = now,
-                    plot = response.plot,
-                    score = response.score?.toDouble(10)
-                )
-                bookmarkRepository.saveBookmark(newBookmark)
-            } else if (currentEp != null) {
-                val newBookmark = BookmarkEntity(
-                    accountId = accountId,
-                    id = parentId,
-                    name = currentEp.name ?: currentEp.headerName,
-                    url = currentState.url ?: currentEp.data,
-                    apiName = currentEp.apiName,
-                    type = currentEp.tvType,
-                    posterUrl = currentEp.poster,
-                    watchType = 0,
-                    bookmarkedTime = now,
-                    latestUpdatedTime = now,
-                    plot = currentEp.description
-                )
-                bookmarkRepository.saveBookmark(newBookmark)
-            }
+            ensureBookmarkUpdated(currentEp, parentId, now)
         }
     }
 
-    /**
-     * Marks all episodes from previous seasons and current season with index <= targetEp.index as watched.
-     */
     private fun markEpisodesUpTo(episodeId: Int, season: Int) {
         launch {
             val allEpisodes = currentState.episodesByIndexer.values.flatten()
@@ -973,15 +1113,12 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Filters episodes by the selected season.
-     */
     private fun selectSeason(season: Int) {
         updateState {
             val dub = selectedDubStatus
-            val filtered = episodesByIndexer[EpisodeIndexer(dub, season)]
+            val filtered = (episodesByIndexer[EpisodeIndexer(dub, season)]
                 ?: episodesByIndexer.entries.firstOrNull { it.key.season == season }?.value
-                ?: emptyList()
+                ?: persistentListOf()).toImmutableList()
             copy(
                 selectedSeason = season,
                 episodes = filtered
@@ -989,15 +1126,12 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Filters episodes by the selected anime dub status.
-     */
     private fun selectDubStatus(dubStatus: DubStatus) {
         updateState {
             val season = selectedSeason ?: 0
-            val filtered = episodesByIndexer[EpisodeIndexer(dubStatus, season)]
+            val filtered = (episodesByIndexer[EpisodeIndexer(dubStatus, season)]
                 ?: episodesByIndexer.entries.firstOrNull { it.key.dubStatus == dubStatus }?.value
-                ?: emptyList()
+                ?: persistentListOf()).toImmutableList()
             copy(
                 selectedDubStatus = dubStatus,
                 episodes = filtered
@@ -1005,9 +1139,6 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Sets the currently selected episode and ensures exact progress and duration are reflected.
-     */
     private fun selectEpisode(episode: ResultEpisode) {
         val existingEp = currentState.episodesByIndexer.values.flatten().firstOrNull { it.id == episode.id }
         val baseEp = if (existingEp != null && (existingEp.position > 0 || existingEp.duration > 0 || existingEp.videoWatchState > 0)) {
@@ -1047,20 +1178,64 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Extracts streaming links and subtitles for the specified or current episode/movie.
-     */
+    private fun resolveStreamDataUrl(targetEp: ResultEpisode?): String {
+        return targetEp?.data
+            ?: (currentState.loadResponse as? MovieLoadResponse)?.dataUrl
+            ?: (currentState.loadResponse as? LiveStreamLoadResponse)?.dataUrl
+            ?: (currentState.loadResponse as? TorrentLoadResponse)?.let { it.torrent ?: it.magnet }
+            ?: currentState.url
+            ?: ""
+    }
+
+    private suspend fun extractLinksFallback(dataUrl: String) {
+        if (!dataUrl.startsWith("http://") && !dataUrl.startsWith("https://")) return
+        try {
+            loadExtractor(
+                url = dataUrl,
+                subtitleCallback = { sub ->
+                    launch {
+                        linksMutex.withLock {
+                            updateState {
+                                if (!extractedSubtitles.contains(sub)) {
+                                    copy(extractedSubtitles = (extractedSubtitles + sub).toImmutableList())
+                                } else this
+                            }
+                        }
+                    }
+                },
+                callback = { link ->
+                    launch {
+                        linksMutex.withLock {
+                            updateState {
+                                if (!extractedLinks.contains(link)) {
+                                    copy(
+                                        extractedLinks = (extractedLinks + link).toImmutableList(),
+                                        linksLoadingProgress = linksLoadingProgress + 1
+                                    )
+                                } else this
+                            }
+                        }
+                    }
+                }
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logError(e)
+        }
+    }
+
     private fun reloadLinks(episode: ResultEpisode?, isCasting: Boolean, clearCache: Boolean = false) {
         launchSafeJob(key = "link_extraction") job@{
             val targetEp = episode ?: currentState.selectedEpisode ?: currentState.episodes.firstOrNull()
             updateState {
-                val currentEpisodes = if (episodes.isEmpty() && targetEp != null) listOf(targetEp) else episodes
+                val currentEpisodes = (if (episodes.isEmpty() && targetEp != null) listOf(targetEp) else episodes).toImmutableList()
                 copy(
                     isExtractingLinks = true,
                     linksLoadingProgress = 0,
                     linksLoadingError = null,
-                    extractedLinks = if (clearCache || episode != null) emptyList() else extractedLinks,
-                    extractedSubtitles = if (clearCache || episode != null) emptyList() else extractedSubtitles,
+                    extractedLinks = if (clearCache || episode != null) persistentListOf() else extractedLinks,
+                    extractedSubtitles = if (clearCache || episode != null) persistentListOf() else extractedSubtitles,
                     selectedEpisode = episode ?: selectedEpisode ?: targetEp,
                     episodes = currentEpisodes
                 )
@@ -1086,13 +1261,7 @@ class ResultViewModel(
                 return@job
             }
 
-            val dataUrl = targetEp?.data
-                ?: (currentState.loadResponse as? MovieLoadResponse)?.dataUrl
-                ?: (currentState.loadResponse as? LiveStreamLoadResponse)?.dataUrl
-                ?: (currentState.loadResponse as? TorrentLoadResponse)?.let { it.torrent ?: it.magnet }
-                ?: currentState.url
-                ?: ""
-
+            val dataUrl = resolveStreamDataUrl(targetEp)
             if (dataUrl.isBlank()) {
                 val errorMessage = getString(Res.string.result_error_no_stream_url)
                 updateState {
@@ -1114,7 +1283,7 @@ class ResultViewModel(
                                 linksMutex.withLock {
                                     updateState {
                                         if (!extractedSubtitles.contains(sub)) {
-                                            copy(extractedSubtitles = extractedSubtitles + sub)
+                                            copy(extractedSubtitles = (extractedSubtitles + sub).toImmutableList())
                                         } else this
                                     }
                                 }
@@ -1126,7 +1295,7 @@ class ResultViewModel(
                                     updateState {
                                         if (!extractedLinks.contains(link)) {
                                             copy(
-                                                extractedLinks = extractedLinks + link,
+                                                extractedLinks = (extractedLinks + link).toImmutableList(),
                                                 linksLoadingProgress = linksLoadingProgress + 1
                                             )
                                         } else this
@@ -1142,42 +1311,8 @@ class ResultViewModel(
                     false
                 }
 
-                // If not handled by api or if standard extractor url
-                if (!handledByApi && (dataUrl.startsWith("http://") || dataUrl.startsWith("https://"))) {
-                    try {
-                        loadExtractor(
-                            url = dataUrl,
-                            subtitleCallback = { sub ->
-                                launch {
-                                    linksMutex.withLock {
-                                        updateState {
-                                            if (!extractedSubtitles.contains(sub)) {
-                                                copy(extractedSubtitles = extractedSubtitles + sub)
-                                            } else this
-                                        }
-                                    }
-                                }
-                            },
-                            callback = { link ->
-                                launch {
-                                    linksMutex.withLock {
-                                        updateState {
-                                            if (!extractedLinks.contains(link)) {
-                                                copy(
-                                                    extractedLinks = extractedLinks + link,
-                                                    linksLoadingProgress = linksLoadingProgress + 1
-                                                )
-                                            } else this
-                                        }
-                                    }
-                                }
-                            }
-                        )
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        logError(e)
-                    }
+                if (!handledByApi) {
+                    extractLinksFallback(dataUrl)
                 }
 
                 updateState { copy(isExtractingLinks = false) }
@@ -1197,25 +1332,19 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Clears all extracted links and subtitles.
-     */
     private fun clearLinks() {
         cancelJob("link_extraction")
         updateState {
             copy(
                 isExtractingLinks = false,
-                extractedLinks = emptyList(),
-                extractedSubtitles = emptyList(),
+                extractedLinks = persistentListOf(),
+                extractedSubtitles = persistentListOf(),
                 linksLoadingProgress = 0,
                 linksLoadingError = null
             )
         }
     }
 
-    /**
-     * Clears error messages.
-     */
     private fun clearError(linksOnly: Boolean) {
         updateState {
             if (linksOnly) {
@@ -1226,24 +1355,26 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Resolves the primary URL of an episode and emits [ResultEffect.CopyToClipboard].
-     */
+    private fun resolveEpisodeUrl(episode: ResultEpisode): String {
+        if (episode.data.startsWith("http://") || episode.data.startsWith("https://") || episode.data.startsWith("magnet:")) {
+            return episode.data
+        }
+        val api = APIHolder.getApiFromNameNull(episode.apiName)
+            ?: APIHolder.getApiFromNameNull(currentState.apiName ?: "")
+        if (api != null && episode.data.isNotBlank()) {
+            val base = api.mainUrl.removeSuffix("/")
+            val path = if (episode.data.startsWith("/")) episode.data else "/${episode.data}"
+            return "$base$path"
+        }
+        if (episode.data.isNotBlank()) {
+            return episode.data
+        }
+        return currentState.url ?: ""
+    }
+
     private fun copyEpisodeLink(episode: ResultEpisode) {
         launch {
-            val api = APIHolder.getApiFromNameNull(episode.apiName)
-                ?: APIHolder.getApiFromNameNull(currentState.apiName ?: "")
-            val resolvedUrl = when {
-                episode.data.startsWith("http://") || episode.data.startsWith("https://") || episode.data.startsWith("magnet:") -> episode.data
-                api != null && episode.data.isNotBlank() -> {
-                    val base = api.mainUrl.removeSuffix("/")
-                    val path = if (episode.data.startsWith("/")) episode.data else "/${episode.data}"
-                    "$base$path"
-                }
-                episode.data.isNotBlank() -> episode.data
-                else -> currentState.url ?: ""
-            }
-
+            val resolvedUrl = resolveEpisodeUrl(episode)
             if (resolvedUrl.isNotBlank()) {
                 val toastMsg = try {
                     getString(Res.string.copy_link_toast)
@@ -1255,9 +1386,6 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Updates tracking watch status for an external service.
-     */
     private fun updateSyncStatus(service: SyncService, status: ExternalSyncStatus) {
         launch {
             val mediaId = currentState.mediaId
@@ -1276,7 +1404,7 @@ class ResultViewModel(
                 )
 
                 copy(
-                    externalSyncStates = externalSyncStates + (service to updatedEntry)
+                    externalSyncStates = (externalSyncStates + (service to updatedEntry)).toImmutableMap()
                 )
             }
 
@@ -1296,9 +1424,6 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Updates user score for an external tracking service.
-     */
     private fun updateSyncScore(service: SyncService, event: ResultEvent.UpdateSyncScore) {
         updateState {
             val current = externalSyncStates[service] ?: ExternalSyncEntry(service)
@@ -1311,14 +1436,11 @@ class ResultViewModel(
                 lastUpdated = APIHolder.unixTimeMS
             )
             copy(
-                externalSyncStates = externalSyncStates + (service to updated)
+                externalSyncStates = (externalSyncStates + (service to updated)).toImmutableMap()
             )
         }
     }
 
-    /**
-     * Sets the active score scale format for an external tracking service.
-     */
     private fun setSyncScoreScale(service: SyncService, scale: TrackerScoreScale) {
         updateState {
             val current = externalSyncStates[service] ?: ExternalSyncEntry(service)
@@ -1327,14 +1449,11 @@ class ResultViewModel(
                 lastUpdated = APIHolder.unixTimeMS
             )
             copy(
-                externalSyncStates = externalSyncStates + (service to updated)
+                externalSyncStates = (externalSyncStates + (service to updated)).toImmutableMap()
             )
         }
     }
 
-    /**
-     * Updates watched episodes count for an external tracking service.
-     */
     private fun updateSyncEpisode(service: SyncService, episode: Int) {
         updateState {
             val current = externalSyncStates[service] ?: ExternalSyncEntry(service)
@@ -1359,14 +1478,11 @@ class ResultViewModel(
                 lastUpdated = APIHolder.unixTimeMS
             )
             copy(
-                externalSyncStates = externalSyncStates + (service to updated)
+                externalSyncStates = (externalSyncStates + (service to updated)).toImmutableMap()
             )
         }
     }
 
-    /**
-     * Saves and commits all synchronization fields for a tracking service.
-     */
     private fun saveSyncData(event: ResultEvent.SaveSyncData) {
         launch {
             val mediaId = currentState.mediaId
@@ -1390,7 +1506,7 @@ class ResultViewModel(
                     lastUpdated = now
                 )
                 copy(
-                    externalSyncStates = externalSyncStates + (event.service to updated)
+                    externalSyncStates = (externalSyncStates + (event.service to updated)).toImmutableMap()
                 )
             }
 
@@ -1409,9 +1525,6 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Unlinks tracking for a specific external service.
-     */
     private fun unlinkSyncService(service: SyncService) {
         launch {
             val mediaId = currentState.mediaId
@@ -1427,7 +1540,7 @@ class ResultViewModel(
                     lastUpdated = 0L
                 )
                 copy(
-                    externalSyncStates = externalSyncStates + (service to reset)
+                    externalSyncStates = (externalSyncStates + (service to reset)).toImmutableMap()
                 )
             }
 
@@ -1437,9 +1550,6 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Opens the trailer modal dialog and triggers extraction of the trailer at [trailerIndex].
-     */
     private fun openTrailer(trailerIndex: Int) {
         updateState {
             copy(
@@ -1450,20 +1560,17 @@ class ResultViewModel(
         loadTrailer(trailerIndex)
     }
 
-    /**
-     * Extracts streaming links and subtitles for the trailer at [trailerIndex].
-     */
     private fun loadTrailer(trailerIndex: Int) {
         launchSafeJob(key = "trailer_extraction") job@{
-            val allTrailers = currentState.trailers.ifEmpty { currentState.loadResponse?.trailers ?: emptyList() }
+            val allTrailers = currentState.trailers.ifEmpty { currentState.loadResponse?.trailers?.toImmutableList() ?: persistentListOf() }
             val targetTrailer = allTrailers.getOrNull(trailerIndex)
 
             updateState {
                 copy(
                     selectedTrailerIndex = trailerIndex,
                     isExtractingTrailer = true,
-                    extractedTrailerLinks = emptyList(),
-                    extractedTrailerSubtitles = emptyList(),
+                    extractedTrailerLinks = persistentListOf(),
+                    extractedTrailerSubtitles = persistentListOf(),
                     selectedTrailerQuality = null,
                     trailerExtractionError = null
                 )
@@ -1481,9 +1588,6 @@ class ResultViewModel(
             }
 
             val trailerUrl = targetTrailer.extractorUrl
-            val referer = targetTrailer.referer
-            val raw = targetTrailer.raw
-            val headers = targetTrailer.headers
 
             if (trailerUrl.isBlank()) {
                 val errorMessage = getString(Res.string.result_error_invalid_trailer_url)
@@ -1502,14 +1606,14 @@ class ResultViewModel(
                     subtitleCallback = { sub ->
                         updateState {
                             if (!extractedTrailerSubtitles.contains(sub)) {
-                                copy(extractedTrailerSubtitles = extractedTrailerSubtitles + sub)
+                                copy(extractedTrailerSubtitles = (extractedTrailerSubtitles + sub).toImmutableList())
                             } else this
                         }
                     },
                     linkCallback = { link ->
                         updateState {
                             val updatedLinks = if (!extractedTrailerLinks.contains(link)) {
-                                extractedTrailerLinks + link
+                                (extractedTrailerLinks + link).toImmutableList()
                             } else extractedTrailerLinks
                             copy(
                                 extractedTrailerLinks = updatedLinks,
@@ -1543,17 +1647,14 @@ class ResultViewModel(
         }
     }
 
-    /**
-     * Closes trailer dialog, releases active trailer extraction job and clears extracted trailer links.
-     */
     private fun closeTrailer() {
         cancelJob("trailer_extraction")
         updateState {
             copy(
                 isTrailerDialogOpen = false,
                 isExtractingTrailer = false,
-                extractedTrailerLinks = emptyList(),
-                extractedTrailerSubtitles = emptyList(),
+                extractedTrailerLinks = persistentListOf(),
+                extractedTrailerSubtitles = persistentListOf(),
                 selectedTrailerQuality = null,
                 trailerExtractionError = null
             )

@@ -15,22 +15,22 @@ import cloudstream.shared_ui.generated.resources.search_error_failed
 import cloudstream.shared_ui.generated.resources.search_error_no_providers
 import com.lagradost.cloudstream3.shared.ui.search.SearchDisplayMode
 import com.lagradost.cloudstream3.utils.txt
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.ImmutableSet
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentMapOf
+import kotlinx.collections.immutable.persistentSetOf
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.collections.immutable.toImmutableSet
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 
-/**
- * Pure Kotlin Multiplatform ViewModel for Search using MVI architecture.
- *
- * @param providersProvider Lambda supplying the list of providers to search across.
- * @param preferenceRepository Repository for accessing and persisting search preferences.
- * @param initialState Initial search state.
- * @param coroutineContext Optional coroutine context for viewModelScope.
- */
 class SearchViewModel(
     private val providersProvider: () -> List<MainAPI> = {
         val apisList = APIHolder.apis.withLock { APIHolder.apis.toList() }
@@ -52,17 +52,14 @@ class SearchViewModel(
         }
     }
 
-    /**
-     * Loads available providers and available types/qualities.
-     */
     fun initialize() {
-        val providers = providersProvider()
-        val allTypes = TvType.entries.toSet()
-        val allQualities = SearchQuality.entries.toSet()
+        val providers = providersProvider().toImmutableList()
+        val allTypes = TvType.entries.toImmutableSet()
+        val allQualities = SearchQuality.entries.toImmutableSet()
 
-        val savedProviders = preferenceRepository.getStringSetSync(AppPreferenceManager.KEY_SEARCH_SELECTED_PROVIDERS, emptySet()) ?: emptySet()
-        val savedTypes = preferenceRepository.getStringSetSync(AppPreferenceManager.KEY_SEARCH_SELECTED_TYPES, emptySet())?.mapNotNull { runCatching { TvType.valueOf(it) }.getOrNull() }?.toSet() ?: emptySet()
-        val savedQualities = preferenceRepository.getStringSetSync(AppPreferenceManager.KEY_SEARCH_SELECTED_QUALITIES, emptySet())?.mapNotNull { runCatching { SearchQuality.valueOf(it) }.getOrNull() }?.toSet() ?: emptySet()
+        val savedProviders = preferenceRepository.getStringSetSync(AppPreferenceManager.KEY_SEARCH_SELECTED_PROVIDERS, emptySet())?.toImmutableSet() ?: persistentSetOf()
+        val savedTypes = preferenceRepository.getStringSetSync(AppPreferenceManager.KEY_SEARCH_SELECTED_TYPES, emptySet())?.mapNotNull { runCatching { TvType.valueOf(it) }.getOrNull() }?.toImmutableSet() ?: persistentSetOf()
+        val savedQualities = preferenceRepository.getStringSetSync(AppPreferenceManager.KEY_SEARCH_SELECTED_QUALITIES, emptySet())?.mapNotNull { runCatching { SearchQuality.valueOf(it) }.getOrNull() }?.toImmutableSet() ?: persistentSetOf()
         val savedModeStr = preferenceRepository.getStringSync(AppPreferenceManager.KEY_SEARCH_DISPLAY_MODE, SearchDisplayMode.Unified.name) ?: SearchDisplayMode.Unified.name
         val savedMode = runCatching { SearchDisplayMode.valueOf(savedModeStr) }.getOrDefault(SearchDisplayMode.Unified)
 
@@ -87,106 +84,124 @@ class SearchViewModel(
         preferenceRepository.setStringSetSync(AppPreferenceManager.KEY_SEARCH_SELECTED_QUALITIES, newFilters.selectedQualities.map { it.name }.toSet())
     }
 
-    private fun <T> toggleFilter(currentSet: Set<T>, item: T): Set<T> =
-        if (currentSet.contains(item)) currentSet - item else currentSet + item
+    private fun <T> toggleFilter(currentSet: ImmutableSet<T>, item: T): ImmutableSet<T> =
+        if (currentSet.contains(item)) (currentSet - item).toImmutableSet() else (currentSet + item).toImmutableSet()
 
     override fun handleEvent(event: SearchEvent) {
+        when (event) {
+            is SearchEvent.SetFilter,
+            is SearchEvent.ToggleProviderFilter,
+            is SearchEvent.ToggleTypeFilter,
+            is SearchEvent.ToggleQualityFilter,
+            is SearchEvent.ClearFilters -> handleFilterEvent(event)
+
+            is SearchEvent.RemoveHistoryItem,
+            is SearchEvent.ClearHistory -> handleHistoryEvent(event)
+
+            is SearchEvent.SetDisplayMode,
+            is SearchEvent.Search,
+            is SearchEvent.ClearSearch,
+            is SearchEvent.LoadNextPage,
+            is SearchEvent.ExpandProviderSearch,
+            is SearchEvent.SelectItem,
+            is SearchEvent.DismissError -> handleQueryEvent(event)
+        }
+    }
+
+    private fun handleFilterEvent(event: SearchEvent) {
+        val newFilters = when (event) {
+            is SearchEvent.SetFilter -> event.filter
+            is SearchEvent.ToggleProviderFilter -> currentState.activeFilters.copy(
+                selectedProviders = toggleFilter(currentState.activeFilters.selectedProviders, event.providerName)
+            )
+            is SearchEvent.ToggleTypeFilter -> currentState.activeFilters.copy(
+                selectedTypes = toggleFilter(currentState.activeFilters.selectedTypes, event.type)
+            )
+            is SearchEvent.ToggleQualityFilter -> currentState.activeFilters.copy(
+                selectedQualities = toggleFilter(currentState.activeFilters.selectedQualities, event.quality)
+            )
+            is SearchEvent.ClearFilters -> SearchFilters()
+            else -> return
+        }
+        updateState { copy(activeFilters = newFilters) }
+        persistFilters(newFilters)
+        applyCurrentFilters()
+    }
+
+    private fun handleHistoryEvent(event: SearchEvent) {
+        when (event) {
+            is SearchEvent.RemoveHistoryItem -> updateState {
+                copy(searchHistory = (searchHistory - event.query).toImmutableList())
+            }
+            is SearchEvent.ClearHistory -> updateState {
+                copy(searchHistory = persistentListOf())
+            }
+            else -> Unit
+        }
+    }
+
+    private fun handleQueryEvent(event: SearchEvent) {
         when (event) {
             is SearchEvent.SetDisplayMode -> {
                 updateState { copy(displayMode = event.mode) }
                 preferenceRepository.setStringSync(AppPreferenceManager.KEY_SEARCH_DISPLAY_MODE, event.mode.name)
             }
-
-            is SearchEvent.Search -> {
-                executeSearch(query = event.query, isQuickSearch = event.isQuickSearch)
-            }
-
-            is SearchEvent.SetFilter -> {
-                updateState { copy(activeFilters = event.filter) }
-                persistFilters(event.filter)
-                applyCurrentFilters()
-            }
-
-            is SearchEvent.ToggleProviderFilter -> {
-                val newFilters = currentState.activeFilters.copy(
-                    selectedProviders = toggleFilter(currentState.activeFilters.selectedProviders, event.providerName)
-                )
-                updateState { copy(activeFilters = newFilters) }
-                persistFilters(newFilters)
-                applyCurrentFilters()
-            }
-
-            is SearchEvent.ToggleTypeFilter -> {
-                val newFilters = currentState.activeFilters.copy(
-                    selectedTypes = toggleFilter(currentState.activeFilters.selectedTypes, event.type)
-                )
-                updateState { copy(activeFilters = newFilters) }
-                persistFilters(newFilters)
-                applyCurrentFilters()
-            }
-
-            is SearchEvent.ToggleQualityFilter -> {
-                val newFilters = currentState.activeFilters.copy(
-                    selectedQualities = toggleFilter(currentState.activeFilters.selectedQualities, event.quality)
-                )
-                updateState { copy(activeFilters = newFilters) }
-                persistFilters(newFilters)
-                applyCurrentFilters()
-            }
-
-            is SearchEvent.ClearFilters -> {
-                val newFilters = SearchFilters()
-                updateState { copy(activeFilters = newFilters) }
-                persistFilters(newFilters)
-                applyCurrentFilters()
-            }
-
-            is SearchEvent.RemoveHistoryItem -> {
-                updateState { copy(searchHistory = searchHistory - event.query) }
-            }
-
-            is SearchEvent.ClearHistory -> {
-                updateState { copy(searchHistory = emptyList()) }
-            }
-
-            is SearchEvent.ClearSearch -> {
-                cancelJob("search")
-                cancelJob("pagination")
-                rawProviderResults.clear()
-                providerPagination.clear()
-                updateState {
-                    copy(
-                        query = "",
-                        results = emptyList(),
-                        groupedResults = emptyMap(),
-                        isLoading = false,
-                        isPaginating = false,
-                        hasNextPage = false,
-                        currentPage = 1,
-                        error = null
-                    )
-                }
-            }
-
-            is SearchEvent.LoadNextPage -> {
-                loadNextPage()
-            }
-
-            is SearchEvent.ExpandProviderSearch -> {
-                expandProviderSearch(event.providerName)
-            }
-
+            is SearchEvent.Search -> executeSearch(query = event.query, isQuickSearch = event.isQuickSearch)
+            is SearchEvent.ClearSearch -> resetSearchSession()
+            is SearchEvent.LoadNextPage -> loadNextPage()
+            is SearchEvent.ExpandProviderSearch -> expandProviderSearch(event.providerName)
             is SearchEvent.SelectItem -> {
                 updateState { copy(selectedItem = event.item) }
-                if (event.item != null) {
-                    emitEffect(SearchEffect.NavigateToDetails(event.item))
-                }
+                if (event.item != null) emitEffect(SearchEffect.NavigateToDetails(event.item))
             }
-
-            is SearchEvent.DismissError -> {
-                updateState { copy(error = null) }
-            }
+            is SearchEvent.DismissError -> updateState { copy(error = null) }
+            else -> Unit
         }
+    }
+
+    private fun resetSearchSession() {
+        cancelJob("search")
+        cancelJob("pagination")
+        rawProviderResults.clear()
+        providerPagination.clear()
+        updateState {
+            copy(
+                query = "",
+                results = persistentListOf(),
+                groupedResults = persistentMapOf(),
+                isLoading = false,
+                isPaginating = false,
+                hasNextPage = false,
+                currentPage = 1,
+                error = null
+            )
+        }
+    }
+
+    private fun resolveCandidateProviders(isQuickSearch: Boolean): List<MainAPI> {
+        val allProviders = currentState.availableProviders.ifEmpty { providersProvider().toImmutableList() }
+        val selectedNames = currentState.activeFilters.selectedProviders
+        return allProviders.filter { provider ->
+            val matchesSelection = selectedNames.isEmpty() || provider.name in selectedNames
+            val matchesQuickSearch = !isQuickSearch || provider.hasQuickSearch
+            matchesSelection && matchesQuickSearch
+        }
+    }
+
+    private suspend fun fetchSingleProviderSearch(
+        provider: MainAPI,
+        query: String,
+        isQuickSearch: Boolean
+    ): Triple<String, List<SearchResponse>, Boolean> = try {
+        val response: SearchResponseList? = if (isQuickSearch) {
+            val list = provider.quickSearch(query)
+            list?.let { newSearchResponseList(it, false) }
+        } else {
+            provider.search(query, 1)
+        }
+        Triple(provider.name, response?.items ?: emptyList(), response?.hasNext ?: false)
+    } catch (e: Throwable) {
+        Triple(provider.name, emptyList(), false)
     }
 
     private fun executeSearch(query: String, isQuickSearch: Boolean) {
@@ -196,8 +211,7 @@ class SearchViewModel(
             return
         }
 
-        // Add to recent search history
-        val newHistory = (listOf(trimmedQuery) + currentState.searchHistory).distinct().take(20)
+        val newHistory = (listOf(trimmedQuery) + currentState.searchHistory).distinct().take(20).toImmutableList()
         updateState { copy(searchHistory = newHistory) }
 
         cancelJob("pagination")
@@ -223,22 +237,14 @@ class SearchViewModel(
                 )
             }
 
-            val allProviders = currentState.availableProviders.ifEmpty { providersProvider() }
-            val selectedProviderNames = currentState.activeFilters.selectedProviders
-
-            val candidateProviders = allProviders.filter { provider ->
-                val matchesSelection = selectedProviderNames.isEmpty() || selectedProviderNames.contains(provider.name)
-                val matchesQuickSearch = !isQuickSearch || provider.hasQuickSearch
-                matchesSelection && matchesQuickSearch
-            }
-
+            val candidateProviders = resolveCandidateProviders(isQuickSearch)
             if (candidateProviders.isEmpty()) {
                 rawProviderResults.clear()
                 providerPagination.clear()
                 updateState {
                     copy(
-                        results = emptyList(),
-                        groupedResults = emptyMap(),
+                        results = persistentListOf(),
+                        groupedResults = persistentMapOf(),
                         isLoading = false,
                         hasNextPage = false,
                         error = txt(Res.string.search_error_no_providers)
@@ -252,19 +258,7 @@ class SearchViewModel(
 
             val fetched = coroutineScope {
                 candidateProviders.map { provider ->
-                    async {
-                        try {
-                            val response: SearchResponseList? = if (isQuickSearch) {
-                                val list = provider.quickSearch(trimmedQuery)
-                                list?.let { newSearchResponseList(it, false) }
-                            } else {
-                                provider.search(trimmedQuery, 1)
-                            }
-                            Triple(provider.name, response?.items ?: emptyList(), response?.hasNext ?: false)
-                        } catch (e: Throwable) {
-                            Triple(provider.name, emptyList<SearchResponse>(), false)
-                        }
-                    }
+                    async { fetchSingleProviderSearch(provider, trimmedQuery, isQuickSearch) }
                 }.awaitAll()
             }
 
@@ -411,49 +405,37 @@ class SearchViewModel(
         }
     }
 
-    /**
-     * Filters raw search results by active criteria (provider, TvType, SearchQuality, NSFW).
-     */
+    private fun SearchFilters.matches(item: SearchResponse): Boolean {
+        if (hideNsfw && item.type == TvType.NSFW) return false
+        if (selectedTypes.isNotEmpty() && item.type != null && item.type !in selectedTypes) return false
+        if (selectedQualities.isNotEmpty() && item.quality != null && item.quality !in selectedQualities) return false
+        return true
+    }
+
     private fun filterResults(
         raw: Map<String, List<SearchResponse>>,
         filters: SearchFilters
-    ): Map<String, List<SearchResponse>> {
-        val filtered = mutableMapOf<String, List<SearchResponse>>()
+    ): ImmutableMap<String, ImmutableList<SearchResponse>> {
+        val filtered = mutableMapOf<String, ImmutableList<SearchResponse>>()
 
         for ((providerName, items) in raw) {
-            if (filters.selectedProviders.isNotEmpty() && !filters.selectedProviders.contains(providerName)) {
+            if (filters.selectedProviders.isNotEmpty() && providerName !in filters.selectedProviders) {
                 continue
             }
 
-            val matchingItems = items.filter { item ->
-                if (filters.hideNsfw && item.type == TvType.NSFW) {
-                    return@filter false
-                }
-                if (filters.selectedTypes.isNotEmpty() && item.type != null && !filters.selectedTypes.contains(item.type)) {
-                    return@filter false
-                }
-                if (filters.selectedQualities.isNotEmpty() && item.quality != null && !filters.selectedQualities.contains(item.quality)) {
-                    return@filter false
-                }
-                true
-            }
-
+            val matchingItems = items.filter { filters.matches(it) }
             if (matchingItems.isNotEmpty()) {
-                filtered[providerName] = matchingItems
+                filtered[providerName] = matchingItems.toImmutableList()
             }
         }
 
-        return filtered
+        return filtered.toImmutableMap()
     }
 
-    /**
-     * Bundles grouped results by interleaving them from each provider to ensure balanced presentation,
-     * deduplicating by URL.
-     */
-    private fun bundleSearchResults(grouped: Map<String, List<SearchResponse>>): List<SearchResponse> {
+    private fun bundleSearchResults(grouped: Map<String, List<SearchResponse>>): ImmutableList<SearchResponse> {
         val lists = grouped.values.toList()
-        if (lists.isEmpty()) return emptyList()
-        if (lists.size == 1) return lists.first()
+        if (lists.isEmpty()) return persistentListOf()
+        if (lists.size == 1) return lists.first().toImmutableList()
 
         val bundled = mutableListOf<SearchResponse>()
         val seenUrls = mutableSetOf<String>()
@@ -474,6 +456,6 @@ class SearchViewModel(
             index++
         } while (addedAny)
 
-        return bundled
+        return bundled.toImmutableList()
     }
 }

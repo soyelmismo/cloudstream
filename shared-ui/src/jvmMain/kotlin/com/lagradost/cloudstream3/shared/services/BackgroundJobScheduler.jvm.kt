@@ -4,6 +4,7 @@ import com.lagradost.api.Log
 import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.EpisodeResponse
+import com.lagradost.cloudstream3.shared.persistence.database.AppDatabase
 import com.lagradost.cloudstream3.shared.persistence.driver.DatabaseDriverFactory
 import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
@@ -34,6 +35,7 @@ actual class BackgroundJobScheduler actual constructor() {
 
         subscriptionJob = scope.launch {
             while (isActive) {
+                delay(intervalMinutes * 60_000L)
                 try {
                     executeSubscriptionCheck()
                 } catch (e: CancellationException) {
@@ -41,7 +43,6 @@ actual class BackgroundJobScheduler actual constructor() {
                 } catch (e: Throwable) {
                     Log.e(TAG, "Error executing subscription check: ${e.message}")
                 }
-                delay(intervalMinutes * 60 * 1000L)
             }
         }
     }
@@ -86,41 +87,59 @@ actual class BackgroundJobScheduler actual constructor() {
         if (subscriptions.isEmpty()) return
 
         for (savedData in subscriptions) {
-            try {
-                val api = APIHolder.getApiFromNameNull(savedData.apiName) ?: continue
-                val response = withTimeoutOrNull(60_000) {
-                    api.load(savedData.url) as? EpisodeResponse
-                } ?: continue
-
-                val latestEpisodes = response.getLatestEpisodes()
-                val lastSeenMap: Map<String, Int?> = savedData.lastSeenEpisodeCountJson?.let {
-                    tryParseJson<Map<String, Int?>>(it)
-                } ?: emptyMap()
-
-                val latestEpisode = latestEpisodes[DubStatus.None]
-                    ?: latestEpisodes[DubStatus.Subbed]
-                    ?: latestEpisodes[DubStatus.Dubbed]
-                    ?: Int.MIN_VALUE
-                val lastSeen = lastSeenMap[DubStatus.None.name]
-                    ?: lastSeenMap[DubStatus.Subbed.name]
-                    ?: lastSeenMap[DubStatus.Dubbed.name]
-                    ?: Int.MIN_VALUE
-
-                val updatedSubscription = savedData.copy(
-                    latestUpdatedTime = System.currentTimeMillis(),
-                    lastSeenEpisodeCountJson = toJson(latestEpisodes.mapKeys { it.key.name })
-                )
-                db.subscriptionDao().upsertSubscription(updatedSubscription)
-
-                if (latestEpisode > lastSeen) {
-                    Log.i(TAG, "New episode detected for ${savedData.name}: Episode $latestEpisode")
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                Log.e(TAG, "Failed checking subscription ${savedData.name}: ${e.message}")
-            }
+            checkSubscriptionEntry(db, savedData)
         }
+    }
+
+    private suspend fun checkSubscriptionEntry(
+        db: AppDatabase,
+        savedData: com.lagradost.cloudstream3.shared.persistence.entity.SubscriptionEntity
+    ) {
+        try {
+            val api = APIHolder.getApiFromNameNull(savedData.apiName) ?: return
+            val response = withTimeoutOrNull(60_000) {
+                api.load(savedData.url) as? EpisodeResponse
+            } ?: return
+
+            val latestEpisodes = response.getLatestEpisodes()
+            val lastSeenMap = parseLastSeenMap(savedData.lastSeenEpisodeCountJson)
+
+            val latestEpisode = resolveMaxEpisode(latestEpisodes)
+            val lastSeen = resolveLastSeen(lastSeenMap)
+
+            val updatedSubscription = savedData.copy(
+                latestUpdatedTime = System.currentTimeMillis(),
+                lastSeenEpisodeCountJson = toJson(latestEpisodes.mapKeys { it.key.name })
+            )
+            db.subscriptionDao().upsertSubscription(updatedSubscription)
+
+            if (latestEpisode > lastSeen) {
+                Log.i(TAG, "New episode detected for ${savedData.name}: Episode $latestEpisode")
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed checking subscription ${savedData.name}: ${e.message}")
+        }
+    }
+
+    private fun parseLastSeenMap(json: String?): Map<String, Int?> {
+        if (json == null) return emptyMap()
+        return tryParseJson<Map<String, Int?>>(json) ?: emptyMap()
+    }
+
+    private fun resolveMaxEpisode(episodes: Map<DubStatus, Int?>): Int {
+        return episodes[DubStatus.None]
+            ?: episodes[DubStatus.Subbed]
+            ?: episodes[DubStatus.Dubbed]
+            ?: Int.MIN_VALUE
+    }
+
+    private fun resolveLastSeen(lastSeenMap: Map<String, Int?>): Int {
+        return lastSeenMap[DubStatus.None.name]
+            ?: lastSeenMap[DubStatus.Subbed.name]
+            ?: lastSeenMap[DubStatus.Dubbed.name]
+            ?: Int.MIN_VALUE
     }
 
     private suspend fun executeBackup() {
@@ -152,10 +171,13 @@ actual class BackgroundJobScheduler actual constructor() {
         backupFile.writeText(toJson(backupMap))
         Log.i(TAG, "Periodic backup created at ${backupFile.absolutePath}")
 
-        // Retain max 10 backups
+        cleanupOldBackups(backupsDir)
+    }
+
+    private fun cleanupOldBackups(backupsDir: File, maxRetain: Int = 10) {
         backupsDir.listFiles { f -> f.isFile && f.name.startsWith("cloudstream_backup_") && f.name.endsWith(".json") }
             ?.sortedByDescending { it.lastModified() }
-            ?.drop(10)
+            ?.drop(maxRetain)
             ?.forEach { it.delete() }
     }
 

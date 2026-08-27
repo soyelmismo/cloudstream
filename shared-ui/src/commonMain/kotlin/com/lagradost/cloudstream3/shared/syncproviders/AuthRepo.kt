@@ -27,48 +27,51 @@ open class AuthRepo(open val api: AuthAPI) {
         var openBrowserHandler: ((String) -> Unit)? = { url -> defaultOpenBrowser(url) }
         var showToastHandler: ((UiText) -> Unit)? = null
 
-        fun defaultOpenBrowser(url: String) {
-            val os = System.getProperty("os.name")?.lowercase() ?: ""
-
-            // 1. On Linux/Unix, try xdg-open or gio open directly to prevent UnsupportedOperationException from Desktop.browse on Wayland/XWayland
-            if (!os.contains("win") && !os.contains("mac")) {
-                try {
-                    ProcessBuilder("xdg-open", url).start()
-                    return
-                } catch (_: Throwable) {
-                    try {
-                        ProcessBuilder("gio", "open", url).start()
-                        return
-                    } catch (_: Throwable) {
-                    }
-                }
+        private fun tryRunProcess(vararg command: String): Boolean {
+            return try {
+                ProcessBuilder(*command).start()
+                true
+            } catch (_: Throwable) {
+                false
             }
+        }
 
-            // 2. Try standard java.awt.Desktop
-            try {
+        private fun tryOpenDesktopBrowser(url: String): Boolean {
+            return try {
                 val desktopClass = Class.forName("java.awt.Desktop")
                 val isDesktopSupportedMethod = desktopClass.getMethod("isDesktopSupported")
                 val supported = isDesktopSupportedMethod.invoke(null) as? Boolean ?: false
-                if (supported) {
-                    val getDesktopMethod = desktopClass.getMethod("getDesktop")
-                    val desktop = getDesktopMethod.invoke(null)
-                    val uri = java.net.URI(url)
-                    val browseMethod = desktopClass.getMethod("browse", java.net.URI::class.java)
-                    browseMethod.invoke(desktop, uri)
-                    return
-                }
-            } catch (_: Throwable) {
-            }
+                if (!supported) return false
 
-            // 3. Fallback for Windows / macOS
-            try {
-                when {
-                    os.contains("win") -> ProcessBuilder("cmd", "/c", "start", url).start()
-                    os.contains("mac") -> ProcessBuilder("open", url).start()
-                    else -> ProcessBuilder("xdg-open", url).start()
-                }
-            } catch (e: Throwable) {
-                logError(e)
+                val getDesktopMethod = desktopClass.getMethod("getDesktop")
+                val desktop = getDesktopMethod.invoke(null)
+                val browseMethod = desktopClass.getMethod("browse", java.net.URI::class.java)
+                browseMethod.invoke(desktop, java.net.URI(url))
+                true
+            } catch (_: Throwable) {
+                false
+            }
+        }
+
+        private fun openLinuxBrowser(url: String): Boolean {
+            return tryRunProcess("xdg-open", url) || tryRunProcess("gio", "open", url)
+        }
+
+        private fun openOsSpecificBrowser(os: String, url: String): Boolean = when {
+            os.contains("win") -> tryRunProcess("cmd", "/c", "start", url)
+            os.contains("mac") -> tryRunProcess("open", url)
+            else -> tryRunProcess("xdg-open", url)
+        }
+
+        fun defaultOpenBrowser(url: String) {
+            val os = System.getProperty("os.name")?.lowercase().orEmpty()
+            val isLinux = !os.contains("win") && !os.contains("mac")
+
+            // On Linux, prefer xdg-open/gio to prevent issues with Desktop.browse on Wayland/XWayland
+            if (isLinux && openLinuxBrowser(url)) return
+            if (tryOpenDesktopBrowser(url)) return
+            if (!openOsSpecificBrowser(os, url)) {
+                logError(ErrorLoadingException("Failed to open browser for URL: $url"))
             }
         }
     }

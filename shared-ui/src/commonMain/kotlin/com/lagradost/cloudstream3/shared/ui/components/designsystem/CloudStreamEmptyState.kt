@@ -29,8 +29,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 /**
  * Standardized reusable Empty State & Error State component for the CloudStream Design System.
@@ -179,3 +181,17 @@ fun CloudStreamEmptyState(
         }
     }
 }
+
+@Preview
+@Composable
+private fun CloudStreamEmptyStatePreview() {
+    CloudStreamTheme {
+        CloudStreamEmptyState(
+            title = "No Content Found",
+            subtitle = "There are no items matching your criteria at this moment.",
+            actionText = "Reload",
+            onActionClick = {}
+        )
+    }
+}
+

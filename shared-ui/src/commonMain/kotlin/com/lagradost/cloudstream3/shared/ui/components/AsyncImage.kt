@@ -10,6 +10,7 @@ import androidx.compose.material.Icon
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,6 +23,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
+import org.jetbrains.compose.ui.tooling.preview.Preview
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.Dispatchers
@@ -142,9 +145,13 @@ object ImageMemoryCache : SynchronizedObject() {
     }
 }
 
+@Immutable
 private sealed interface ImageLoadState {
-    object Loading : ImageLoadState
+    @Immutable
+    data object Loading : ImageLoadState
+    @Immutable
     data class Success(val bitmap: ImageBitmap) : ImageLoadState
+    @Immutable
     data class Error(val message: String?) : ImageLoadState
 }
 
@@ -271,3 +278,24 @@ fun DefaultImageErrorPlaceholder(modifier: Modifier = Modifier) {
         )
     }
 }
+
+@Preview
+@Composable
+private fun AsyncImagePlaceholderPreview() {
+    CloudStreamTheme {
+        Box(modifier = Modifier.size(100.dp)) {
+            DefaultImagePlaceholder()
+        }
+    }
+}
+
+@Preview
+@Composable
+private fun AsyncImageErrorPreview() {
+    CloudStreamTheme {
+        Box(modifier = Modifier.size(100.dp)) {
+            DefaultImageErrorPlaceholder()
+        }
+    }
+}
+

@@ -1,5 +1,6 @@
 package com.lagradost.cloudstream3.shared.viewmodels.result
 
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import com.lagradost.cloudstream3.ActorData
 import com.lagradost.cloudstream3.DubStatus
@@ -19,20 +20,132 @@ import com.lagradost.cloudstream3.shared.ui.theme.AppColors
 import com.lagradost.cloudstream3.syncproviders.SyncIdName
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.UiText
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentMapOf
+import kotlinx.collections.immutable.toImmutableMap
 import kotlinx.serialization.Serializable
 import org.jetbrains.compose.resources.StringResource
 import cloudstream.shared_ui.generated.resources.*
 import kotlin.math.roundToInt
 
-/**
- * Supported external tracking services.
- */
+enum class TrackerScoreScale(
+    val id: String,
+    val stringRes: StringResource,
+    val maxScore: Int,
+    val isDecimal: Boolean = false
+) {
+    Point10Decimal(
+        id = "POINT_10_DECIMAL",
+        stringRes = Res.string.sync_scale_10_decimal,
+        maxScore = 10,
+        isDecimal = true
+    ) {
+        override fun toDisplayValue(score: Score?): Double? {
+            if (score == null) return null
+            return (score.toDouble(10) * 10.0).roundToInt() / 10.0
+        }
+
+        override fun formatScore(score: Score?): String? {
+            if (score == null) return null
+            val d = (score.toDouble(10) * 10.0).roundToInt() / 10.0
+            return if (d % 1.0 == 0.0) "${d.toInt()}" else "$d"
+        }
+
+        override fun toScore(value: Double?): Score? {
+            if (value == null || value <= 0.0) return null
+            return Score.from(value.coerceIn(0.1, 10.0), 10)
+        }
+    },
+    Point100(
+        id = "POINT_100",
+        stringRes = Res.string.sync_scale_100_point,
+        maxScore = 100,
+        isDecimal = false
+    ) {
+        override fun toDisplayValue(score: Score?): Double? {
+            if (score == null) return null
+            return score.toDouble(100).roundToInt().toDouble().coerceIn(1.0, 100.0)
+        }
+
+        override fun formatScore(score: Score?): String? {
+            if (score == null) return null
+            return "${score.toDouble(100).roundToInt().coerceIn(1, 100)}"
+        }
+
+        override fun toScore(value: Double?): Score? {
+            if (value == null || value <= 0.0) return null
+            return Score.from100(value.roundToInt().coerceIn(1, 100))
+        }
+    },
+    Point5Star(
+        id = "POINT_5",
+        stringRes = Res.string.sync_scale_5_star,
+        maxScore = 5,
+        isDecimal = false
+    ) {
+        override fun toDisplayValue(score: Score?): Double? {
+            if (score == null) return null
+            return score.toDouble(5).roundToInt().toDouble().coerceIn(1.0, 5.0)
+        }
+
+        override fun formatScore(score: Score?): String? {
+            if (score == null) return null
+            return "${score.toDouble(5).roundToInt().coerceIn(1, 5)}"
+        }
+
+        override fun toScore(value: Double?): Score? {
+            if (value == null || value <= 0.0) return null
+            return Score.from5(value.roundToInt().coerceIn(1, 5))
+        }
+    },
+    Point3Smiley(
+        id = "POINT_3",
+        stringRes = Res.string.sync_scale_3_smiley,
+        maxScore = 3,
+        isDecimal = false
+    ) {
+        override fun toDisplayValue(score: Score?): Double? {
+            if (score == null) return null
+            return score.toDouble(3).roundToInt().toDouble().coerceIn(1.0, 3.0)
+        }
+
+        override fun formatScore(score: Score?): String? {
+            if (score == null) return null
+            return when (score.toDouble(3).roundToInt().coerceIn(1, 3)) {
+                1 -> "Sad"
+                2 -> "Neutral"
+                3 -> "Happy"
+                else -> null
+            }
+        }
+
+        override fun toScore(value: Double?): Score? {
+            if (value == null || value <= 0.0) return null
+            return Score.from(value.roundToInt().coerceIn(1, 3), 3)
+        }
+    };
+
+    abstract fun toDisplayValue(score: Score?): Double?
+    abstract fun formatScore(score: Score?): String?
+    abstract fun toScore(value: Double?): Score?
+
+    companion object {
+        fun fromId(id: String?): TrackerScoreScale {
+            if (id == null) return Point10Decimal
+            return entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: Point10Decimal
+        }
+    }
+}
+
 enum class SyncService(
     val syncIdName: SyncIdName,
     val serviceName: String,
     val idPrefix: String,
     val defaultUrlPrefix: String,
-    val brandColor: Color
+    val brandColor: Color,
+    val defaultScale: TrackerScoreScale = TrackerScoreScale.Point10Decimal
 ) {
     AniList(
         syncIdName = SyncIdName.Anilist,
@@ -67,7 +180,8 @@ enum class SyncService(
         serviceName = "Kitsu",
         idPrefix = "kitsu",
         defaultUrlPrefix = "https://kitsu.io/anime/",
-        brandColor = AppColors.BrandKitsu
+        brandColor = AppColors.BrandKitsu,
+        defaultScale = TrackerScoreScale.Point100
     );
 
     companion object {
@@ -83,9 +197,6 @@ enum class SyncService(
     }
 }
 
-/**
- * Tracking status on an external service.
- */
 enum class ExternalSyncStatus(
     val internalId: Int,
     val stringRes: StringResource,
@@ -105,96 +216,6 @@ enum class ExternalSyncStatus(
     }
 }
 
-/**
- * Supported scoring scale formats for external tracking services (AniList, MAL, Simkl, Kitsu).
- */
-enum class TrackerScoreScale(
-    val id: String,
-    val stringRes: StringResource,
-    val maxScore: Int,
-    val isDecimal: Boolean = false
-) {
-    /** 10-point decimal rating (0.0 to 10.0, e.g. 8.5/10) */
-    Point10Decimal(
-        id = "POINT_10_DECIMAL",
-        stringRes = Res.string.sync_scale_10_decimal,
-        maxScore = 10,
-        isDecimal = true
-    ),
-    /** 100-point integer rating (1 to 100, e.g. 85/100) */
-    Point100(
-        id = "POINT_100",
-        stringRes = Res.string.sync_scale_100_point,
-        maxScore = 100,
-        isDecimal = false
-    ),
-    /** 5-star rating (1 to 5 stars) */
-    Point5Star(
-        id = "POINT_5",
-        stringRes = Res.string.sync_scale_5_star,
-        maxScore = 5,
-        isDecimal = false
-    ),
-    /** 3-point smiley rating (1 = Sad, 2 = Neutral, 3 = Happy) */
-    Point3Smiley(
-        id = "POINT_3",
-        stringRes = Res.string.sync_scale_3_smiley,
-        maxScore = 3,
-        isDecimal = false
-    );
-
-    /** Converts a raw Score object to the numeric value in scale units */
-    fun toDisplayValue(score: Score?): Double? {
-        if (score == null) return null
-        return when (this) {
-            Point10Decimal -> (score.toDouble(10) * 10.0).roundToInt() / 10.0
-            Point100 -> score.toDouble(100).roundToInt().toDouble().coerceIn(1.0, 100.0)
-            Point5Star -> score.toDouble(5).roundToInt().toDouble().coerceIn(1.0, 5.0)
-            Point3Smiley -> score.toDouble(3).roundToInt().toDouble().coerceIn(1.0, 3.0)
-        }
-    }
-
-    /** Formats Score into a string based on scale rules */
-    fun formatScore(score: Score?): String? {
-        if (score == null) return null
-        return when (this) {
-            Point10Decimal -> {
-                val d = (score.toDouble(10) * 10.0).roundToInt() / 10.0
-                if (d % 1.0 == 0.0) "${d.toInt()}" else "$d"
-            }
-            Point100 -> "${score.toDouble(100).roundToInt().coerceIn(1, 100)}"
-            Point5Star -> "${score.toDouble(5).roundToInt().coerceIn(1, 5)}"
-            Point3Smiley -> when (score.toDouble(3).roundToInt().coerceIn(1, 3)) {
-                1 -> "Sad"
-                2 -> "Neutral"
-                3 -> "Happy"
-                else -> null
-            }
-        }
-    }
-
-    /** Converts a scale value back to a normalized Score object */
-    fun toScore(value: Double?): Score? {
-        if (value == null || value <= 0.0) return null
-        return when (this) {
-            Point10Decimal -> Score.from(value.coerceIn(0.1, 10.0), 10)
-            Point100 -> Score.from100(value.roundToInt().coerceIn(1, 100))
-            Point5Star -> Score.from5(value.roundToInt().coerceIn(1, 5))
-            Point3Smiley -> Score.from(value.roundToInt().coerceIn(1, 3), 3)
-        }
-    }
-
-    companion object {
-        fun fromId(id: String?): TrackerScoreScale {
-            if (id == null) return Point10Decimal
-            return entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: Point10Decimal
-        }
-    }
-}
-
-/**
- * 3-point smiley rating levels for external trackers (e.g. AniList 3-point scale).
- */
 enum class SmileyRating(
     val scoreValue: Int,
     val stringRes: StringResource,
@@ -217,16 +238,14 @@ enum class SmileyRating(
     }
 }
 
-/**
- * Synchronization state for a specific tracking service.
- */
+@Immutable
 data class ExternalSyncEntry(
     val service: SyncService,
     val syncId: String? = null,
     val isLinked: Boolean = false,
     val status: ExternalSyncStatus = ExternalSyncStatus.None,
-    val score: Int? = null, // 1 to 10 integer for backward compatibility
-    val rawScore: Score? = null, // Normalized Score object
+    val score: Int? = null,
+    val rawScore: Score? = null,
     val scoreScale: TrackerScoreScale = TrackerScoreScale.Point10Decimal,
     val watchedEpisodes: Int = 0,
     val maxEpisodes: Int? = null,
@@ -237,30 +256,23 @@ data class ExternalSyncEntry(
     val hasTracking: Boolean
         get() = isLinked || status != ExternalSyncStatus.None || !syncId.isNullOrBlank()
 
-    /** Effective normalized Score representation */
     val effectiveScore: Score?
         get() = rawScore ?: score?.let { Score.from10(it) }
 
-    /** Returns formatted score according to this entry's active score scale */
     fun formattedScore(): String? = scoreScale.formatScore(effectiveScore)
 
-    /** Returns numeric value in active scale units */
     val displayScoreValue: Double?
         get() = scoreScale.toDisplayValue(effectiveScore)
 }
 
-/**
- * Key used to index episodes by Dub status (Sub/Dub) and Season number.
- */
+@Immutable
 @Serializable
 data class EpisodeIndexer(
     val dubStatus: DubStatus = DubStatus.None,
     val season: Int = 0
 )
 
-/**
- * Season metadata for UI selection.
- */
+@Immutable
 @Serializable
 data class ResultSeason(
     val season: Int,
@@ -281,9 +293,7 @@ data class ResultSeason(
     }
 }
 
-/**
- * Represents an episode in the media details view.
- */
+@Immutable
 @Serializable
 data class ResultEpisode(
     val headerName: String,
@@ -303,13 +313,12 @@ data class ResultEpisode(
     val isFiller: Boolean? = null,
     val tvType: TvType,
     val parentId: Int,
-    val videoWatchState: Int = 0, // 0 = None, 1 = Watching, 2 = Watched
+    val videoWatchState: Int = 0,
     val totalEpisodeIndex: Int? = null,
     val airDate: Long? = null,
     val runTime: Int? = null,
     val seasonData: SeasonData? = null
 ) {
-    /** Position in ms, ignoring negligible edges (start/finish) */
     fun getRealPosition(): Long {
         if (duration <= 0) return 0L
         val percentage = position * 100 / duration
@@ -317,7 +326,6 @@ data class ResultEpisode(
         return position
     }
 
-    /** Position formatted for UI progress bars (0 to duration) */
     fun getDisplayPosition(): Long {
         if (duration <= 0) return 0L
         val percentage = position * 100 / duration
@@ -327,7 +335,6 @@ data class ResultEpisode(
         return position
     }
 
-    /** Progress ratio between 0.0f and 1.0f */
     fun getWatchProgress(): Float {
         if (duration <= 0) return 0f
         return (getDisplayPosition().toFloat() / duration.toFloat()).coerceIn(0f, 1f)
@@ -337,20 +344,13 @@ data class ResultEpisode(
         get() = videoWatchState == 2 || (duration > 0 && position * 100 / duration >= 90)
 }
 
-/**
- * Immutable State for ResultViewModel in KMP MVI architecture.
- */
+@Immutable
 data class ResultState(
-    // Loading & Error states
     val isLoading: Boolean = false,
     val error: UiText? = null,
-
-    // Source Info
     val url: String? = null,
     val apiName: String? = null,
     val mediaId: Int? = null,
-
-    // Raw response and Metadata
     val loadResponse: LoadResponse? = null,
     val title: String = "",
     val synopsis: String? = null,
@@ -359,106 +359,82 @@ data class ResultState(
     val logoUrl: String? = null,
     val year: Int? = null,
     val rating: Score? = null,
-    val tags: List<String> = emptyList(),
-    val actors: List<ActorData> = emptyList(),
+    val tags: ImmutableList<String> = persistentListOf(),
+    val actors: ImmutableList<ActorData> = persistentListOf(),
     val tvType: TvType? = null,
-    val duration: Int? = null, // In minutes
+    val duration: Int? = null,
     val comingSoon: Boolean = false,
     val showStatus: ShowStatus? = null,
     val contentRating: String? = null,
-    val trailers: List<TrailerData> = emptyList(),
-    val recommendations: List<SearchResponse> = emptyList(),
-    val syncData: Map<String, String> = emptyMap(),
-    val posterHeaders: Map<String, String>? = null,
-
-    // Classification helpers
+    val trailers: ImmutableList<TrailerData> = persistentListOf(),
+    val recommendations: ImmutableList<SearchResponse> = persistentListOf(),
+    val syncData: ImmutableMap<String, String> = persistentMapOf(),
+    val posterHeaders: ImmutableMap<String, String>? = null,
     val isMovie: Boolean = false,
     val isAnime: Boolean = false,
     val isEpisodeBased: Boolean = false,
-
-    // Seasons & Episodes
-    val availableSeasons: List<ResultSeason> = emptyList(),
-    val availableDubStatuses: List<DubStatus> = emptyList(),
+    val availableSeasons: ImmutableList<ResultSeason> = persistentListOf(),
+    val availableDubStatuses: ImmutableList<DubStatus> = persistentListOf(),
     val selectedSeason: Int? = null,
     val selectedDubStatus: DubStatus = DubStatus.None,
-    val episodesByIndexer: Map<EpisodeIndexer, List<ResultEpisode>> = emptyMap(),
-    val episodes: List<ResultEpisode> = emptyList(),
+    val episodesByIndexer: ImmutableMap<EpisodeIndexer, ImmutableList<ResultEpisode>> = persistentMapOf(),
+    val episodes: ImmutableList<ResultEpisode> = persistentListOf(),
     val selectedEpisode: ResultEpisode? = null,
     val isEpisodeMenuOpen: Boolean = false,
     val selectedMenuEpisode: ResultEpisode? = null,
-
-    // Persistence / Room status
     val isBookmarked: Boolean = false,
-    val bookmarkWatchType: Int = 0, // 0=None, 1=Watching, 2=Completed, 3=On Hold, 4=Dropped, 5=Planned
+    val bookmarkWatchType: Int = 0,
     val isFavorite: Boolean = false,
     val isSubscribed: Boolean = false,
     val lastWatchedEpisode: ResultEpisode? = null,
     val lastWatchedProgress: WatchProgressEntity? = null,
     val resumeWatching: ResumeWatchingEntity? = null,
-
-    // Extraction Links & Subtitles
     val isExtractingLinks: Boolean = false,
-    val extractedLinks: List<ExtractorLink> = emptyList(),
-    val extractedSubtitles: List<SubtitleFile> = emptyList(),
+    val extractedLinks: ImmutableList<ExtractorLink> = persistentListOf(),
+    val extractedSubtitles: ImmutableList<SubtitleFile> = persistentListOf(),
     val linksLoadingProgress: Int = 0,
     val linksLoadingError: String? = null,
-
-    // External Tracking & Sync (AniList, MAL, Simkl, Kitsu)
-    val externalSyncStates: Map<SyncService, ExternalSyncEntry> = SyncService.entries.associateWith {
+    val externalSyncStates: ImmutableMap<SyncService, ExternalSyncEntry> = SyncService.entries.associateWith {
         ExternalSyncEntry(service = it)
-    },
+    }.toImmutableMap(),
     val selectedSyncService: SyncService = SyncService.AniList,
     val isSyncSaving: Boolean = false,
-
-    // Trailer Viewer & Player State
     val selectedTrailerIndex: Int = 0,
     val isExtractingTrailer: Boolean = false,
-    val extractedTrailerLinks: List<ExtractorLink> = emptyList(),
-    val extractedTrailerSubtitles: List<SubtitleFile> = emptyList(),
+    val extractedTrailerLinks: ImmutableList<ExtractorLink> = persistentListOf(),
+    val extractedTrailerSubtitles: ImmutableList<SubtitleFile> = persistentListOf(),
     val selectedTrailerQuality: ExtractorLink? = null,
     val trailerExtractionError: String? = null,
     val isTrailerDialogOpen: Boolean = false
 ) : UiState {
-    /** True if there is at least one episode available */
     val hasEpisodes: Boolean
         get() = episodes.isNotEmpty()
 
-    /** True if links have been successfully extracted */
     val hasLinks: Boolean
         get() = extractedLinks.isNotEmpty()
 
-    /** True if trailers are available from response */
     val hasTrailers: Boolean
         get() = trailers.isNotEmpty() || (loadResponse?.trailers?.isNotEmpty() == true)
 
-    /** Currently active TrailerData */
     val currentTrailerData: TrailerData?
         get() = trailers.getOrNull(selectedTrailerIndex) ?: loadResponse?.trailers?.getOrNull(selectedTrailerIndex)
 
-    /** Effective display poster url */
     val displayPosterUrl: String?
         get() = posterUrl ?: backgroundPosterUrl
 
-    /** Effective display background poster url */
     val displayBackgroundPosterUrl: String?
         get() = backgroundPosterUrl ?: posterUrl
 
-    /** Active sync state for the currently selected service */
     val currentSyncState: ExternalSyncEntry
         get() = externalSyncStates[selectedSyncService] ?: ExternalSyncEntry(selectedSyncService)
 
-    /** Returns true if ANY service is actively linked or tracked */
     val isSyncLinked: Boolean
         get() = externalSyncStates.values.any { it.hasTracking }
 
-    /** First linked service for badge indicator in header / action buttons */
     val primaryLinkedSync: ExternalSyncEntry?
         get() = externalSyncStates.values.firstOrNull { it.hasTracking }
 }
 
-/**
- * One-shot UI side effects for ResultViewModel.
- */
 sealed interface ResultEffect : UiEffect {
     data class AutoPlayEpisode(val episode: ResultEpisode, val resumePosition: Long?, val parentId: Int) : ResultEffect
     data class ShowToast(val message: String) : ResultEffect

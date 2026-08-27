@@ -9,9 +9,6 @@ import androidx.room.Upsert
 import com.lagradost.cloudstream3.shared.persistence.entity.BookmarkEntity
 import kotlinx.coroutines.flow.Flow
 
-/**
- * Data Access Object for bookmarks, watchlist, and user library items.
- */
 @Dao
 interface BookmarkDao {
     @Query("SELECT * FROM bookmarks WHERE accountId = :accountId AND id = :id LIMIT 1")

@@ -1,7 +1,7 @@
 package com.lagradost.cloudstream3.shared.viewmodels.onboarding
 
-import com.lagradost.cloudstream3.shared.mvi.MviViewModel
-import com.lagradost.cloudstream3.shared.mvi.UiEvent
+import androidx.compose.runtime.Immutable
+import com.lagradost.cloudstream3.shared.mvi.BaseViewModel
 import com.lagradost.cloudstream3.shared.mvi.UiState
 import com.lagradost.cloudstream3.shared.persistence.entity.AccountEntity
 import com.lagradost.cloudstream3.shared.persistence.repository.AccountRepository
@@ -10,17 +10,20 @@ import com.lagradost.cloudstream3.shared.viewmodels.account.AccountViewModel
 import com.lagradost.cloudstream3.shared.viewmodels.settings.AppSettingsViewModel
 import com.lagradost.cloudstream3.shared.viewmodels.settings.AppTheme
 import com.lagradost.cloudstream3.shared.viewmodels.settings.DohProvider
+import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginRepositoryItem
 import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginsRepository
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.serialization.Serializable
 import kotlin.coroutines.CoroutineContext
 
-/**
- * Sequential steps in the Onboarding Setup Wizard.
- */
 @Serializable
 enum class OnboardingStep(val stepIndex: Int) {
     WELCOME_LANGUAGE(0),
@@ -30,9 +33,7 @@ enum class OnboardingStep(val stepIndex: Int) {
     PROFILE_SETUP(4)
 }
 
-/**
- * Pre-configured starter repository option for quick setup.
- */
+@Immutable
 @Serializable
 data class StarterRepoOption(
     val name: String,
@@ -42,17 +43,15 @@ data class StarterRepoOption(
     val language: String = "Multi"
 )
 
-/**
- * State representing the Onboarding Setup Wizard.
- */
+@Immutable
 @Serializable
 data class OnboardingState(
     val currentStep: OnboardingStep = OnboardingStep.WELCOME_LANGUAGE,
     val selectedLanguage: String = "es",
-    val selectedLayoutMode: String = "auto", // auto, mobile, desktop, tv
+    val selectedLayoutMode: String = "auto",
     val selectedTheme: AppTheme = AppTheme.AMOLED,
     val selectedDohProvider: DohProvider = DohProvider.CLOUDFLARE,
-    val starterRepositories: List<StarterRepoOption> = listOf(
+    val starterRepositories: ImmutableList<StarterRepoOption> = persistentListOf(
         StarterRepoOption(
             name = "CloudStream Official & Community",
             description = "Main English, Multi-language and Anime scrapers",
@@ -82,34 +81,22 @@ data class OnboardingState(
     val error: String? = null
 ) : UiState
 
-/**
- * Events for the Onboarding Setup Wizard.
- */
-sealed class OnboardingEvent : UiEvent {
-    data object NextStep : OnboardingEvent()
-    data object PreviousStep : OnboardingEvent()
-    data class GoToStep(val step: OnboardingStep) : OnboardingEvent()
-    data class SelectLanguage(val langCode: String) : OnboardingEvent()
-    data class SelectLayoutMode(val mode: String) : OnboardingEvent()
-    data class SelectTheme(val theme: AppTheme) : OnboardingEvent()
-    data class SelectDohProvider(val doh: DohProvider) : OnboardingEvent()
-    data class ToggleStarterRepo(val url: String) : OnboardingEvent()
-    data class SetProfileName(val name: String) : OnboardingEvent()
-    data class SetProfileAvatar(val index: Int) : OnboardingEvent()
-    data object CompleteOnboarding : OnboardingEvent()
-    data object SkipOnboarding : OnboardingEvent()
-}
-
-/**
- * MVI ViewModel controlling user first-run experience, initial customization and profile setup.
- */
 class OnboardingViewModel(
     private val preferenceRepository: AppPreferenceRepository,
     private val accountRepository: AccountRepository,
     private val pluginsRepository: PluginsRepository? = null,
     initialState: OnboardingState = OnboardingState(),
     coroutineContext: CoroutineContext = SupervisorJob() + Dispatchers.Default
-) : MviViewModel<OnboardingState, OnboardingEvent>(initialState, coroutineContext) {
+) : BaseViewModel(coroutineContext) {
+
+    private val _state = MutableStateFlow(initialState)
+    val state: StateFlow<OnboardingState> = _state.asStateFlow()
+    val currentState: OnboardingState
+        get() = _state.value
+
+    protected fun updateState(reducer: OnboardingState.() -> OnboardingState) {
+        _state.update { it.reducer() }
+    }
 
     companion object {
         const val KEY_HAS_COMPLETED_ONBOARDING = "has_completed_onboarding"
@@ -117,24 +104,10 @@ class OnboardingViewModel(
         const val KEY_APP_LANGUAGE = "app_language"
     }
 
-    override fun handleEvent(event: OnboardingEvent) {
-        when (event) {
-            is OnboardingEvent.NextStep -> advanceStep()
-            is OnboardingEvent.PreviousStep -> retreatStep()
-            is OnboardingEvent.GoToStep -> updateState { copy(currentStep = event.step) }
-            is OnboardingEvent.SelectLanguage -> updateState { copy(selectedLanguage = event.langCode) }
-            is OnboardingEvent.SelectLayoutMode -> updateState { copy(selectedLayoutMode = event.mode) }
-            is OnboardingEvent.SelectTheme -> updateState { copy(selectedTheme = event.theme) }
-            is OnboardingEvent.SelectDohProvider -> updateState { copy(selectedDohProvider = event.doh) }
-            is OnboardingEvent.ToggleStarterRepo -> toggleStarterRepo(event.url)
-            is OnboardingEvent.SetProfileName -> updateState { copy(profileName = event.name) }
-            is OnboardingEvent.SetProfileAvatar -> updateState { copy(profileAvatarIndex = event.index) }
-            is OnboardingEvent.CompleteOnboarding -> finishOnboarding()
-            is OnboardingEvent.SkipOnboarding -> skipOnboarding()
-        }
-    }
+    fun nextStep() = advanceStep()
+    fun previousStep() = retreatStep()
 
-    private fun advanceStep() {
+    fun advanceStep() {
         val nextOrdinal = currentState.currentStep.ordinal + 1
         if (nextOrdinal < OnboardingStep.entries.size) {
             updateState { copy(currentStep = OnboardingStep.entries[nextOrdinal]) }
@@ -143,40 +116,64 @@ class OnboardingViewModel(
         }
     }
 
-    private fun retreatStep() {
+    fun retreatStep() {
         val prevOrdinal = currentState.currentStep.ordinal - 1
         if (prevOrdinal >= 0) {
             updateState { copy(currentStep = OnboardingStep.entries[prevOrdinal]) }
         }
     }
 
-    private fun toggleStarterRepo(url: String) {
+    fun goToStep(step: OnboardingStep) {
+        updateState { copy(currentStep = step) }
+    }
+
+    fun selectLanguage(langCode: String) {
+        updateState { copy(selectedLanguage = langCode) }
+    }
+
+    fun selectLayoutMode(mode: String) {
+        updateState { copy(selectedLayoutMode = mode) }
+    }
+
+    fun selectTheme(theme: AppTheme) {
+        updateState { copy(selectedTheme = theme) }
+    }
+
+    fun selectDohProvider(doh: DohProvider) {
+        updateState { copy(selectedDohProvider = doh) }
+    }
+
+    fun setProfileName(name: String) {
+        updateState { copy(profileName = name) }
+    }
+
+    fun setProfileAvatar(index: Int) {
+        updateState { copy(profileAvatarIndex = index) }
+    }
+
+    fun completeOnboarding() = finishOnboarding()
+
+    fun toggleStarterRepo(url: String) {
         updateState {
             copy(
                 starterRepositories = starterRepositories.map { repo ->
                     if (repo.url == url) repo.copy(isSelected = !repo.isSelected) else repo
-                }
+                }.toImmutableList()
             )
         }
     }
 
-    private fun finishOnboarding() {
+    fun finishOnboarding() {
         launchSafeJob(
             key = "finish_onboarding",
             onError = { t -> updateState { copy(isCompleting = false, error = t.message) } }
         ) {
             updateState { copy(isCompleting = true) }
-            // 1. Save language
             preferenceRepository.setString(KEY_APP_LANGUAGE, currentState.selectedLanguage)
-
-            // 2. Save layout mode
             preferenceRepository.setString(KEY_APP_LAYOUT_MODE, currentState.selectedLayoutMode)
-
-            // 3. Save Theme & DoH Provider
             preferenceRepository.setString(AppSettingsViewModel.KEY_APP_THEME, currentState.selectedTheme.key)
             preferenceRepository.setString(AppSettingsViewModel.KEY_DOH_PROVIDER, currentState.selectedDohProvider.id.toString())
 
-            // 4. Save/create main profile
             val initialName = currentState.profileName.trim().ifBlank { "User" }
             val accounts = accountRepository.getAllAccounts()
             val activeId = if (accounts.isEmpty()) {
@@ -199,13 +196,12 @@ class OnboardingViewModel(
             }
             preferenceRepository.setString(AccountViewModel.KEY_ACTIVE_ACCOUNT_ID, activeId.toString())
 
-            // 5. Install / add starter repositories
             pluginsRepository?.let { repo ->
                 val selectedRepos = currentState.starterRepositories.filter { it.isSelected }
                 for (starter in selectedRepos) {
                     try {
                         repo.addRepository(
-                            com.lagradost.cloudstream3.shared.viewmodels.settings.PluginRepositoryItem(
+                            PluginRepositoryItem(
                                 name = starter.name,
                                 url = starter.url,
                                 isRemovable = true
@@ -215,14 +211,12 @@ class OnboardingViewModel(
                 }
             }
 
-            // 6. Mark onboarding completed
             preferenceRepository.setString(KEY_HAS_COMPLETED_ONBOARDING, "true")
-
             updateState { copy(isCompleting = false, hasCompleted = true) }
         }
     }
 
-    private fun skipOnboarding() {
+    fun skipOnboarding() {
         launchSafeJob(
             key = "skip_onboarding",
             onError = { t -> updateState { copy(isCompleting = false, error = t.message) } }

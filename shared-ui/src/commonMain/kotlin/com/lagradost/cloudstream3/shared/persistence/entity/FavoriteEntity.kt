@@ -1,13 +1,11 @@
 package com.lagradost.cloudstream3.shared.persistence.entity
 
+import androidx.compose.runtime.Immutable
 import androidx.room.Entity
 import androidx.room.Index
 import com.lagradost.cloudstream3.TvType
 import kotlinx.serialization.Serializable
 
-/**
- * Entity representing user favorites.
- */
 @Entity(
     tableName = "favorites",
     primaryKeys = ["accountId", "id"],
@@ -17,6 +15,7 @@ import kotlinx.serialization.Serializable
     ]
 )
 @Serializable
+@Immutable
 data class FavoriteEntity(
     val accountId: Int,
     val id: Int,

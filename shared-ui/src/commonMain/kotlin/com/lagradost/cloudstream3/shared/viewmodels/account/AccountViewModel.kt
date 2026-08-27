@@ -1,26 +1,29 @@
 package com.lagradost.cloudstream3.shared.viewmodels.account
 
-import com.lagradost.cloudstream3.shared.mvi.MviViewModel
-import com.lagradost.cloudstream3.shared.mvi.UiEvent
+import androidx.compose.runtime.Immutable
+import com.lagradost.cloudstream3.shared.mvi.BaseViewModel
 import com.lagradost.cloudstream3.shared.mvi.UiState
 import com.lagradost.cloudstream3.shared.persistence.entity.AccountEntity
 import com.lagradost.cloudstream3.shared.persistence.repository.AccountRepository
 import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceRepository
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.update
 import kotlinx.serialization.Serializable
 import kotlin.coroutines.CoroutineContext
 
-/**
- * State representing profiles/accounts management.
- */
+@Immutable
 @Serializable
 data class AccountState(
-    val accounts: List<AccountEntity> = emptyList(),
+    val accounts: ImmutableList<AccountEntity> = persistentListOf(),
     val activeAccountId: Int = 0,
     val isManageMode: Boolean = false,
     val isCreateDialogOpen: Boolean = false,
@@ -34,42 +37,21 @@ data class AccountState(
         get() = accounts.firstOrNull { it.keyIndex == activeAccountId }
 }
 
-/**
- * Events for account and profile management.
- */
-sealed class AccountEvent : UiEvent {
-    data object LoadAccounts : AccountEvent()
-    data class SelectAccount(val account: AccountEntity, val enteredPin: String? = null) : AccountEvent()
-    data class CreateAccount(
-        val name: String,
-        val defaultImageIndex: Int = 0,
-        val lockPin: String? = null
-    ) : AccountEvent()
-    data class UpdateAccount(
-        val keyIndex: Int,
-        val name: String,
-        val defaultImageIndex: Int = 0,
-        val lockPin: String? = null
-    ) : AccountEvent()
-    data class DeleteAccount(val keyIndex: Int) : AccountEvent()
-    data object ToggleManageMode : AccountEvent()
-    data object OpenCreateDialog : AccountEvent()
-    data object CloseCreateDialog : AccountEvent()
-    data class OpenEditDialog(val account: AccountEntity) : AccountEvent()
-    data object CloseEditDialog : AccountEvent()
-    data object DismissPinPrompt : AccountEvent()
-    data object ClearError : AccountEvent()
-}
-
-/**
- * MVI ViewModel managing user profiles, account switching, avatar customization and security PINs.
- */
 class AccountViewModel(
     private val accountRepository: AccountRepository,
     private val preferenceRepository: AppPreferenceRepository,
     initialState: AccountState = AccountState(),
     coroutineContext: CoroutineContext = SupervisorJob() + Dispatchers.Default
-) : MviViewModel<AccountState, AccountEvent>(initialState, coroutineContext) {
+) : BaseViewModel(coroutineContext) {
+
+    private val _state = MutableStateFlow(initialState)
+    val state: StateFlow<AccountState> = _state.asStateFlow()
+    val currentState: AccountState
+        get() = _state.value
+
+    protected fun updateState(reducer: AccountState.() -> AccountState) {
+        _state.update { it.reducer() }
+    }
 
     companion object {
         const val KEY_ACTIVE_ACCOUNT_ID = "active_account_id"
@@ -77,21 +59,21 @@ class AccountViewModel(
         const val DEFAULT_ACCOUNT_NAME = "Main User"
 
         val AVATAR_COLORS = listOf(
-            0xFF3B82F6L, // Blue
-            0xFF8B5CF6L, // Purple
-            0xFFEC4899L, // Pink
-            0xFFEF4444L, // Red
-            0xFFF59E0BL, // Amber
-            0xFF10B981L, // Emerald
-            0xFF06B6D4L, // Cyan
-            0xFF6366F1L  // Indigo
+            0xFF3B82F6L,
+            0xFF8B5CF6L,
+            0xFFEC4899L,
+            0xFFEF4444L,
+            0xFFF59E0BL,
+            0xFF10B981L,
+            0xFF06B6D4L,
+            0xFF6366F1L
         )
         val DEFAULT_AVATAR_COLOR = AVATAR_COLORS[0]
     }
 
     init {
         observeAccounts()
-        handleEvent(AccountEvent.LoadAccounts)
+        loadAccounts()
     }
 
     private fun observeAccounts() {
@@ -100,7 +82,7 @@ class AccountViewModel(
                 val activeId = preferenceRepository.getString(KEY_ACTIVE_ACCOUNT_ID)?.toIntOrNull() ?: DEFAULT_ACCOUNT_ID
                 updateState {
                     copy(
-                        accounts = accountsList,
+                        accounts = accountsList.toImmutableList(),
                         activeAccountId = if (accountsList.any { it.keyIndex == activeId }) activeId else (accountsList.firstOrNull()?.keyIndex ?: DEFAULT_ACCOUNT_ID)
                     )
                 }
@@ -108,39 +90,51 @@ class AccountViewModel(
             .launchIn(viewModelScope)
     }
 
-    override fun handleEvent(event: AccountEvent) {
-        when (event) {
-            is AccountEvent.LoadAccounts -> loadAccounts()
-            is AccountEvent.SelectAccount -> selectAccount(event.account, event.enteredPin)
-            is AccountEvent.CreateAccount -> createAccount(event.name, event.defaultImageIndex, event.lockPin)
-            is AccountEvent.UpdateAccount -> updateAccount(event.keyIndex, event.name, event.defaultImageIndex, event.lockPin)
-            is AccountEvent.DeleteAccount -> deleteAccount(event.keyIndex)
-            is AccountEvent.ToggleManageMode -> updateState { copy(isManageMode = !isManageMode) }
-            is AccountEvent.OpenCreateDialog -> updateState { copy(isCreateDialogOpen = true, error = null) }
-            is AccountEvent.CloseCreateDialog -> updateState { copy(isCreateDialogOpen = false, error = null) }
-            is AccountEvent.OpenEditDialog -> updateState { copy(editingAccount = event.account, error = null) }
-            is AccountEvent.CloseEditDialog -> updateState { copy(editingAccount = null, error = null) }
-            is AccountEvent.DismissPinPrompt -> updateState { copy(pinPromptAccount = null, pinError = false) }
-            is AccountEvent.ClearError -> updateState { copy(error = null, pinError = false) }
-        }
+    fun toggleManageMode() {
+        updateState { copy(isManageMode = !isManageMode) }
     }
 
-    private fun loadAccounts() {
+    fun openCreateDialog() {
+        updateState { copy(isCreateDialogOpen = true, error = null) }
+    }
+
+    fun closeCreateDialog() {
+        updateState { copy(isCreateDialogOpen = false, error = null) }
+    }
+
+    fun openEditDialog(account: AccountEntity) {
+        updateState { copy(editingAccount = account, error = null) }
+    }
+
+    fun closeEditDialog() {
+        updateState { copy(editingAccount = null, error = null) }
+    }
+
+    fun dismissPinPrompt() {
+        updateState { copy(pinPromptAccount = null, pinError = false) }
+    }
+
+    fun clearError() {
+        updateState { copy(error = null, pinError = false) }
+    }
+
+    fun loadAccounts() {
         launchSafeJob(
             key = "load_accounts",
             onError = { t -> updateState { copy(isLoading = false, error = t.message) } }
         ) {
             updateState { copy(isLoading = true) }
-            var accountsList = accountRepository.getAllAccounts()
-            if (accountsList.isEmpty()) {
-                // Seed default main profile if brand new database
+            val allAccounts = accountRepository.getAllAccounts()
+            val accountsList = if (allAccounts.isEmpty()) {
                 val defaultAccount = AccountEntity(
                     keyIndex = DEFAULT_ACCOUNT_ID,
                     name = DEFAULT_ACCOUNT_NAME,
                     defaultImageIndex = 0
                 )
                 accountRepository.saveAccount(defaultAccount)
-                accountsList = listOf(defaultAccount)
+                persistentListOf(defaultAccount)
+            } else {
+                allAccounts.toImmutableList()
             }
             val activeId = preferenceRepository.getString(KEY_ACTIVE_ACCOUNT_ID)?.toIntOrNull() ?: DEFAULT_ACCOUNT_ID
             updateState {
@@ -153,21 +147,18 @@ class AccountViewModel(
         }
     }
 
-    private fun selectAccount(account: AccountEntity, enteredPin: String?) {
+    fun selectAccount(account: AccountEntity, enteredPin: String? = null) {
         launchSafeJob(key = "select_account") job@{
             if (account.lockPin != null && account.lockPin.isNotBlank()) {
                 if (enteredPin == null) {
-                    // Require PIN input
                     updateState { copy(pinPromptAccount = account, pinError = false) }
                     return@job
                 } else if (enteredPin != account.lockPin) {
-                    // Incorrect PIN
                     updateState { copy(pinError = true) }
                     return@job
                 }
             }
 
-            // PIN verified or not required
             preferenceRepository.setString(KEY_ACTIVE_ACCOUNT_ID, account.keyIndex.toString())
             updateState {
                 copy(
@@ -180,7 +171,7 @@ class AccountViewModel(
         }
     }
 
-    private fun createAccount(name: String, defaultImageIndex: Int, lockPin: String?) {
+    fun createAccount(name: String, defaultImageIndex: Int = 0, lockPin: String? = null) {
         val trimmed = name.trim()
         if (trimmed.isBlank()) {
             updateState { copy(error = "Profile name cannot be empty") }
@@ -212,7 +203,7 @@ class AccountViewModel(
         }
     }
 
-    private fun updateAccount(keyIndex: Int, name: String, defaultImageIndex: Int, lockPin: String?) {
+    fun updateAccount(keyIndex: Int, name: String, defaultImageIndex: Int = 0, lockPin: String? = null) {
         val trimmed = name.trim()
         if (trimmed.isBlank()) {
             updateState { copy(error = "Profile name cannot be empty") }
@@ -240,7 +231,7 @@ class AccountViewModel(
         }
     }
 
-    private fun deleteAccount(keyIndex: Int) {
+    fun deleteAccount(keyIndex: Int) {
         launchSafeJob(
             key = "delete_account",
             onError = { t -> updateState { copy(error = t.message) } }
@@ -261,7 +252,7 @@ class AccountViewModel(
             preferenceRepository.setString(KEY_ACTIVE_ACCOUNT_ID, nextActive.toString())
             updateState {
                 copy(
-                    accounts = remaining,
+                    accounts = remaining.toImmutableList(),
                     activeAccountId = nextActive,
                     editingAccount = null,
                     error = null

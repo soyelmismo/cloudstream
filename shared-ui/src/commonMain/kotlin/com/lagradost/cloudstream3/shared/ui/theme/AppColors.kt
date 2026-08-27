@@ -3,12 +3,13 @@ package com.lagradost.cloudstream3.shared.ui.theme
 import androidx.compose.material.Colors
 import androidx.compose.material.darkColors
 import androidx.compose.material.lightColors
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import com.lagradost.cloudstream3.shared.viewmodels.settings.AppTheme
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
 
-/**
- * Extended color tokens for advanced CloudStream UI styling.
- */
+@Immutable
 data class CloudstreamExtendedColors(
     val cardBackground: Color,
     val cardBorder: Color,
@@ -23,7 +24,7 @@ data class CloudstreamExtendedColors(
     val info: Color = Color(0xFF3B82F6),
     val badgeBackground: Color,
     val badgeText: Color,
-    val previewPalette: List<Color>
+    val previewPalette: ImmutableList<Color>
 )
 
 object AppColors {
@@ -66,35 +67,35 @@ object AppColors {
     val NsfwFilterContent = Color(0xFFFF4081)
 
     // Gradients
-    val CardOverlayGradient = listOf(Color.Transparent, Color(0xCC000000), Color(0xF0000000))
-    val ShimmerGradient = listOf(Color(0xFF2D3342), Color(0xFF161922))
+    val CardOverlayGradient: ImmutableList<Color> = persistentListOf(Color.Transparent, Color(0xCC000000), Color(0xF0000000))
+    val ShimmerGradient: ImmutableList<Color> = persistentListOf(Color(0xFF2D3342), Color(0xFF161922))
 
     // Subtitle Customizer Presets
-    val SubtitleTextColors = listOf(
-        Color(0xFFFFFFFF), // White
-        Color(0xFFFFEB3B), // Yellow
-        Color(0xFF00E5FF), // Cyan
-        Color(0xFF69F0AE), // Green
-        Color(0xFFFF80AB), // Pink
-        Color(0xFFFFD180), // Orange
-        Color(0xFFE0E0E0)  // Light Gray
+    val SubtitleTextColors: ImmutableList<Color> = persistentListOf(
+        Color(0xFFFFFFFF),
+        Color(0xFFFFEB3B),
+        Color(0xFF00E5FF),
+        Color(0xFF69F0AE),
+        Color(0xFFFF80AB),
+        Color(0xFFFFD180),
+        Color(0xFFE0E0E0)
     )
 
-    val SubtitleEdgeColors = listOf(
-        Color(0xFF000000), // Solid Black
-        Color(0xFF212121), // Dark Gray
-        Color(0xFF37474F), // Slate Gray
-        Color(0xFF1A237E), // Deep Navy
-        Color(0xFF3E2723), // Dark Brown
-        Color(0xFFB71C1C)  // Dark Red
+    val SubtitleEdgeColors: ImmutableList<Color> = persistentListOf(
+        Color(0xFF000000),
+        Color(0xFF212121),
+        Color(0xFF37474F),
+        Color(0xFF1A237E),
+        Color(0xFF3E2723),
+        Color(0xFFB71C1C)
     )
 
-    val SubtitleBackgroundColors = listOf(
-        Color(0x00000000), // Transparent
-        Color(0x66000000), // 40% Black
-        Color(0xAA000000), // 66% Black
-        Color(0xFF000000), // Solid Black
-        Color(0x88121824)  // Semi-transparent Slate
+    val SubtitleBackgroundColors: ImmutableList<Color> = persistentListOf(
+        Color(0x00000000),
+        Color(0x66000000),
+        Color(0xAA000000),
+        Color(0xFF000000),
+        Color(0x88121824)
     )
 
     // External Sync & Subtitle Brand Colors
@@ -148,6 +149,17 @@ object AppColors {
     val AmoledTextPrimary = Color(0xFFE9EAEE)
     val AmoledTextSecondary = Color(0xFF9BA0A4)
     val AmoledTextMuted = Color(0xFF6B7280)
+
+    // AMOLED Light palette (Pure high-contrast canonical)
+    val AmoledLightBackground = Color(0xFFFFFFFF)
+    val AmoledLightSurface = Color(0xFFFFFFFF)
+    val AmoledLightCard = Color(0xFFF7F7F7)
+    val AmoledLightPrimary = Color(0xFF000000)
+    val AmoledLightSecondary = Color(0xFF222222)
+    val AmoledLightDivider = Color(0xFFE5E5E5)
+    val AmoledLightTextPrimary = Color(0xFF000000)
+    val AmoledLightTextSecondary = Color(0xFF404040)
+    val AmoledLightTextMuted = Color(0xFF737373)
 
     // Light palette (Canonical CloudStream Light)
     val LightBg = Color(0xFFF1F1F1)
@@ -244,15 +256,15 @@ object AppColors {
                 )
             } else {
                 lightColors(
-                    primary = Color(0xFF000000),
+                    primary = AmoledLightPrimary,
                     primaryVariant = Color(0xFF222222),
-                    secondary = Color(0xFF333333),
-                    background = Color(0xFFFFFFFF),
-                    surface = Color(0xFFFFFFFF),
+                    secondary = AmoledLightSecondary,
+                    background = AmoledLightBackground,
+                    surface = AmoledLightSurface,
                     onPrimary = Color.White,
                     onSecondary = Color.White,
-                    onBackground = Color(0xFF000000),
-                    onSurface = Color(0xFF000000),
+                    onBackground = AmoledLightTextPrimary,
+                    onSurface = AmoledLightTextPrimary,
                     error = Color(0xFFDC2626)
                 )
             }
@@ -363,9 +375,9 @@ object AppColors {
                             systemAccentColor.copy(alpha = 0.10f)
                         },
                         previewPalette = if (isDarkMode) {
-                            listOf(systemAccentColor, DarkBackground, DarkSurface, systemAccentColor)
+                            persistentListOf(systemAccentColor, DarkBackground, DarkSurface, systemAccentColor)
                         } else {
-                            listOf(systemAccentColor, LightBg, LightSurf, systemAccentColor)
+                            persistentListOf(systemAccentColor, LightBg, LightSurf, systemAccentColor)
                         }
                     )
                 } else {
@@ -385,21 +397,21 @@ object AppColors {
                     activeBackground = Color(0xFF222222),
                     badgeBackground = AmoledPrimary.copy(alpha = 0.2f),
                     badgeText = AmoledPrimary,
-                    previewPalette = listOf(AmoledPrimary, AmoledBackground, AmoledSurface, AmoledSecondary)
+                    previewPalette = persistentListOf(AmoledPrimary, AmoledBackground, AmoledSurface, AmoledSecondary)
                 )
             } else {
                 CloudstreamExtendedColors(
-                    cardBackground = Color(0xFFFFFFFF),
-                    cardBorder = Color(0xFF000000),
-                    textPrimary = Color(0xFF000000),
-                    textSecondary = Color(0xFF333333),
-                    textMuted = Color(0xFF666666),
-                    divider = Color(0xFFCCCCCC),
-                    hoverBackground = Color(0xFFF0F0F0),
+                    cardBackground = AmoledLightCard,
+                    cardBorder = AmoledLightDivider,
+                    textPrimary = AmoledLightTextPrimary,
+                    textSecondary = AmoledLightTextSecondary,
+                    textMuted = AmoledLightTextMuted,
+                    divider = AmoledLightDivider,
+                    hoverBackground = Color(0xFFEFEFEF),
                     activeBackground = Color(0xFFE0E0E0),
-                    badgeBackground = Color(0xFF000000).copy(alpha = 0.12f),
-                    badgeText = Color(0xFF000000),
-                    previewPalette = listOf(Color(0xFF000000), Color(0xFFFFFFFF), Color(0xFFF5F5F5), Color(0xFF333333))
+                    badgeBackground = AmoledLightPrimary.copy(alpha = 0.12f),
+                    badgeText = AmoledLightPrimary,
+                    previewPalette = persistentListOf(AmoledLightPrimary, AmoledLightBackground, AmoledLightCard, AmoledLightSecondary)
                 )
             }
             AppTheme.DRACULA -> if (isDarkMode) {
@@ -414,7 +426,7 @@ object AppColors {
                     activeBackground = Color(0xFF6272A4).copy(alpha = 0.4f),
                     badgeBackground = DraculaPurple.copy(alpha = 0.25f),
                     badgeText = DraculaPurple,
-                    previewPalette = listOf(DraculaPurple, DraculaBackground, DraculaCurrentLine, DraculaPink)
+                    previewPalette = persistentListOf(DraculaPurple, DraculaBackground, DraculaCurrentLine, DraculaPink)
                 )
             } else {
                 CloudstreamExtendedColors(
@@ -428,7 +440,7 @@ object AppColors {
                     activeBackground = Color(0xFFE2E8F0),
                     badgeBackground = DraculaLightPrimary.copy(alpha = 0.12f),
                     badgeText = DraculaLightPrimary,
-                    previewPalette = listOf(DraculaLightPrimary, DraculaLightBg, DraculaLightSurf, DraculaLightSecondary)
+                    previewPalette = persistentListOf(DraculaLightPrimary, DraculaLightBg, DraculaLightSurf, DraculaLightSecondary)
                 )
             }
             AppTheme.LAVENDER -> if (isDarkMode) {
@@ -443,7 +455,7 @@ object AppColors {
                     activeBackground = Color(0xFF4C2F6E),
                     badgeBackground = LavenderDarkPrimary.copy(alpha = 0.2f),
                     badgeText = LavenderDarkPrimary,
-                    previewPalette = listOf(LavenderDarkPrimary, LavenderDarkBg, LavenderDarkSurf, LavenderDarkSecondary)
+                    previewPalette = persistentListOf(LavenderDarkPrimary, LavenderDarkBg, LavenderDarkSurf, LavenderDarkSecondary)
                 )
             } else {
                 CloudstreamExtendedColors(
@@ -457,7 +469,7 @@ object AppColors {
                     activeBackground = Color(0xFFEEDBFC),
                     badgeBackground = LavenderPrimary.copy(alpha = 0.2f),
                     badgeText = LavenderPrimary,
-                    previewPalette = listOf(LavenderPrimary, LavenderBackground, LavenderSurface, LavenderSecondary)
+                    previewPalette = persistentListOf(LavenderPrimary, LavenderBackground, LavenderSurface, LavenderSecondary)
                 )
             }
             AppTheme.SILENT_BLUE -> if (isDarkMode) {
@@ -472,7 +484,7 @@ object AppColors {
                     activeBackground = Color(0xFF3B4874),
                     badgeBackground = SilentBluePrimary.copy(alpha = 0.2f),
                     badgeText = SilentBluePrimary,
-                    previewPalette = listOf(SilentBluePrimary, SilentBlueBackground, SilentBlueSurface, SilentBlueSecondary)
+                    previewPalette = persistentListOf(SilentBluePrimary, SilentBlueBackground, SilentBlueSurface, SilentBlueSecondary)
                 )
             } else {
                 CloudstreamExtendedColors(
@@ -486,7 +498,7 @@ object AppColors {
                     activeBackground = Color(0xFFBAE6FD),
                     badgeBackground = SilentBlueLightPrimary.copy(alpha = 0.12f),
                     badgeText = SilentBlueLightPrimary,
-                    previewPalette = listOf(SilentBlueLightPrimary, SilentBlueLightBg, SilentBlueLightSurf, SilentBlueLightSecondary)
+                    previewPalette = persistentListOf(SilentBlueLightPrimary, SilentBlueLightBg, SilentBlueLightSurf, SilentBlueLightSecondary)
                 )
             }
         }
@@ -529,7 +541,7 @@ object AppColors {
         activeBackground = Color(0xFF2B2C30),
         badgeBackground = DarkPrimary.copy(alpha = 0.2f),
         badgeText = DarkPrimary,
-        previewPalette = listOf(DarkPrimary, DarkBackground, DarkSurface, DarkSecondary)
+        previewPalette = persistentListOf(DarkPrimary, DarkBackground, DarkSurface, DarkSecondary)
     )
 
     private fun getLightExtendedColors() = CloudstreamExtendedColors(
@@ -543,7 +555,7 @@ object AppColors {
         activeBackground = Color(0xFFDFE3E7),
         badgeBackground = LightPrimary.copy(alpha = 0.12f),
         badgeText = LightPrimary,
-        previewPalette = listOf(LightPrimary, LightBg, LightSurf, LightSecondary)
+        previewPalette = persistentListOf(LightPrimary, LightBg, LightSurf, LightSecondary)
     )
 }
 

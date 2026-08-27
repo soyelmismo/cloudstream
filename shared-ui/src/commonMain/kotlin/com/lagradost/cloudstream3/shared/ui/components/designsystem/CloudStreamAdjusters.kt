@@ -27,12 +27,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
-
-// =============================================================================
-// SHARED STEP ADJUSTER LAYOUT
-// =============================================================================
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 @Composable
 private fun StepAdjusterLayout(
@@ -161,10 +159,6 @@ private fun StepAdjusterLayout(
     }
 }
 
-// =============================================================================
-// 1. NUMBER STEP ADJUSTER (LONG)
-// =============================================================================
-
 /**
  * Standardized Number Step Adjuster component adhering to the CloudStream design system.
  *
@@ -287,10 +281,6 @@ fun NumberStepAdjuster(
     )
 }
 
-// =============================================================================
-// 2. NUMBER STEP ADJUSTER (INT OVERLOAD)
-// =============================================================================
-
 /**
  * Integer overload of [NumberStepAdjuster].
  */
@@ -369,4 +359,19 @@ fun NumberStepAdjuster(
         manualInputPlaceholder = manualInputPlaceholder,
         enabled = enabled
     )
+}
+
+@Preview
+@Composable
+private fun NumberStepAdjusterPreview() {
+    CloudStreamTheme {
+        NumberStepAdjuster(
+            value = 150L,
+            onValueChange = {},
+            step = 50L,
+            unit = "ms",
+            title = "Subtitle Delay",
+            subtitle = "Adjust synchronization delay in milliseconds"
+        )
+    }
 }

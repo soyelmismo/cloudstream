@@ -644,29 +644,24 @@ object Kitsu {
 
     var isEnabled = true
 
+    private suspend fun fetchSiteEpisodeDetails(id: String?, site: String): Map<Int, KitsuResponse.Node>? {
+        if (id.isNullOrBlank()) return null
+        return try {
+            getKitsuEpisodesDetails(id, site)?.takeIf { it.isNotEmpty() }
+        } catch (e: Throwable) {
+            logError(e)
+            null
+        }
+    }
+
     suspend fun getEpisodesDetails(
         malId: String?,
         anilistId: String?,
         isResponseRequired: Boolean = true,
     ): Map<Int, KitsuResponse.Node>? {
         if (!isResponseRequired && !isEnabled) return null
-        if (anilistId != null) {
-            try {
-                val map = getKitsuEpisodesDetails(anilistId, "ANILIST_ANIME")
-                if (!map.isNullOrEmpty()) return map
-            } catch (e: Exception) {
-                logError(e)
-            }
-        }
-        if (malId != null) {
-            try {
-                val map = getKitsuEpisodesDetails(malId, "MYANIMELIST_ANIME")
-                if (!map.isNullOrEmpty()) return map
-            } catch (e: Exception) {
-                logError(e)
-            }
-        }
-        return null
+        return fetchSiteEpisodeDetails(anilistId, "ANILIST_ANIME")
+            ?: fetchSiteEpisodeDetails(malId, "MYANIMELIST_ANIME")
     }
 
     @Throws

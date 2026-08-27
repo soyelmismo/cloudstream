@@ -1,106 +1,78 @@
 package com.lagradost.cloudstream3.shared.ui
 
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.scale
-import androidx.compose.material.Icon
-import androidx.compose.material.IconButton
-import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
-import androidx.compose.material.Text
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.ripple.rememberRipple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.ClipboardManager
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.SubtitleFile
 import com.lagradost.cloudstream3.plugins.PluginLoader
+import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.shared.persistence.database.AppDatabase
+import com.lagradost.cloudstream3.shared.persistence.repository.AccountRepositoryImpl
+import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceRepositoryImpl
 import com.lagradost.cloudstream3.shared.persistence.repository.BookmarkRepositoryImpl
 import com.lagradost.cloudstream3.shared.persistence.repository.FavoriteRepositoryImpl
-import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceRepositoryImpl
+import com.lagradost.cloudstream3.shared.persistence.repository.ProviderRepositoryImpl
 import com.lagradost.cloudstream3.shared.persistence.repository.ResumeWatchingRepositoryImpl
 import com.lagradost.cloudstream3.shared.persistence.repository.SubscriptionRepositoryImpl
 import com.lagradost.cloudstream3.shared.persistence.repository.WatchProgressRepositoryImpl
 import com.lagradost.cloudstream3.shared.player.LocalVideoPlayer
 import com.lagradost.cloudstream3.shared.player.LocalVideoPlayerContent
 import com.lagradost.cloudstream3.shared.player.VideoPlayer
+import com.lagradost.cloudstream3.shared.ui.account.AccountSelectScreen
 import com.lagradost.cloudstream3.shared.ui.components.AppBottomNavigation
-
-import com.lagradost.cloudstream3.shared.ui.downloads.DownloadsScreen
-import com.lagradost.cloudstream3.shared.viewmodels.downloads.DownloadsViewModel
-import com.lagradost.cloudstream3.shared.ui.home.HomeScreen
+import com.lagradost.cloudstream3.shared.ui.components.AppNavigationRail
 import com.lagradost.cloudstream3.shared.ui.components.ProvideAppLocale
-import org.jetbrains.compose.resources.painterResource
-import org.jetbrains.compose.resources.stringResource
-import cloudstream.shared_ui.generated.resources.*
-
-
+import com.lagradost.cloudstream3.shared.ui.downloads.DownloadsScreen
+import com.lagradost.cloudstream3.shared.ui.home.HomeScreen
+import com.lagradost.cloudstream3.shared.ui.layout.Layout
+import com.lagradost.cloudstream3.shared.ui.layout.LocalLayout
+import com.lagradost.cloudstream3.shared.ui.layout.isLayoutState
 import com.lagradost.cloudstream3.shared.ui.library.LibraryScreen
+import com.lagradost.cloudstream3.shared.ui.onboarding.OnboardingScreen
 import com.lagradost.cloudstream3.shared.ui.player.PlayerControlsOverlay
 import com.lagradost.cloudstream3.shared.ui.plugins.PluginDetailsScreen
 import com.lagradost.cloudstream3.shared.ui.plugins.PluginsScreen
 import com.lagradost.cloudstream3.shared.ui.result.ResultScreen
 import com.lagradost.cloudstream3.shared.ui.search.SearchScreen
 import com.lagradost.cloudstream3.shared.ui.settings.SettingsScreen
-import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import com.lagradost.cloudstream3.shared.ui.theme.CloudstreamTheme
 import com.lagradost.cloudstream3.shared.ui.theme.rememberNativeSystemTheme
 import com.lagradost.cloudstream3.shared.viewmodels.HomeViewModel
 import com.lagradost.cloudstream3.shared.viewmodels.SearchEvent
 import com.lagradost.cloudstream3.shared.viewmodels.SearchViewModel
+import com.lagradost.cloudstream3.shared.viewmodels.account.AccountViewModel
+import com.lagradost.cloudstream3.shared.viewmodels.downloads.DownloadsViewModel
 import com.lagradost.cloudstream3.shared.viewmodels.library.LibraryViewModel
+import com.lagradost.cloudstream3.shared.viewmodels.onboarding.OnboardingViewModel
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerControllerViewModel
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerQuality
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerSubtitleTrack
@@ -111,47 +83,86 @@ import com.lagradost.cloudstream3.shared.viewmodels.result.ResultEpisode
 import com.lagradost.cloudstream3.shared.viewmodels.result.ResultEvent
 import com.lagradost.cloudstream3.shared.viewmodels.result.ResultState
 import com.lagradost.cloudstream3.shared.viewmodels.result.ResultViewModel
-import com.lagradost.cloudstream3.shared.persistence.repository.AccountRepositoryImpl
-import com.lagradost.cloudstream3.shared.persistence.repository.ProviderRepositoryImpl
-import com.lagradost.cloudstream3.shared.ui.account.AccountSelectScreen
-import com.lagradost.cloudstream3.shared.ui.onboarding.OnboardingScreen
-import com.lagradost.cloudstream3.shared.viewmodels.account.AccountViewModel
-import com.lagradost.cloudstream3.shared.viewmodels.onboarding.OnboardingViewModel
-import com.lagradost.cloudstream3.shared.viewmodels.settings.AppTheme
+import com.lagradost.cloudstream3.shared.viewmodels.settings.AppSettingsState
 import com.lagradost.cloudstream3.shared.viewmodels.settings.AppSettingsViewModel
+import com.lagradost.cloudstream3.shared.viewmodels.settings.AppTheme
 import com.lagradost.cloudstream3.shared.viewmodels.settings.DefaultPluginsRepository
 import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginsSettingsViewModel
-import com.lagradost.cloudstream3.utils.ExtractorLink
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
+import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
-/**
- * Root Compose Multiplatform entry point for CloudStream.
- *
- * Provides:
- * - Persistent Room database repositories injection.
- * - Reactive cross-platform VideoPlayer integration.
- * - Responsive desktop navigation rail / mobile bottom navigation.
- * - Centralized backstack navigation routing.
- *
- * @param database The initialized Room [AppDatabase] instance.
- * @param player The platform-specific [VideoPlayer] implementation (e.g. DesktopVideoPlayer / AndroidVideoPlayer).
- * @param pluginLoader Optional platform [PluginLoader] for dynamic extension management.
- * @param videoPlayerContent Platform-specific surface composable to render the video canvas.
- * @param modifier Optional root modifier.
- */
-@Composable
-fun CloudstreamApp(
-    database: AppDatabase,
-    player: VideoPlayer,
-    pluginLoader: PluginLoader? = null,
-    onRegisterBackHandler: (((() -> Boolean) -> Unit))? = null,
-    onPlayerStateChanged: ((isActive: Boolean) -> Unit)? = null,
-    onToggleFullscreen: (() -> Unit)? = null,
-    videoPlayerContent: @Composable (VideoPlayer, Modifier) -> Unit,
-    modifier: Modifier = Modifier
+@Stable
+class AppNavigationState(
+    initialBackstack: ImmutableList<Screen> = persistentListOf(Screen.Home)
 ) {
-    // -------------------------------------------------------------------------
-    // Repositories
-    // -------------------------------------------------------------------------
+    var backstack: ImmutableList<Screen> by mutableStateOf(initialBackstack)
+        private set
+
+    val currentScreen: Screen
+        get() = backstack.lastOrNull() ?: Screen.Home
+
+    val canNavigateBack: Boolean
+        get() = backstack.size > 1
+
+    fun navigateTo(screen: Screen) {
+        backstack = when {
+            screen == Screen.Home -> persistentListOf(Screen.Home)
+            screen in mainTabScreens -> persistentListOf(Screen.Home, screen)
+            else -> (backstack + screen).toImmutableList()
+        }
+    }
+
+    fun navigateBack(): Boolean {
+        if (backstack.size > 1) {
+            backstack = backstack.dropLast(1).toImmutableList()
+            return true
+        }
+        return false
+    }
+
+    companion object {
+        private val mainTabScreens = setOf(
+            Screen.Home,
+            Screen.Search,
+            Screen.Library,
+            Screen.Downloads,
+            Screen.Settings,
+            Screen.AccountSelect
+        )
+    }
+}
+
+val Screen.isMainTab: Boolean
+    get() = this is Screen.Home ||
+            this is Screen.Search ||
+            this is Screen.Library ||
+            this is Screen.Downloads ||
+            this is Screen.Settings
+
+@Composable
+fun rememberAppNavigationState(hasCompletedOnboarding: Boolean): AppNavigationState {
+    val initialScreen = if (hasCompletedOnboarding) Screen.Home else Screen.Onboarding
+    return remember { AppNavigationState(persistentListOf(initialScreen)) }
+}
+
+@Immutable
+private class AppRepositories(
+    val preferenceRepository: AppPreferenceRepositoryImpl,
+    val bookmarkRepository: BookmarkRepositoryImpl,
+    val watchProgressRepository: WatchProgressRepositoryImpl,
+    val favoriteRepository: FavoriteRepositoryImpl,
+    val resumeWatchingRepository: ResumeWatchingRepositoryImpl,
+    val subscriptionRepository: SubscriptionRepositoryImpl,
+    val accountRepository: AccountRepositoryImpl,
+    val providerRepository: ProviderRepositoryImpl,
+    val hasCompletedOnboarding: Boolean
+)
+
+@Composable
+private fun rememberAppRepositories(database: AppDatabase): AppRepositories {
     val preferenceRepository = remember(database) {
         AppPreferenceRepositoryImpl(database.appPreferenceDao())
     }
@@ -176,38 +187,74 @@ fun CloudstreamApp(
     val providerRepository = remember {
         ProviderRepositoryImpl()
     }
+    val hasCompletedOnboarding = remember(preferenceRepository) {
+        kotlinx.coroutines.runBlocking {
+            preferenceRepository.getString(OnboardingViewModel.KEY_HAS_COMPLETED_ONBOARDING)?.toBooleanStrictOrNull() ?: false
+        }
+    }
+    return remember(database, hasCompletedOnboarding) {
+        AppRepositories(
+            preferenceRepository = preferenceRepository,
+            bookmarkRepository = bookmarkRepository,
+            watchProgressRepository = watchProgressRepository,
+            favoriteRepository = favoriteRepository,
+            resumeWatchingRepository = resumeWatchingRepository,
+            subscriptionRepository = subscriptionRepository,
+            accountRepository = accountRepository,
+            providerRepository = providerRepository,
+            hasCompletedOnboarding = hasCompletedOnboarding
+        )
+    }
+}
 
-    // -------------------------------------------------------------------------
-    // ViewModels
-    // -------------------------------------------------------------------------
-    val homeViewModelLazy = remember(providerRepository, bookmarkRepository, watchProgressRepository, resumeWatchingRepository, preferenceRepository) {
+@Immutable
+private class AppViewModels(
+    val homeViewModelLazy: Lazy<HomeViewModel>,
+    val searchViewModelLazy: Lazy<SearchViewModel>,
+    val libraryViewModelLazy: Lazy<LibraryViewModel>,
+    val appSettingsViewModel: AppSettingsViewModel,
+    val pluginsViewModelLazy: Lazy<PluginsSettingsViewModel>,
+    val playerControllerViewModel: PlayerControllerViewModel,
+    val downloadsViewModelLazy: Lazy<DownloadsViewModel>,
+    val accountViewModelLazy: Lazy<AccountViewModel>,
+    val onboardingViewModelLazy: Lazy<OnboardingViewModel>
+)
+
+@Composable
+private fun rememberAppViewModels(
+    repos: AppRepositories,
+    player: VideoPlayer,
+    pluginLoader: PluginLoader?,
+    database: AppDatabase
+): AppViewModels {
+    val homeViewModelLazy = remember(repos) {
         lazy {
             HomeViewModel(
-                providerRepository = providerRepository,
-                bookmarkRepository = bookmarkRepository,
-                watchProgressRepository = watchProgressRepository,
-                resumeWatchingRepository = resumeWatchingRepository,
-                preferenceRepository = preferenceRepository
+                providerRepository = repos.providerRepository,
+                bookmarkRepository = repos.bookmarkRepository,
+                watchProgressRepository = repos.watchProgressRepository,
+                resumeWatchingRepository = repos.resumeWatchingRepository,
+                preferenceRepository = repos.preferenceRepository
             )
         }
     }
     val searchViewModelLazy = remember { lazy { SearchViewModel() } }
-    val libraryViewModelLazy = remember(bookmarkRepository, watchProgressRepository, favoriteRepository) {
+    val libraryViewModelLazy = remember(repos) {
         lazy {
             LibraryViewModel(
-            bookmarkRepository = bookmarkRepository,
-            watchProgressRepository = watchProgressRepository,
-            favoriteRepository = favoriteRepository
-        )
+                bookmarkRepository = repos.bookmarkRepository,
+                watchProgressRepository = repos.watchProgressRepository,
+                favoriteRepository = repos.favoriteRepository
+            )
         }
     }
-    val appSettingsViewModel = remember(preferenceRepository) {
-        AppSettingsViewModel(preferenceRepository = preferenceRepository)
+    val appSettingsViewModel = remember(repos.preferenceRepository) {
+        AppSettingsViewModel(preferenceRepository = repos.preferenceRepository)
     }
-    val pluginsViewModelLazy = remember(preferenceRepository, pluginLoader) {
+    val pluginsViewModelLazy = remember(repos.preferenceRepository, pluginLoader) {
         lazy {
             PluginsSettingsViewModel(
-                preferenceRepository = preferenceRepository,
+                preferenceRepository = repos.preferenceRepository,
                 pluginLoader = pluginLoader,
                 onPluginLoaded = {
                     homeViewModelLazy.value.initializeProviders()
@@ -217,12 +264,12 @@ fun CloudstreamApp(
             )
         }
     }
-    val playerControllerViewModel = remember(player, watchProgressRepository, resumeWatchingRepository, bookmarkRepository) {
+    val playerControllerViewModel = remember(player, repos) {
         PlayerControllerViewModel(
             player = player,
-            watchProgressRepository = watchProgressRepository,
-            resumeWatchingRepository = resumeWatchingRepository,
-            bookmarkRepository = bookmarkRepository
+            watchProgressRepository = repos.watchProgressRepository,
+            resumeWatchingRepository = repos.resumeWatchingRepository,
+            bookmarkRepository = repos.bookmarkRepository
         )
     }
     val downloadsViewModelLazy = remember(database) {
@@ -230,456 +277,585 @@ fun CloudstreamApp(
             DownloadsViewModel(downloadCacheDao = database.downloadCacheDao())
         }
     }
-    val accountViewModelLazy = remember(accountRepository, preferenceRepository) {
+    val accountViewModelLazy = remember(repos) {
         lazy {
             AccountViewModel(
-            accountRepository = accountRepository,
-            preferenceRepository = preferenceRepository
-        )
+                accountRepository = repos.accountRepository,
+                preferenceRepository = repos.preferenceRepository
+            )
         }
     }
-    val onboardingViewModelLazy = remember(preferenceRepository, accountRepository) {
+    val onboardingViewModelLazy = remember(repos) {
         lazy {
             OnboardingViewModel(
-            preferenceRepository = preferenceRepository,
-            accountRepository = accountRepository,
-            pluginsRepository = DefaultPluginsRepository(preferenceRepository)
-        )
+                preferenceRepository = repos.preferenceRepository,
+                accountRepository = repos.accountRepository,
+                pluginsRepository = DefaultPluginsRepository(repos.preferenceRepository)
+            )
         }
     }
 
-    val appSettingsState by appSettingsViewModel.state.collectAsState()
-    
-
-    // -------------------------------------------------------------------------
-    // Navigation Stack
-    // -------------------------------------------------------------------------
-    val hasCompletedOnboarding = remember(preferenceRepository) {
-        kotlinx.coroutines.runBlocking {
-            preferenceRepository.getString(OnboardingViewModel.KEY_HAS_COMPLETED_ONBOARDING)?.toBooleanStrictOrNull() ?: false
-        }
-    }
-    var backstack by remember {
-        mutableStateOf(
-            if (hasCompletedOnboarding) listOf<Screen>(Screen.Home) else listOf<Screen>(Screen.Onboarding)
+    return remember(repos, player, pluginLoader, database) {
+        AppViewModels(
+            homeViewModelLazy = homeViewModelLazy,
+            searchViewModelLazy = searchViewModelLazy,
+            libraryViewModelLazy = libraryViewModelLazy,
+            appSettingsViewModel = appSettingsViewModel,
+            pluginsViewModelLazy = pluginsViewModelLazy,
+            playerControllerViewModel = playerControllerViewModel,
+            downloadsViewModelLazy = downloadsViewModelLazy,
+            accountViewModelLazy = accountViewModelLazy,
+            onboardingViewModelLazy = onboardingViewModelLazy
         )
     }
-    val currentScreen = backstack.lastOrNull() ?: Screen.Home
+}
+
+@Composable
+private fun rememberActiveResultViewModel(
+    activeDetailsScreen: Screen.Details?,
+    repos: AppRepositories
+): ResultViewModel? {
+    return remember(activeDetailsScreen?.url, activeDetailsScreen?.apiName) {
+        activeDetailsScreen?.let { details ->
+            ResultViewModel(
+                bookmarkRepository = repos.bookmarkRepository,
+                watchProgressRepository = repos.watchProgressRepository,
+                favoriteRepository = repos.favoriteRepository,
+                resumeWatchingRepository = repos.resumeWatchingRepository,
+                subscriptionRepository = repos.subscriptionRepository
+            ).apply {
+                onEvent(ResultEvent.LoadResult(url = details.url, apiName = details.apiName, autoResume = details.autoResume))
+            }
+        }
+    }
+}
+
+@Composable
+fun CloudstreamApp(
+    database: AppDatabase,
+    player: VideoPlayer,
+    pluginLoader: PluginLoader? = null,
+    onRegisterBackHandler: (((() -> Boolean) -> Unit))? = null,
+    onPlayerStateChanged: ((isActive: Boolean) -> Unit)? = null,
+    onToggleFullscreen: (() -> Unit)? = null,
+    videoPlayerContent: @Composable (VideoPlayer, Modifier) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val repos = rememberAppRepositories(database)
+    val viewModels = rememberAppViewModels(repos, player, pluginLoader, database)
+    val appSettingsState by viewModels.appSettingsViewModel.state.collectAsState()
+
+    val navState = rememberAppNavigationState(repos.hasCompletedOnboarding)
+    val currentScreen = navState.currentScreen
     val isPlayerActive = currentScreen is Screen.Player
 
     LaunchedEffect(isPlayerActive) {
         onPlayerStateChanged?.invoke(isPlayerActive)
     }
 
-    // Retain active media details ViewModel across navigation transitions (e.g. from Details to Player)
-    val activeDetailsScreen = backstack.filterIsInstance<Screen.Details>().lastOrNull()
-    val activeResultViewModel = remember(activeDetailsScreen?.url, activeDetailsScreen?.apiName) {
-        activeDetailsScreen?.let { details ->
-            ResultViewModel(
-                bookmarkRepository = bookmarkRepository,
-                watchProgressRepository = watchProgressRepository,
-                favoriteRepository = favoriteRepository,
-                resumeWatchingRepository = resumeWatchingRepository,
-                subscriptionRepository = subscriptionRepository
-            ).apply {
-                onEvent(ResultEvent.LoadResult(url = details.url, apiName = details.apiName, autoResume = details.autoResume))
-            }
-        }
+    SideEffect {
+        onRegisterBackHandler?.invoke { navState.navigateBack() }
     }
 
+    val activeDetailsScreen = navState.backstack.filterIsInstance<Screen.Details>().lastOrNull()
+    val activeResultViewModel = rememberActiveResultViewModel(activeDetailsScreen, repos)
     val activeResultState = activeResultViewModel?.state?.collectAsState()?.value
 
-    fun navigateTo(screen: Screen) {
-        println("CloudStreamDebug: navigateTo -> $screen | backstack before=${backstack.map { it::class.simpleName }}")
-        if (screen == Screen.Home) {
-            backstack = listOf(Screen.Home)
-        } else if (screen == Screen.Search || screen == Screen.Library || screen == Screen.Downloads || screen == Screen.Settings || screen == Screen.AccountSelect) {
-            // Keep Home as root and replace section
-            backstack = listOf(Screen.Home, screen)
-        } else {
-            backstack = backstack + screen
-        }
-    }
-
-    fun navigateBack(): Boolean {
-        println("CloudStreamDebug: navigateBack called! backstack before=${backstack.map { it::class.simpleName }}")
-        if (backstack.size > 1) {
-            backstack = backstack.dropLast(1)
-            return true
-        }
-        return false
-    }
-
-    SideEffect {
-        onRegisterBackHandler?.invoke { navigateBack() }
-    }
-
-    val clipboardManager = LocalClipboardManager.current
-    val defaultAppTitle = stringResource(Res.string.app_name)
     var pendingPlayEpisode by remember { mutableStateOf<ResultEpisode?>(null) }
+    val defaultAppTitle = stringResource(Res.string.app_name)
 
-    LaunchedEffect(activeResultViewModel) {
-        val vm = activeResultViewModel ?: return@LaunchedEffect
-        vm.effects.collect { effect ->
-            println("CloudStreamDebug: ResultEffect received: $effect")
-            when (effect) {
-                is ResultEffect.AutoPlayEpisode -> {
-                    vm.onEvent(ResultEvent.SelectEpisode(effect.episode))
-                    if (appSettingsViewModel.state.value.showSourcesOnPlay) {
-                        pendingPlayEpisode = null
-                    } else {
-                        val currentLinks = activeResultState?.extractedLinks ?: emptyList()
-                        val currentSubs = activeResultState?.extractedSubtitles ?: emptyList()
-                        if (currentLinks.isNotEmpty()) {
-                            pendingPlayEpisode = null
-                            val bestLink = currentLinks.first()
-                            val qualities = currentLinks.map { PlayerQuality.fromExtractorLink(it) }
-                            val playerSubtitleTracks = currentSubs.map { PlayerSubtitleTrack.fromSubtitleFile(it) }
-                            playerControllerViewModel.handleEvent(
-                                PlayerUiEvent.LoadMedia(
-                                    url = bestLink.url,
-                                    mediaId = effect.episode.id,
-                                    parentId = effect.parentId,
-                                    qualities = qualities,
-                                    subtitles = playerSubtitleTracks,
-                                    autoPlay = true,
-                                    resumePosition = effect.resumePosition
-                                )
-                            )
-                            navigateTo(
-                                Screen.Player(
-                                    title = effect.episode.name ?: activeResultState?.title ?: defaultAppTitle,
-                                    url = bestLink.url,
-                                    subtitles = currentSubs,
-                                    availableLinks = currentLinks
-                                )
-                            )
-                        } else {
-                            pendingPlayEpisode = effect.episode
-                        }
+    ResultPlaybackCoordinator(
+        activeResultViewModel = activeResultViewModel,
+        activeResultState = activeResultState,
+        playerControllerViewModel = viewModels.playerControllerViewModel,
+        showSourcesOnPlay = appSettingsState.showSourcesOnPlay,
+        defaultAppTitle = defaultAppTitle,
+        pendingPlayEpisode = pendingPlayEpisode,
+        onSetPendingPlayEpisode = { pendingPlayEpisode = it },
+        onNavigateToPlayer = { navState.navigateTo(it) }
+    )
+
+    PlayerEffectsHandler(
+        playerControllerViewModel = viewModels.playerControllerViewModel,
+        onNavigateBack = { navState.navigateBack() }
+    )
+
+    AppThemeWrapper(
+        appSettingsState = appSettingsState,
+        player = player,
+        videoPlayerContent = videoPlayerContent
+    ) {
+        BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+            val parentLayout = LocalLayout.current
+            val deviceLayout = remember(maxWidth, parentLayout) {
+                if (parentLayout != Layout.PHONE && parentLayout != Layout.NONE) {
+                    parentLayout
+                } else if (maxWidth >= 720.dp) {
+                    Layout.COMPUTER or Layout.DESKTOP
+                } else {
+                    Layout.PHONE
+                }
+            }
+
+            CompositionLocalProvider(LocalLayout provides deviceLayout) {
+                AppLayoutShell(
+                    currentScreen = currentScreen,
+                    canNavigateBack = navState.canNavigateBack,
+                    onNavigateBack = { navState.navigateBack() },
+                    onNavigateTo = { navState.navigateTo(it) },
+                    onToggleFullscreen = onToggleFullscreen,
+                    player = player,
+                    videoPlayerContent = videoPlayerContent,
+                    playerControllerViewModel = viewModels.playerControllerViewModel,
+                    onboardingViewModel = viewModels.onboardingViewModelLazy.value,
+                    accountViewModel = viewModels.accountViewModelLazy.value,
+                    contentRouter = { routerModifier ->
+                        AppContentRouter(
+                            currentScreen = currentScreen,
+                            viewModels = viewModels,
+                            repos = repos,
+                            activeResultViewModel = activeResultViewModel,
+                            activeResultState = activeResultState,
+                            navigateTo = { navState.navigateTo(it) },
+                            navigateBack = { navState.navigateBack() },
+                            onSetPendingPlayEpisode = { pendingPlayEpisode = it },
+                            modifier = routerModifier
+                        )
                     }
-                }
-                is ResultEffect.CopyToClipboard -> {
-                    clipboardManager.setText(AnnotatedString(effect.text))
-                }
-                is ResultEffect.ShowToast -> {}
-            }
-        }
-    }
-
-    LaunchedEffect(activeResultState?.extractedLinks, activeResultState?.extractedSubtitles, activeResultState?.linksLoadingError) {
-        if (activeResultState?.linksLoadingError != null && pendingPlayEpisode != null) {
-            pendingPlayEpisode = null
-        }
-        val links = activeResultState?.extractedLinks ?: emptyList()
-        val subs = activeResultState?.extractedSubtitles ?: emptyList()
-        println("CloudStreamDebug: extractedLinks changed: size=${links.size}, subs=${subs.size}, error=${activeResultState?.linksLoadingError}, pendingPlayEpisode=${pendingPlayEpisode?.name}")
-        if (links.isNotEmpty()) {
-            val qualities = links.map { PlayerQuality.fromExtractorLink(it) }
-            val subTracks = subs.map { PlayerSubtitleTrack.fromSubtitleFile(it) }
-            val pendingEp = pendingPlayEpisode
-
-            if (pendingEp != null) {
-                pendingPlayEpisode = null
-                val bestLink = links.first()
-                val currentEp = activeResultState?.selectedEpisode ?: pendingEp
-                playerControllerViewModel.handleEvent(
-                    PlayerUiEvent.LoadMedia(
-                        url = bestLink.url,
-                        mediaId = currentEp.id,
-                        parentId = activeResultState?.mediaId ?: currentEp.parentId,
-                        qualities = qualities,
-                        subtitles = subTracks,
-                        autoPlay = true,
-                        resumePosition = currentEp.position.takeIf { it > 0 }
-                    )
-                )
-                navigateTo(
-                    Screen.Player(
-                        title = currentEp.name ?: activeResultState?.title ?: defaultAppTitle,
-                        url = bestLink.url,
-                        subtitles = subs,
-                        availableLinks = links
-                    )
-                )
-            } else {
-                // Only update secondary qualities/subtitles if player is already loaded
-                playerControllerViewModel.handleEvent(
-                    PlayerUiEvent.UpdateQualitiesAndSubtitles(
-                        qualities = qualities,
-                        subtitles = subTracks
-                    )
                 )
             }
         }
     }
+}
 
-    LaunchedEffect(playerControllerViewModel) {
-        playerControllerViewModel.effects.collect { effect ->
-            println("CloudStreamDebug: playerControllerViewModel effect received: $effect")
-            when (effect) {
-                is PlayerUiEffect.NavigateBack -> {
-                    playerControllerViewModel.handleEvent(PlayerUiEvent.Pause)
-                    navigateBack()
-                }
-                else -> {}
-            }
-        }
+@Composable
+private fun AppThemeWrapper(
+    appSettingsState: AppSettingsState,
+    player: VideoPlayer,
+    videoPlayerContent: @Composable (VideoPlayer, Modifier) -> Unit,
+    content: @Composable () -> Unit
+) {
+    val nativeTheme = rememberNativeSystemTheme()
+    val effectiveDarkMode = if (appSettingsState.theme == AppTheme.SYSTEM) {
+        nativeTheme.isDarkMode ?: appSettingsState.isDarkMode
+    } else {
+        appSettingsState.isDarkMode
     }
-
-    val currentLanguage = appSettingsState.appLanguage
 
     CompositionLocalProvider(
         LocalVideoPlayer provides player,
         LocalVideoPlayerContent provides videoPlayerContent
     ) {
-        ProvideAppLocale(languageCode = currentLanguage) {
-            val nativeTheme = rememberNativeSystemTheme()
-            val effectiveDarkMode = if (appSettingsState.theme == AppTheme.SYSTEM) {
-                nativeTheme.isDarkMode ?: appSettingsState.isDarkMode
-            } else {
-                appSettingsState.isDarkMode
-            }
+        ProvideAppLocale(languageCode = appSettingsState.appLanguage) {
             CloudStreamTheme(
                 theme = appSettingsState.theme,
                 isDarkMode = effectiveDarkMode,
-                systemAccentColor = nativeTheme.accentColor
-            ) {
-            Surface(
-                modifier = modifier.fillMaxSize(),
-                color = Color.Black
-            ) {
-                // Determine the high-level layout mode to avoid duplicate Scaffold recompositions
-                val layoutMode = remember(currentScreen) {
-                    when (currentScreen) {
-                        is Screen.Player -> 0
-                        is Screen.Onboarding -> 1
-                        is Screen.AccountSelect -> 2
-                        else -> 3
-                    }
+                systemAccentColor = nativeTheme.accentColor,
+                content = content
+            )
+        }
+    }
+}
+
+@Composable
+private fun ResultPlaybackCoordinator(
+    activeResultViewModel: ResultViewModel?,
+    activeResultState: ResultState?,
+    playerControllerViewModel: PlayerControllerViewModel,
+    showSourcesOnPlay: Boolean,
+    defaultAppTitle: String,
+    pendingPlayEpisode: ResultEpisode?,
+    onSetPendingPlayEpisode: (ResultEpisode?) -> Unit,
+    onNavigateToPlayer: (Screen.Player) -> Unit
+) {
+    val clipboardManager = LocalClipboardManager.current
+
+    LaunchedEffect(activeResultViewModel) {
+        val vm = activeResultViewModel ?: return@LaunchedEffect
+        vm.effects.collect { effect ->
+            val resultEffect = effect as? ResultEffect ?: return@collect
+            handleResultEffect(
+                effect = resultEffect,
+                viewModel = vm,
+                activeResultState = activeResultState,
+                playerControllerViewModel = playerControllerViewModel,
+                showSourcesOnPlay = showSourcesOnPlay,
+                defaultAppTitle = defaultAppTitle,
+                clipboardManager = clipboardManager,
+                onSetPendingPlayEpisode = onSetPendingPlayEpisode,
+                onNavigateToPlayer = onNavigateToPlayer
+            )
+        }
+    }
+
+    LaunchedEffect(activeResultState?.extractedLinks, activeResultState?.extractedSubtitles, activeResultState?.linksLoadingError) {
+        handleExtractedMediaState(
+            activeResultState = activeResultState,
+            pendingPlayEpisode = pendingPlayEpisode,
+            playerControllerViewModel = playerControllerViewModel,
+            defaultAppTitle = defaultAppTitle,
+            onSetPendingPlayEpisode = onSetPendingPlayEpisode,
+            onNavigateToPlayer = onNavigateToPlayer
+        )
+    }
+}
+
+private fun resolveMediaTitle(
+    specificName: String?,
+    fallbackName: String?,
+    defaultTitle: String
+): String = specificName ?: fallbackName ?: defaultTitle
+
+private fun handleResultEffect(
+    effect: ResultEffect,
+    viewModel: ResultViewModel,
+    activeResultState: ResultState?,
+    playerControllerViewModel: PlayerControllerViewModel,
+    showSourcesOnPlay: Boolean,
+    defaultAppTitle: String,
+    clipboardManager: ClipboardManager,
+    onSetPendingPlayEpisode: (ResultEpisode?) -> Unit,
+    onNavigateToPlayer: (Screen.Player) -> Unit
+) {
+    when (effect) {
+        is ResultEffect.AutoPlayEpisode -> handleAutoPlayEpisode(
+            effect = effect,
+            viewModel = viewModel,
+            activeResultState = activeResultState,
+            playerControllerViewModel = playerControllerViewModel,
+            showSourcesOnPlay = showSourcesOnPlay,
+            defaultAppTitle = defaultAppTitle,
+            onSetPendingPlayEpisode = onSetPendingPlayEpisode,
+            onNavigateToPlayer = onNavigateToPlayer
+        )
+        is ResultEffect.CopyToClipboard -> clipboardManager.setText(AnnotatedString(effect.text))
+        is ResultEffect.ShowToast -> Unit
+    }
+}
+
+private fun handleAutoPlayEpisode(
+    effect: ResultEffect.AutoPlayEpisode,
+    viewModel: ResultViewModel,
+    activeResultState: ResultState?,
+    playerControllerViewModel: PlayerControllerViewModel,
+    showSourcesOnPlay: Boolean,
+    defaultAppTitle: String,
+    onSetPendingPlayEpisode: (ResultEpisode?) -> Unit,
+    onNavigateToPlayer: (Screen.Player) -> Unit
+) {
+    viewModel.onEvent(ResultEvent.SelectEpisode(effect.episode))
+    if (showSourcesOnPlay) {
+        onSetPendingPlayEpisode(null)
+        return
+    }
+
+    val currentLinks = activeResultState?.extractedLinks.orEmpty()
+    if (currentLinks.isEmpty()) {
+        onSetPendingPlayEpisode(effect.episode)
+        return
+    }
+
+    onSetPendingPlayEpisode(null)
+    dispatchLoadAndNavigate(
+        playerControllerViewModel = playerControllerViewModel,
+        links = currentLinks,
+        subtitles = activeResultState?.extractedSubtitles.orEmpty(),
+        mediaId = effect.episode.id,
+        parentId = effect.parentId,
+        resumePosition = effect.resumePosition,
+        title = resolveMediaTitle(effect.episode.name, activeResultState?.title, defaultAppTitle),
+        onNavigateToPlayer = onNavigateToPlayer
+    )
+}
+
+private fun handleExtractedMediaState(
+    activeResultState: ResultState?,
+    pendingPlayEpisode: ResultEpisode?,
+    playerControllerViewModel: PlayerControllerViewModel,
+    defaultAppTitle: String,
+    onSetPendingPlayEpisode: (ResultEpisode?) -> Unit,
+    onNavigateToPlayer: (Screen.Player) -> Unit
+) {
+    if (activeResultState?.linksLoadingError != null) {
+        onSetPendingPlayEpisode(null)
+    }
+
+    val links = activeResultState?.extractedLinks.orEmpty()
+    if (links.isEmpty()) return
+
+    val subs = activeResultState?.extractedSubtitles.orEmpty()
+    if (pendingPlayEpisode != null) {
+        handlePendingEpisodePlayback(
+            pendingPlayEpisode = pendingPlayEpisode,
+            activeResultState = activeResultState,
+            links = links,
+            subs = subs,
+            playerControllerViewModel = playerControllerViewModel,
+            defaultAppTitle = defaultAppTitle,
+            onSetPendingPlayEpisode = onSetPendingPlayEpisode,
+            onNavigateToPlayer = onNavigateToPlayer
+        )
+    } else {
+        playerControllerViewModel.handleEvent(
+            PlayerUiEvent.UpdateQualitiesAndSubtitles(
+                qualities = links.map { PlayerQuality.fromExtractorLink(it) },
+                subtitles = subs.map { PlayerSubtitleTrack.fromSubtitleFile(it) }
+            )
+        )
+    }
+}
+
+private fun handlePendingEpisodePlayback(
+    pendingPlayEpisode: ResultEpisode,
+    activeResultState: ResultState?,
+    links: List<ExtractorLink>,
+    subs: List<SubtitleFile>,
+    playerControllerViewModel: PlayerControllerViewModel,
+    defaultAppTitle: String,
+    onSetPendingPlayEpisode: (ResultEpisode?) -> Unit,
+    onNavigateToPlayer: (Screen.Player) -> Unit
+) {
+    onSetPendingPlayEpisode(null)
+    val currentEp = activeResultState?.selectedEpisode ?: pendingPlayEpisode
+    val parentId = activeResultState?.mediaId ?: currentEp.parentId
+    val resumePos = currentEp.position.takeIf { it > 0 }
+    val title = resolveMediaTitle(currentEp.name, activeResultState?.title, defaultAppTitle)
+
+    dispatchLoadAndNavigate(
+        playerControllerViewModel = playerControllerViewModel,
+        links = links,
+        subtitles = subs,
+        mediaId = currentEp.id,
+        parentId = parentId,
+        resumePosition = resumePos,
+        title = title,
+        onNavigateToPlayer = onNavigateToPlayer
+    )
+}
+
+private fun dispatchLoadAndNavigate(
+    playerControllerViewModel: PlayerControllerViewModel,
+    links: List<ExtractorLink>,
+    subtitles: List<SubtitleFile>,
+    mediaId: Int?,
+    parentId: Int?,
+    resumePosition: Long?,
+    title: String,
+    onNavigateToPlayer: (Screen.Player) -> Unit
+) {
+    val bestLink = links.firstOrNull() ?: return
+    val qualities = links.map { PlayerQuality.fromExtractorLink(it) }
+    val playerSubtitleTracks = subtitles.map { PlayerSubtitleTrack.fromSubtitleFile(it) }
+
+    playerControllerViewModel.handleEvent(
+        PlayerUiEvent.LoadMedia(
+            url = bestLink.url,
+            mediaId = mediaId,
+            parentId = parentId,
+            qualities = qualities,
+            subtitles = playerSubtitleTracks,
+            autoPlay = true,
+            resumePosition = resumePosition
+        )
+    )
+    onNavigateToPlayer(
+        Screen.Player(
+            title = title,
+            url = bestLink.url,
+            subtitles = subtitles.toImmutableList(),
+            availableLinks = links.toImmutableList()
+        )
+    )
+}
+
+@Composable
+private fun PlayerEffectsHandler(
+    playerControllerViewModel: PlayerControllerViewModel,
+    onNavigateBack: () -> Unit
+) {
+    LaunchedEffect(playerControllerViewModel) {
+        playerControllerViewModel.effects.collect { effect ->
+            when (effect) {
+                is PlayerUiEffect.NavigateBack -> {
+                    playerControllerViewModel.handleEvent(PlayerUiEvent.Pause)
+                    onNavigateBack()
                 }
-
-                when (layoutMode) {
-                    0 -> {
-                        // -------------------------------------------------------------
-                        // Immersive Fullscreen Video Player Mode (Hides All Navigation)
-                        // -------------------------------------------------------------
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color.Black)
-                        ) {
-                            videoPlayerContent(player, Modifier.fillMaxSize())
-                            PlayerControlsOverlay(
-                                viewModel = playerControllerViewModel,
-                                onBackClick = {
-                                    playerControllerViewModel.handleEvent(PlayerUiEvent.SaveProgressNow)
-                                    playerControllerViewModel.handleEvent(PlayerUiEvent.Pause)
-                                    navigateBack()
-                                },
-                                onToggleFullscreen = onToggleFullscreen,
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                    }
-                    1 -> {
-                        OnboardingScreen(
-                            viewModel = onboardingViewModelLazy.value,
-                            onComplete = { navigateTo(Screen.Home) },
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .statusBarsPadding()
-                                .navigationBarsPadding()
-                        )
-                    }
-                    2 -> {
-                        AccountSelectScreen(
-                            viewModel = accountViewModelLazy.value,
-                            onProfileSelected = { navigateTo(Screen.Home) },
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .statusBarsPadding()
-                                .navigationBarsPadding()
-                        )
-                    }
-                    else -> {
-                        // -------------------------------------------------------------
-                        // Responsive Scaffold: Navigation Rail (>= 600dp) vs Bottom Navigation (< 600dp)
-                        // -------------------------------------------------------------
-                        BoxWithConstraints(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-                            val isExpanded = maxWidth >= 600.dp
-                            val isMainTab = currentScreen is Screen.Home ||
-                                    currentScreen is Screen.Search ||
-                                    currentScreen is Screen.Library ||
-                                    currentScreen is Screen.Downloads ||
-                                    currentScreen is Screen.Settings
-
-                            if (isExpanded) {
-                                // Desktop / Tablet / Wide Landscape Layout: Left Navigation Rail
-                                Row(modifier = Modifier.fillMaxSize()) {
-                                    AppNavigationRail(
-                                        currentScreen = currentScreen,
-                                        canNavigateBack = backstack.size > 1,
-                                        onNavigateBack = ::navigateBack,
-                                        onNavigate = ::navigateTo,
-                                        modifier = Modifier
-                                            .width(88.dp)
-                                            .fillMaxHeight()
-                                    )
-
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxHeight()
-                                            .width(1.dp)
-                                            .background(CloudstreamTheme.extendedColors.divider)
-                                    )
-
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxHeight()
-                                            .statusBarsPadding()
-                                            .navigationBarsPadding()
-                                    ) {
-                                        AppContentRouter(
-                                            currentScreen = currentScreen,
-                                            homeViewModelLazy = homeViewModelLazy,
-                                            searchViewModelLazy = searchViewModelLazy,
-                                            libraryViewModelLazy = libraryViewModelLazy,
-                                            downloadsViewModelLazy = downloadsViewModelLazy,
-                                            appSettingsViewModel = appSettingsViewModel,
-                                            pluginsViewModelLazy = pluginsViewModelLazy,
-                                            accountViewModelLazy = accountViewModelLazy,
-                                            onboardingViewModelLazy = onboardingViewModelLazy,
-                                            playerControllerViewModel = playerControllerViewModel,
-                                            bookmarkRepository = bookmarkRepository,
-                                            watchProgressRepository = watchProgressRepository,
-                                            favoriteRepository = favoriteRepository,
-                                            resumeWatchingRepository = resumeWatchingRepository,
-                                            subscriptionRepository = subscriptionRepository,
-                                            activeResultViewModel = activeResultViewModel,
-                                            activeResultState = activeResultState,
-                                            navigateTo = ::navigateTo,
-                                            navigateBack = ::navigateBack,
-                                            onSetPendingPlayEpisode = { pendingPlayEpisode = it },
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    }
-                                }
-                            } else {
-                                // Mobile / Narrow Window (< 600dp): Content + Bottom Navigation Bar
-                                Column(modifier = Modifier.fillMaxSize()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxWidth()
-                                            .statusBarsPadding()
-                                            .then(if (!isMainTab) Modifier.navigationBarsPadding() else Modifier)
-                                    ) {
-                                        AppContentRouter(
-                                            currentScreen = currentScreen,
-                                            homeViewModelLazy = homeViewModelLazy,
-                                            searchViewModelLazy = searchViewModelLazy,
-                                            libraryViewModelLazy = libraryViewModelLazy,
-                                            downloadsViewModelLazy = downloadsViewModelLazy,
-                                            appSettingsViewModel = appSettingsViewModel,
-                                            pluginsViewModelLazy = pluginsViewModelLazy,
-                                            accountViewModelLazy = accountViewModelLazy,
-                                            onboardingViewModelLazy = onboardingViewModelLazy,
-                                            playerControllerViewModel = playerControllerViewModel,
-                                            bookmarkRepository = bookmarkRepository,
-                                            watchProgressRepository = watchProgressRepository,
-                                            favoriteRepository = favoriteRepository,
-                                            resumeWatchingRepository = resumeWatchingRepository,
-                                            subscriptionRepository = subscriptionRepository,
-                                            activeResultViewModel = activeResultViewModel,
-                                            activeResultState = activeResultState,
-                                            navigateTo = ::navigateTo,
-                                            navigateBack = ::navigateBack,
-                                            onSetPendingPlayEpisode = { pendingPlayEpisode = it },
-                                            modifier = Modifier.fillMaxSize()
-                                        )
-                                    }
-
-                                    if (isMainTab) {
-                                        AppBottomNavigation(
-                                            currentScreen = currentScreen,
-                                            onNavigate = ::navigateTo,
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .navigationBarsPadding()
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                else -> {}
             }
         }
     }
 }
+
+@Composable
+private fun AppLayoutShell(
+    currentScreen: Screen,
+    canNavigateBack: Boolean,
+    onNavigateBack: () -> Unit,
+    onNavigateTo: (Screen) -> Unit,
+    onToggleFullscreen: (() -> Unit)?,
+    player: VideoPlayer,
+    videoPlayerContent: @Composable (VideoPlayer, Modifier) -> Unit,
+    playerControllerViewModel: PlayerControllerViewModel,
+    onboardingViewModel: OnboardingViewModel,
+    accountViewModel: AccountViewModel,
+    contentRouter: @Composable (Modifier) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier.fillMaxSize(),
+        color = Color.Black
+    ) {
+        when (currentScreen) {
+            is Screen.Player -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
+                ) {
+                    videoPlayerContent(player, Modifier.fillMaxSize())
+                    PlayerControlsOverlay(
+                        viewModel = playerControllerViewModel,
+                        onBackClick = {
+                            playerControllerViewModel.handleEvent(PlayerUiEvent.SaveProgressNow)
+                            playerControllerViewModel.handleEvent(PlayerUiEvent.Pause)
+                            onNavigateBack()
+                        },
+                        onToggleFullscreen = onToggleFullscreen,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+            }
+
+            is Screen.Onboarding -> {
+                OnboardingScreen(
+                    viewModel = onboardingViewModel,
+                    onComplete = { onNavigateTo(Screen.Home) },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                )
+            }
+
+            is Screen.AccountSelect -> {
+                AccountSelectScreen(
+                    viewModel = accountViewModel,
+                    onProfileSelected = { onNavigateTo(Screen.Home) },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                )
+            }
+
+            else -> {
+                ResponsiveAppScaffold(
+                    currentScreen = currentScreen,
+                    canNavigateBack = canNavigateBack,
+                    onNavigateBack = onNavigateBack,
+                    onNavigateTo = onNavigateTo,
+                    contentRouter = contentRouter
+                )
+            }
+        }
+    }
 }
 
-/**
- * Shared screen router across desktop and mobile layouts.
- */
+@Composable
+private fun ResponsiveAppScaffold(
+    currentScreen: Screen,
+    canNavigateBack: Boolean,
+    onNavigateBack: () -> Unit,
+    onNavigateTo: (Screen) -> Unit,
+    contentRouter: @Composable (Modifier) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isExpanded by isLayoutState(Layout.TV or Layout.COMPUTER)
+    val isMainTab = currentScreen.isMainTab
+
+    if (isExpanded) {
+        Row(modifier = modifier.fillMaxSize().background(Color.Black)) {
+            AppNavigationRail(
+                currentScreen = currentScreen,
+                canNavigateBack = canNavigateBack,
+                onNavigateBack = onNavigateBack,
+                onNavigate = onNavigateTo,
+                modifier = Modifier
+                    .width(88.dp)
+                    .fillMaxHeight()
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .width(1.dp)
+                    .background(CloudstreamTheme.extendedColors.divider)
+            )
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+            ) {
+                contentRouter(Modifier.fillMaxSize())
+            }
+        }
+    } else {
+        Column(modifier = modifier.fillMaxSize().background(Color.Black)) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .then(if (!isMainTab) Modifier.navigationBarsPadding() else Modifier)
+            ) {
+                contentRouter(Modifier.fillMaxSize())
+            }
+
+            if (isMainTab) {
+                AppBottomNavigation(
+                    currentScreen = currentScreen,
+                    onNavigate = onNavigateTo,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                )
+            }
+        }
+    }
+}
+
+private fun screenKeyFor(screen: Screen): String = when (screen) {
+    is Screen.Details -> "details_${screen.url}_${screen.apiName}"
+    is Screen.PluginDetails -> "plugin_${screen.plugin.internalName}"
+    is Screen.Player -> "player"
+    else -> screen::class.simpleName ?: "screen"
+}
+
 @Composable
 private fun AppContentRouter(
     currentScreen: Screen,
-    homeViewModelLazy: Lazy<HomeViewModel>,
-    searchViewModelLazy: Lazy<SearchViewModel>,
-    libraryViewModelLazy: Lazy<LibraryViewModel>,
-    downloadsViewModelLazy: Lazy<DownloadsViewModel>,
-    appSettingsViewModel: AppSettingsViewModel,
-    pluginsViewModelLazy: Lazy<PluginsSettingsViewModel>,
-    accountViewModelLazy: Lazy<AccountViewModel>,
-    onboardingViewModelLazy: Lazy<OnboardingViewModel>,
-    playerControllerViewModel: PlayerControllerViewModel,
-    bookmarkRepository: BookmarkRepositoryImpl,
-    watchProgressRepository: WatchProgressRepositoryImpl,
-    favoriteRepository: FavoriteRepositoryImpl,
-    resumeWatchingRepository: ResumeWatchingRepositoryImpl,
-    subscriptionRepository: SubscriptionRepositoryImpl,
+    viewModels: AppViewModels,
+    repos: AppRepositories,
     activeResultViewModel: ResultViewModel?,
     activeResultState: ResultState?,
     navigateTo: (Screen) -> Unit,
     navigateBack: () -> Unit,
-    onSetPendingPlayEpisode: (ResultEpisode?) -> Unit = {},
+    onSetPendingPlayEpisode: (ResultEpisode?) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val saveableStateHolder = rememberSaveableStateHolder()
     val defaultAppTitle = stringResource(Res.string.app_name)
-
-    val isMainTab = currentScreen is Screen.Home ||
-            currentScreen is Screen.Search ||
-            currentScreen is Screen.Library ||
-            currentScreen is Screen.Downloads ||
-            currentScreen is Screen.Settings
-
-    var visitedScreens by remember { mutableStateOf(setOf<Screen>(Screen.Home)) }
-
-    LaunchedEffect(currentScreen) {
-        if (isMainTab && !visitedScreens.contains(currentScreen)) {
-            visitedScreens = visitedScreens + currentScreen
-        }
-    }
-
-    val screenKey = remember(currentScreen) {
-        when (currentScreen) {
-            is Screen.Details -> "details_${currentScreen.url}_${currentScreen.apiName}"
-            is Screen.PluginDetails -> "plugin_${currentScreen.plugin.internalName}"
-            is Screen.Player -> "player"
-            else -> currentScreen::class.simpleName ?: "screen"
-        }
-    }
+    val screenKey = remember(currentScreen) { screenKeyFor(currentScreen) }
 
     Box(modifier = modifier) {
         saveableStateHolder.SaveableStateProvider(key = screenKey) {
             when (currentScreen) {
                 is Screen.Home -> {
                     HomeScreen(
-                        viewModel = homeViewModelLazy.value,
+                        viewModel = viewModels.homeViewModelLazy.value,
                         onNavigateToDetails = { item, autoResume ->
                             navigateTo(Screen.Details(url = item.url, apiName = item.apiName, autoResume = autoResume))
                         },
@@ -690,7 +866,7 @@ private fun AppContentRouter(
 
                 is Screen.Search -> {
                     SearchScreen(
-                        viewModel = searchViewModelLazy.value,
+                        viewModel = viewModels.searchViewModelLazy.value,
                         onNavigateToDetails = { item ->
                             navigateTo(Screen.Details(url = item.url, apiName = item.apiName))
                         },
@@ -700,15 +876,13 @@ private fun AppContentRouter(
 
                 is Screen.Library -> {
                     LibraryScreen(
-                        viewModel = libraryViewModelLazy.value,
+                        viewModel = viewModels.libraryViewModelLazy.value,
                         onNavigateToDetails = { url, apiName ->
                             navigateTo(Screen.Details(url = url, apiName = apiName))
                         },
-                        onNavigateToHome = {
-                            navigateTo(Screen.Home)
-                        },
+                        onNavigateToHome = { navigateTo(Screen.Home) },
                         onSearchMedia = { query ->
-                            searchViewModelLazy.value.handleEvent(SearchEvent.Search(query))
+                            viewModels.searchViewModelLazy.value.handleEvent(SearchEvent.Search(query))
                             navigateTo(Screen.Search)
                         },
                         modifier = Modifier.fillMaxSize()
@@ -716,42 +890,18 @@ private fun AppContentRouter(
                 }
 
                 is Screen.Downloads -> {
-                    DownloadsScreen(
-                        viewModel = downloadsViewModelLazy.value,
-                        onNavigateToExplore = {
-                            navigateTo(Screen.Home)
-                        },
-                        onPlayOffline = { episode, header ->
-                            val offlineTitle = episode.name ?: header?.name ?: defaultAppTitle
-                            val offlineUrl = header?.url?.takeIf { it.isNotBlank() } ?: "offline://${episode.parentId}/${episode.id}"
-                            if (offlineUrl.isNotBlank()) {
-                                playerControllerViewModel.handleEvent(
-                                    PlayerUiEvent.LoadMedia(
-                                        url = offlineUrl,
-                                        mediaId = episode.id,
-                                        parentId = episode.parentId,
-                                        qualities = emptyList(),
-                                        subtitles = emptyList(),
-                                        autoPlay = true
-                                    )
-                                )
-                                navigateTo(
-                                    Screen.Player(
-                                        title = offlineTitle,
-                                        url = offlineUrl,
-                                        subtitles = emptyList(),
-                                        availableLinks = emptyList()
-                                    )
-                                )
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize()
+                    DownloadsScreenDestination(
+                        viewModel = viewModels.downloadsViewModelLazy.value,
+                        playerControllerViewModel = viewModels.playerControllerViewModel,
+                        defaultAppTitle = defaultAppTitle,
+                        onNavigateToHome = { navigateTo(Screen.Home) },
+                        onNavigateToPlayer = { navigateTo(it) }
                     )
                 }
 
                 is Screen.Plugins -> {
                     PluginsScreen(
-                        viewModel = pluginsViewModelLazy.value,
+                        viewModel = viewModels.pluginsViewModelLazy.value,
                         onNavigateToPluginDetails = { plugin ->
                             navigateTo(Screen.PluginDetails(plugin))
                         },
@@ -761,8 +911,8 @@ private fun AppContentRouter(
 
                 is Screen.Settings -> {
                     SettingsScreen(
-                        appSettingsViewModel = appSettingsViewModel,
-                        pluginsViewModel = pluginsViewModelLazy.value,
+                        appSettingsViewModel = viewModels.appSettingsViewModel,
+                        pluginsViewModel = viewModels.pluginsViewModelLazy.value,
                         onBackClick = { navigateBack() },
                         onNavigateToAccountSelect = { navigateTo(Screen.AccountSelect) },
                         modifier = Modifier.fillMaxSize()
@@ -770,72 +920,24 @@ private fun AppContentRouter(
                 }
 
                 is Screen.Details -> {
-                    val detailsScreen = currentScreen
-                    val appSettingsState by appSettingsViewModel.state.collectAsState()
-                    val resultViewModel = activeResultViewModel ?: remember(detailsScreen.url, detailsScreen.apiName) {
-                        ResultViewModel(
-                            bookmarkRepository = bookmarkRepository,
-                            watchProgressRepository = watchProgressRepository,
-                            favoriteRepository = favoriteRepository,
-                            resumeWatchingRepository = resumeWatchingRepository,
-                            subscriptionRepository = subscriptionRepository
-                        ).apply {
-                            onEvent(ResultEvent.LoadResult(url = detailsScreen.url, apiName = detailsScreen.apiName, autoResume = detailsScreen.autoResume))
-                        }
-                    }
-
-                    ResultScreen(
-                        viewModel = resultViewModel,
-                        showSourcesOnPlay = appSettingsState.showSourcesOnPlay,
-                        onBack = { navigateBack() },
-                        onPlayEpisode = { episode ->
-                            println("CloudStreamDebug: onPlayEpisode invoked for episode id=${episode.id} name=${episode.name}")
-                            resultViewModel.onEvent(ResultEvent.SelectEpisode(episode))
-                            resultViewModel.onEvent(ResultEvent.ReloadLinks(episode))
-                            onSetPendingPlayEpisode(episode)
-                        },
-                        onPlayLink = { selectedLink, allLinks, subs, initialSubtitle ->
-                            println("CloudStreamDebug: onPlayLink invoked: url=${selectedLink.url} source=${selectedLink.source}")
-                            val currentEp = activeResultState?.selectedEpisode
-                            val playerSubtitleTracks = subs.map { PlayerSubtitleTrack.fromSubtitleFile(it) }
-                            val initialSubtitleTrack = initialSubtitle?.let { PlayerSubtitleTrack.fromSubtitleFile(it) }
-                            playerControllerViewModel.handleEvent(
-                                PlayerUiEvent.LoadMedia(
-                                    url = selectedLink.url,
-                                    mediaId = currentEp?.id ?: activeResultState?.mediaId,
-                                    parentId = activeResultState?.mediaId,
-                                    qualities = allLinks.map { PlayerQuality.fromExtractorLink(it) },
-                                    subtitles = playerSubtitleTracks,
-                                    initialSubtitle = initialSubtitleTrack,
-                                    autoPlay = true,
-                                    resumePosition = currentEp?.position?.takeIf { it > 0 }
-                                )
-                            )
-                            navigateTo(
-                                Screen.Player(
-                                    title = activeResultState?.title ?: defaultAppTitle,
-                                    url = selectedLink.url,
-                                    subtitles = subs,
-                                    availableLinks = allLinks
-                                )
-                            )
-                        },
-                        onNavigateToRecommendation = { recUrl, recApi ->
-                            navigateTo(Screen.Details(url = recUrl, apiName = recApi))
-                        },
-                        onDownloadEpisode = { episode ->
-                            resultViewModel.onEvent(ResultEvent.SelectEpisode(episode))
-                            resultViewModel.onEvent(ResultEvent.ReloadLinks(episode))
-                        },
-                        modifier = Modifier.fillMaxSize()
+                    DetailsScreenDestination(
+                        currentScreen = currentScreen,
+                        activeResultViewModel = activeResultViewModel,
+                        activeResultState = activeResultState,
+                        repos = repos,
+                        appSettingsViewModel = viewModels.appSettingsViewModel,
+                        playerControllerViewModel = viewModels.playerControllerViewModel,
+                        defaultAppTitle = defaultAppTitle,
+                        navigateTo = navigateTo,
+                        navigateBack = navigateBack,
+                        onSetPendingPlayEpisode = onSetPendingPlayEpisode
                     )
                 }
 
                 is Screen.PluginDetails -> {
-                    val pluginScreen = currentScreen
                     PluginDetailsScreen(
-                        plugin = pluginScreen.plugin,
-                        viewModel = pluginsViewModelLazy.value,
+                        plugin = currentScreen.plugin,
+                        viewModel = viewModels.pluginsViewModelLazy.value,
                         onBackClick = { navigateBack() },
                         modifier = Modifier.fillMaxSize()
                     )
@@ -843,7 +945,7 @@ private fun AppContentRouter(
 
                 Screen.Onboarding -> {
                     OnboardingScreen(
-                        viewModel = onboardingViewModelLazy.value,
+                        viewModel = viewModels.onboardingViewModelLazy.value,
                         onComplete = { navigateTo(Screen.Home) },
                         modifier = Modifier.fillMaxSize()
                     )
@@ -851,7 +953,7 @@ private fun AppContentRouter(
 
                 Screen.AccountSelect -> {
                     AccountSelectScreen(
-                        viewModel = accountViewModelLazy.value,
+                        viewModel = viewModels.accountViewModelLazy.value,
                         onProfileSelected = { navigateTo(Screen.Home) },
                         modifier = Modifier.fillMaxSize()
                     )
@@ -863,184 +965,147 @@ private fun AppContentRouter(
     }
 }
 
-/**
- * Responsive Navigation Rail sidebar for Desktop and Tablet screens.
- */
 @Composable
-private fun AppNavigationRail(
-    currentScreen: Screen,
-    canNavigateBack: Boolean = false,
-    onNavigateBack: () -> Unit = {},
-    onNavigate: (Screen) -> Unit,
-    modifier: Modifier = Modifier
+private fun DownloadsScreenDestination(
+    viewModel: DownloadsViewModel,
+    playerControllerViewModel: PlayerControllerViewModel,
+    defaultAppTitle: String,
+    onNavigateToHome: () -> Unit,
+    onNavigateToPlayer: (Screen.Player) -> Unit
 ) {
-    Column(
-        modifier = modifier
-            .background(MaterialTheme.colors.surface)
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .padding(vertical = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween
-    ) {
-        // Top Section: Back Button / App Brand & Primary Navigation
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            if (canNavigateBack) {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(CloudStreamColors.SurfaceVariant)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(Res.string.action_back),
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
+    DownloadsScreen(
+        viewModel = viewModel,
+        onNavigateToExplore = onNavigateToHome,
+        onPlayOffline = { episode, header ->
+            val offlineTitle = episode.name ?: header?.name ?: defaultAppTitle
+            val offlineUrl = header?.url?.takeIf { it.isNotBlank() } ?: "offline://${episode.parentId}/${episode.id}"
+            if (offlineUrl.isNotBlank()) {
+                playerControllerViewModel.handleEvent(
+                    PlayerUiEvent.LoadMedia(
+                        url = offlineUrl,
+                        mediaId = episode.id,
+                        parentId = episode.parentId,
+                        qualities = emptyList(),
+                        subtitles = emptyList(),
+                        autoPlay = true
                     )
-                }
-            } else {
-                // App Brand Logo
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = CloudStreamColors.SurfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onNavigate(Screen.Home) }
-                ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        Icon(
-                            painter = painterResource(Res.drawable.cloud_2_gradient),
-                            contentDescription = stringResource(Res.string.app_name),
-                            tint = Color.Unspecified,
-                            modifier = Modifier.size(36.dp)
-                        )
-                    }
-                }
+                )
+                onNavigateToPlayer(
+                    Screen.Player(
+                        title = offlineTitle,
+                        url = offlineUrl,
+                        subtitles = persistentListOf(),
+                        availableLinks = persistentListOf()
+                    )
+                )
             }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Navigation Items
-            NavigationRailItem(
-                icon = Icons.Default.Home,
-                label = stringResource(Res.string.navHome),
-                isSelected = currentScreen is Screen.Home,
-                onClick = { onNavigate(Screen.Home) }
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            NavigationRailItem(
-                icon = Icons.Default.Search,
-                label = stringResource(Res.string.navSearch),
-                isSelected = currentScreen is Screen.Search,
-                onClick = { onNavigate(Screen.Search) }
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            NavigationRailItem(
-                icon = Icons.Default.Bookmark,
-                label = stringResource(Res.string.navLibrary),
-                isSelected = currentScreen is Screen.Library,
-                onClick = { onNavigate(Screen.Library) }
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            NavigationRailItem(
-                icon = Icons.Default.Download,
-                label = stringResource(Res.string.navDownloads),
-                isSelected = currentScreen is Screen.Downloads,
-                onClick = { onNavigate(Screen.Downloads) }
-            )
-        }
-
-        // Bottom Section: Settings
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            NavigationRailItem(
-                icon = Icons.Default.Settings,
-                label = stringResource(Res.string.navSettings),
-                isSelected = currentScreen is Screen.Settings,
-                onClick = { onNavigate(Screen.Settings) }
-            )
-        }
-    }
-}
-
-/**
- * Individual Navigation Rail Item with animated state, hover elevation, and ripple feedback.
- */
-@Composable
-private fun NavigationRailItem(
-    icon: ImageVector,
-    label: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isHovered by interactionSource.collectIsHoveredAsState()
-    val isFocused by interactionSource.collectIsFocusedAsState()
-    val isHighlighted = isHovered || isFocused
-
-    val scale by animateFloatAsState(
-        targetValue = if (isHighlighted) 1.06f else 1.0f,
-        animationSpec = tween(150)
+        },
+        modifier = Modifier.fillMaxSize()
     )
+}
 
-    val backgroundColor = when {
-        isSelected -> MaterialTheme.colors.primary.copy(alpha = 0.16f)
-        isHighlighted -> CloudstreamTheme.extendedColors.hoverBackground
-        else -> Color.Transparent
+@Composable
+private fun DetailsScreenDestination(
+    currentScreen: Screen.Details,
+    activeResultViewModel: ResultViewModel?,
+    activeResultState: ResultState?,
+    repos: AppRepositories,
+    appSettingsViewModel: AppSettingsViewModel,
+    playerControllerViewModel: PlayerControllerViewModel,
+    defaultAppTitle: String,
+    navigateTo: (Screen) -> Unit,
+    navigateBack: () -> Unit,
+    onSetPendingPlayEpisode: (ResultEpisode?) -> Unit
+) {
+    val appSettingsState by appSettingsViewModel.state.collectAsState()
+    val resultViewModel = activeResultViewModel ?: remember(currentScreen.url, currentScreen.apiName) {
+        ResultViewModel(
+            bookmarkRepository = repos.bookmarkRepository,
+            watchProgressRepository = repos.watchProgressRepository,
+            favoriteRepository = repos.favoriteRepository,
+            resumeWatchingRepository = repos.resumeWatchingRepository,
+            subscriptionRepository = repos.subscriptionRepository
+        ).apply {
+            onEvent(ResultEvent.LoadResult(url = currentScreen.url, apiName = currentScreen.apiName, autoResume = currentScreen.autoResume))
+        }
     }
 
-    val contentColor = when {
-        isSelected -> MaterialTheme.colors.primary
-        isHighlighted -> CloudstreamTheme.extendedColors.textPrimary
-        else -> CloudstreamTheme.extendedColors.textSecondary
-    }
-
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier
-            .fillMaxWidth()
-            .graphicsLayer(scaleX = scale, scaleY = scale)
-            .padding(horizontal = 8.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(backgroundColor)
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick
+    ResultScreen(
+        viewModel = resultViewModel,
+        showSourcesOnPlay = appSettingsState.showSourcesOnPlay,
+        onBack = { navigateBack() },
+        onPlayEpisode = { episode ->
+            resultViewModel.onEvent(ResultEvent.SelectEpisode(episode))
+            resultViewModel.onEvent(ResultEvent.ReloadLinks(episode))
+            onSetPendingPlayEpisode(episode)
+        },
+        onPlayLink = { selectedLink, allLinks, subs, initialSubtitle ->
+            val currentEp = activeResultState?.selectedEpisode
+            val playerSubtitleTracks = subs.map { PlayerSubtitleTrack.fromSubtitleFile(it) }
+            val initialSubtitleTrack = initialSubtitle?.let { PlayerSubtitleTrack.fromSubtitleFile(it) }
+            playerControllerViewModel.handleEvent(
+                PlayerUiEvent.LoadMedia(
+                    url = selectedLink.url,
+                    mediaId = currentEp?.id ?: activeResultState?.mediaId,
+                    parentId = activeResultState?.mediaId,
+                    qualities = allLinks.map { PlayerQuality.fromExtractorLink(it) },
+                    subtitles = playerSubtitleTracks,
+                    initialSubtitle = initialSubtitleTrack,
+                    autoPlay = true,
+                    resumePosition = currentEp?.position?.takeIf { it > 0 }
+                )
             )
-            .focusable(interactionSource = interactionSource)
-            .padding(vertical = 10.dp, horizontal = 6.dp)
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = contentColor,
-            modifier = Modifier.size(24.dp)
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = label,
-            fontSize = 11.sp,
-            fontWeight = if (isSelected || isHighlighted) FontWeight.SemiBold else FontWeight.Medium,
-            color = contentColor
+            navigateTo(
+                Screen.Player(
+                    title = activeResultState?.title ?: defaultAppTitle,
+                    url = selectedLink.url,
+                    subtitles = subs,
+                    availableLinks = allLinks
+                )
+            )
+        },
+        onNavigateToRecommendation = { recUrl, recApi ->
+            navigateTo(Screen.Details(url = recUrl, apiName = recApi))
+        },
+        onDownloadEpisode = { episode ->
+            resultViewModel.onEvent(ResultEvent.SelectEpisode(episode))
+            resultViewModel.onEvent(ResultEvent.ReloadLinks(episode))
+        },
+        modifier = Modifier.fillMaxSize()
+    )
+}
+
+@Preview
+@Composable
+private fun ResponsiveAppScaffoldPhonePreview() {
+    CloudStreamTheme {
+        ResponsiveAppScaffold(
+            currentScreen = Screen.Home,
+            canNavigateBack = false,
+            onNavigateBack = {},
+            onNavigateTo = {},
+            contentRouter = { modifier ->
+                Box(modifier = modifier.background(Color.DarkGray))
+            }
         )
     }
 }
+
+@Preview
+@Composable
+private fun ResponsiveAppScaffoldExpandedPreview() {
+    CloudStreamTheme {
+        CompositionLocalProvider(LocalLayout provides Layout.TV) {
+            ResponsiveAppScaffold(
+                currentScreen = Screen.Home,
+                canNavigateBack = false,
+                onNavigateBack = {},
+                onNavigateTo = {},
+                contentRouter = { modifier ->
+                    Box(modifier = modifier.background(Color.DarkGray))
+                }
+            )
+        }
+    }
+}
+

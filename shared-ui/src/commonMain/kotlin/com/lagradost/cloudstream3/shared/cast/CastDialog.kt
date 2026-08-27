@@ -91,7 +91,6 @@ fun CastDialog(
                 .padding(vertical = 4.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Active Connected Device Banner (if any)
             if (currentDevice != null && castState != CastState.DISCONNECTED) {
                 Card(
                     shape = RoundedCornerShape(12.dp),
@@ -156,7 +155,6 @@ fun CastDialog(
                 }
             }
 
-            // Discovery Header & Scanning Spinner
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -185,7 +183,6 @@ fun CastDialog(
                 }
             }
 
-            // Discovered Devices List
             if (availableDevices.isEmpty()) {
                 Box(
                     modifier = Modifier

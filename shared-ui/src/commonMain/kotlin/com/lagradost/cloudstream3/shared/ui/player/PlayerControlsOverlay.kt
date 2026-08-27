@@ -75,6 +75,7 @@ import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerUiState
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -787,3 +788,21 @@ fun PlayerControlsOverlay(
         }
     }
 }
+
+@Preview
+@Composable
+private fun PlayerControlsOverlayPreview() {
+    CloudStreamTheme {
+        PlayerControlsOverlay(
+            state = PlayerUiState(
+                isPlaying = true,
+                areControlsVisible = true,
+                positionMs = 120_000L,
+                durationMs = 600_000L
+            ),
+            onEvent = {},
+            onBackClick = {}
+        )
+    }
+}
+

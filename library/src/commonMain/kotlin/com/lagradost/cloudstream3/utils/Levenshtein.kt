@@ -257,248 +257,210 @@ private fun editOpsFromCostMatrix(
     return ops.requireNoNulls()
 }
 
+private data class ScanState(val i: Int, val o: Int, val spos: Int, val dpos: Int)
+
+private fun advanceMatchingOps(
+    ops: Array<EditOp>,
+    initialO: Int,
+    initialI: Int,
+    type: EditType?,
+    initialSpos: Int,
+    initialDpos: Int
+): ScanState {
+    var o = initialO
+    var i = initialI
+    var spos = initialSpos
+    var dpos = initialDpos
+
+    when (type) {
+        EditType.REPLACE -> do {
+            spos++
+            dpos++
+            i--
+            o++
+        } while (i != 0 && ops[o].type === type && spos == ops[o].spos && dpos == ops[o].dpos)
+
+        EditType.DELETE -> do {
+            spos++
+            i--
+            o++
+        } while (i != 0 && ops[o].type === type && spos == ops[o].spos && dpos == ops[o].dpos)
+
+        EditType.INSERT -> do {
+            dpos++
+            i--
+            o++
+        } while (i != 0 && ops[o].type === type && spos == ops[o].spos && dpos == ops[o].dpos)
+
+        else -> {}
+    }
+    return ScanState(i, o, spos, dpos)
+}
+
 private fun getMatchingBlocks(len1: Int, len2: Int, ops: Array<EditOp>): Array<MatchingBlock> {
-    val n = ops.size
-    var numberOfMatchingBlocks = 0
-    var i: Int
-    var spos: Int
-    var dpos: Int
+    val blocks = mutableListOf<MatchingBlock>()
+    var spos = 0
+    var dpos = 0
+    var i = ops.size
     var o = 0
 
-    dpos = 0
-    spos = dpos
-
-    i = n
-    while (i != 0) {
-        while (ops[o].type === EditType.KEEP && --i != 0) {
-            o++
-        }
-        if (i == 0) break
-        if (spos < ops[o].spos || dpos < ops[o].dpos) {
-            numberOfMatchingBlocks++
-            spos = ops[o].spos
-            dpos = ops[o].dpos
-        }
-        val type = ops[o].type!!
-        when (type) {
-            EditType.REPLACE -> do {
-                spos++
-                dpos++
-                i--
-                o++
-            } while (i != 0 && ops[o].type === type && spos == ops[o].spos && dpos == ops[o].dpos)
-
-            EditType.DELETE -> do {
-                spos++
-                i--
-                o++
-            } while (i != 0 && ops[o].type === type && spos == ops[o].spos && dpos == ops[o].dpos)
-
-            EditType.INSERT -> do {
-                dpos++
-                i--
-                o++
-            } while (i != 0 && ops[o].type === type && spos == ops[o].spos && dpos == ops[o].dpos)
-
-            else -> {}
-        }
-    }
-
-    if (spos < len1 || dpos < len2) numberOfMatchingBlocks++
-
-    val matchingBlocks = arrayOfNulls<MatchingBlock>(numberOfMatchingBlocks + 1)
-    o = 0
-    dpos = 0
-    spos = dpos
-    var mbIndex = 0
-
-    i = n
     while (i != 0) {
         while (ops[o].type === EditType.KEEP && --i != 0) o++
         if (i == 0) break
+
         if (spos < ops[o].spos || dpos < ops[o].dpos) {
-            val mb = MatchingBlock(
-                spos = spos,
-                dpos = dpos,
-                length = ops[o].spos - spos
-            )
+            blocks.add(MatchingBlock(spos = spos, dpos = dpos, length = ops[o].spos - spos))
             spos = ops[o].spos
             dpos = ops[o].dpos
-            matchingBlocks[mbIndex++] = mb
         }
-        val type = ops[o].type!!
-        when (type) {
-            EditType.REPLACE -> do {
-                spos++
-                dpos++
-                i--
-                o++
-            } while (i != 0 && ops[o].type === type && spos == ops[o].spos && dpos == ops[o].dpos)
 
-            EditType.DELETE -> do {
-                spos++
-                i--
-                o++
-            } while (i != 0 && ops[o].type === type && spos == ops[o].spos && dpos == ops[o].dpos)
-
-            EditType.INSERT -> do {
-                dpos++
-                i--
-                o++
-            } while (i != 0 && ops[o].type === type && spos == ops[o].spos && dpos == ops[o].dpos)
-
-            else -> {}
-        }
+        val nextState = advanceMatchingOps(ops, o, i, ops[o].type, spos, dpos)
+        i = nextState.i
+        o = nextState.o
+        spos = nextState.spos
+        dpos = nextState.dpos
     }
 
     if (spos < len1 || dpos < len2) {
-        val mb = MatchingBlock(
-            spos = spos,
-            dpos = dpos,
-            length = len1 - spos
-        )
-        matchingBlocks[mbIndex++] = mb
+        blocks.add(MatchingBlock(spos = spos, dpos = dpos, length = len1 - spos))
     }
-
-    val finalBlock = MatchingBlock(
-        spos = len1,
-        dpos = len2,
-        length = 0
-    )
-    matchingBlocks[mbIndex] = finalBlock
-
-    return matchingBlocks.filterNotNull().toTypedArray()
+    blocks.add(MatchingBlock(spos = len1, dpos = len2, length = 0))
+    return blocks.toTypedArray()
 }
 
-private fun levEditDistance(s1: String, s2: String, xcost: Int): Int {
-    var i: Int
-    val half: Int
+private data class AffixTrimResult(
+    val c1: String,
+    val c2: String,
+    val str1: Int,
+    val str2: Int,
+    val len1: Int,
+    val len2: Int
+)
 
+private fun trimAffixes(s1: String, s2: String): AffixTrimResult {
     var c1 = s1
     var c2 = s2
-
     var str1 = 0
     var str2 = 0
-
     var len1 = s1.length
     var len2 = s2.length
 
     while (len1 > 0 && len2 > 0 && c1[str1] == c2[str2]) {
-        len1--
-        len2--
-        str1++
-        str2++
+        len1--; len2--; str1++; str2++
     }
-
     while (len1 > 0 && len2 > 0 && c1[str1 + len1 - 1] == c2[str2 + len2 - 1]) {
-        len1--
-        len2--
+        len1--; len2--
     }
+    if (len1 > len2) {
+        return AffixTrimResult(c2, c1, str2, str1, len2, len1)
+    }
+    return AffixTrimResult(c1, c2, str1, str2, len1, len2)
+}
 
+private fun computeDistanceWithCost(
+    len1: Int,
+    len2: Int,
+    c1: String,
+    str1: Int,
+    c2: String,
+    str2: Int
+): Int {
+    val row = IntArray(len2)
+    val end = len2 - 1
+    for (i in 0..end) row[i] = i
+
+    for (i in 1 until len1) {
+        var p = 1
+        val ch1 = c1[str1 + i - 1]
+        var c2p = str2
+        var d = i
+        var x = i
+        while (p <= end) {
+            if (ch1 == c2[c2p++]) {
+                x = --d
+            } else {
+                x++
+            }
+            d = row[p] + 1
+            if (x > d) x = d
+            row[p++] = x
+        }
+    }
+    return row[end]
+}
+
+private fun computeDistanceWithoutCost(
+    len1: Int,
+    len2: Int,
+    c1: String,
+    str1: Int,
+    c2: String,
+    str2: Int
+): Int {
+    val half = len1 shr 1
+    val row = IntArray(len2)
+    var end = len2 - 1
+    for (i in 0 until (len2 - half)) row[i] = i
+    row[0] = len1 - half - 1
+
+    for (i in 1 until len1) {
+        var p: Int
+        val ch1 = c1[str1 + i - 1]
+        var c2p: Int
+        var d: Int
+        var x: Int
+
+        if (i >= len1 - half) {
+            val offset = i - (len1 - half)
+            c2p = str2 + offset
+            p = offset
+            val c3 = row[p++] + if (ch1 != c2[c2p++]) 1 else 0
+            x = row[p] + 1
+            d = x
+            if (x > c3) x = c3
+            row[p++] = x
+        } else {
+            p = 1
+            c2p = str2
+            x = i
+            d = x
+        }
+        if (i <= half + 1) end = len2 + i - half - 2
+        while (p <= end) {
+            val c3 = --d + if (ch1 != c2[c2p++]) 1 else 0
+            x++
+            if (x > c3) x = c3
+            d = row[p] + 1
+            if (x > d) x = d
+            row[p++] = x
+        }
+        if (i <= half) {
+            val c3 = --d + if (ch1 != c2[c2p]) 1 else 0
+            x++
+            if (x > c3) x = c3
+            row[p] = x
+        }
+    }
+    return row[end]
+}
+
+private fun levEditDistance(s1: String, s2: String, xcost: Int): Int {
+    val trimmed = trimAffixes(s1, s2)
+    val len1 = trimmed.len1
+    val len2 = trimmed.len2
     if (len1 == 0) return len2
     if (len2 == 0) return len1
 
-    if (len1 > len2) {
-        val nx = len1
-        val temp = str1
-        len1 = len2
-        len2 = nx
-        str1 = str2
-        str2 = temp
-        val t = c2
-        c2 = c1
-        c1 = t
-    }
-
     if (len1 == 1) {
-        return if (xcost != 0) {
-            len2 + 1 - 2 * memchr(c2, str2, c1[str1], len2)
-        } else {
-            len2 - memchr(c2, str2, c1[str1], len2)
-        }
+        val matches = memchr(trimmed.c2, trimmed.str2, trimmed.c1[trimmed.str1], len2)
+        return if (xcost != 0) len2 + 1 - 2 * matches else len2 - matches
     }
 
-    len1++
-    len2++
-    half = len1 shr 1
-
-    val row = IntArray(len2)
-    var end = len2 - 1
-
-    i = 0
-    while (i < len2 - if (xcost != 0) 0 else half) {
-        row[i] = i
-        i++
-    }
-
-    if (xcost != 0) {
-        i = 1
-        while (i < len1) {
-            var p = 1
-            val ch1 = c1[str1 + i - 1]
-            var c2p = str2
-            var D = i
-            var x = i
-            while (p <= end) {
-                if (ch1 == c2[c2p++]) {
-                    x = --D
-                } else {
-                    x++
-                }
-                D = row[p]
-                D++
-                if (x > D) x = D
-                row[p++] = x
-            }
-            i++
-        }
+    return if (xcost != 0) {
+        computeDistanceWithCost(len1 + 1, len2 + 1, trimmed.c1, trimmed.str1, trimmed.c2, trimmed.str2)
     } else {
-        row[0] = len1 - half - 1
-        i = 1
-        while (i < len1) {
-            var p: Int
-            val ch1 = c1[str1 + i - 1]
-            var c2p: Int
-            var D: Int
-            var x: Int
-
-            if (i >= len1 - half) {
-                val offset = i - (len1 - half)
-                c2p = str2 + offset
-                p = offset
-                val c3 = row[p++] + if (ch1 != c2[c2p++]) 1 else 0
-                x = row[p]
-                x++
-                D = x
-                if (x > c3) x = c3
-                row[p++] = x
-            } else {
-                p = 1
-                c2p = str2
-                x = i
-                D = x
-            }
-            if (i <= half + 1) end = len2 + i - half - 2
-            while (p <= end) {
-                val c3 = --D + if (ch1 != c2[c2p++]) 1 else 0
-                x++
-                if (x > c3) x = c3
-                D = row[p]
-                D++
-                if (x > D) x = D
-                row[p++] = x
-            }
-            if (i <= half) {
-                val c3 = --D + if (ch1 != c2[c2p]) 1 else 0
-                x++
-                if (x > c3) x = c3
-                row[p] = x
-            }
-            i++
-        }
+        computeDistanceWithoutCost(len1 + 1, len2 + 1, trimmed.c1, trimmed.str1, trimmed.c2, trimmed.str2)
     }
-
-    return row[end]
 }
 
 private fun memchr(haystack: String, offset: Int, needle: Char, num: Int): Int {

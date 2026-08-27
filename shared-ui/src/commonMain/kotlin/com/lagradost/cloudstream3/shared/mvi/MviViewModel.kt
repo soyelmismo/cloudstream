@@ -33,22 +33,15 @@ interface UiEvent
 interface UiEffect
 
 /**
- * Pure Kotlin Multiplatform base class for MVI ViewModels.
- * Exposes an immutable [state] of type [StateFlow] and a handler method [handleEvent].
- *
- * @param S The UI State type, must be non-nullable [Any].
- * @param E The UI Event type, must be non-nullable [Any].
- * @param initialState The initial state representation.
- * @param coroutineContext Optional custom coroutine context for [viewModelScope]. Defaults to [SupervisorJob] + [Dispatchers.Default].
+ * Pure Kotlin Multiplatform lightweight base class for ViewModels.
+ * Provides a managed [viewModelScope], coroutine helpers, job tracking, and [onCleared] lifecycle hook.
  */
-abstract class MviViewModel<S : Any, E : Any>(
-    initialState: S,
+abstract class BaseViewModel(
     coroutineContext: CoroutineContext = SupervisorJob() + Dispatchers.Default
 ) {
     constructor(
-        initialState: S,
         coroutineScope: CoroutineScope?
-    ) : this(initialState, coroutineScope?.coroutineContext ?: (SupervisorJob() + Dispatchers.Default))
+    ) : this(coroutineScope?.coroutineContext ?: (SupervisorJob() + Dispatchers.Default))
 
     /**
      * Managed CoroutineScope for ViewModel operations.
@@ -56,66 +49,10 @@ abstract class MviViewModel<S : Any, E : Any>(
      */
     protected val viewModelScope: CoroutineScope = CoroutineScope(coroutineContext)
 
-    protected val _state: MutableStateFlow<S> = MutableStateFlow(initialState)
-
-    /**
-     * Public immutable [StateFlow] observing the UI state.
-     */
-    val state: StateFlow<S> = _state.asStateFlow()
-
-    /**
-     * Synchronous getter for the current state snapshot.
-     */
-    val currentState: S
-        get() = _state.value
-
-    protected val _effects = Channel<UiEffect>(Channel.BUFFERED)
-
-    /**
-     * Flow exposing one-time UI side-effects.
-     */
-    val effects: Flow<UiEffect> = _effects.receiveAsFlow()
-
     /**
      * Map of active jobs keyed by custom string identifiers for centralized lifecycle management.
      */
     private val activeJobs = mutableMapOf<String, Job>()
-
-    /**
-     * Main dispatch method to process incoming user events or UI actions.
-     */
-    abstract fun handleEvent(event: E)
-
-    /**
-     * Dispatch alias for handleEvent.
-     */
-    open fun onEvent(event: E) = handleEvent(event)
-
-    /**
-     * Atomically updates the current state via the given [reducer] block.
-     */
-    protected fun updateState(reducer: S.() -> S) {
-        _state.update { it.reducer() }
-    }
-
-    /**
-     * Directly replaces the state value.
-     */
-    protected fun setState(newState: S) {
-        _state.value = newState
-    }
-
-    /**
-     * Emits a one-time side effect to listeners.
-     */
-    protected fun emitEffect(effect: UiEffect) {
-        val result = _effects.trySend(effect)
-        if (result.isFailure) {
-            viewModelScope.launch {
-                _effects.send(effect)
-            }
-        }
-    }
 
     /**
      * Helper to launch a coroutine inside the ViewModel's [viewModelScope].
@@ -207,7 +144,6 @@ abstract class MviViewModel<S : Any, E : Any>(
      * Can be overridden by subclasses to perform custom error logging or state updates.
      */
     open fun handleJobError(throwable: Throwable) {
-        // Subclasses can override for centralized logging/state
     }
 
     /**
@@ -226,5 +162,80 @@ abstract class MviViewModel<S : Any, E : Any>(
      */
     open fun close() {
         onCleared()
+    }
+}
+
+/**
+ * Pure Kotlin Multiplatform base class for MVI ViewModels.
+ * Exposes an immutable [state] of type [StateFlow] and a handler method [handleEvent].
+ *
+ * @param S The UI State type, must be non-nullable [Any].
+ * @param E The UI Event type, must be non-nullable [Any].
+ * @param initialState The initial state representation.
+ * @param coroutineContext Optional custom coroutine context for [viewModelScope]. Defaults to [SupervisorJob] + [Dispatchers.Default].
+ */
+abstract class MviViewModel<S : Any, E : Any>(
+    initialState: S,
+    coroutineContext: CoroutineContext = SupervisorJob() + Dispatchers.Default
+) : BaseViewModel(coroutineContext) {
+    constructor(
+        initialState: S,
+        coroutineScope: CoroutineScope?
+    ) : this(initialState, coroutineScope?.coroutineContext ?: (SupervisorJob() + Dispatchers.Default))
+
+    protected val _state: MutableStateFlow<S> = MutableStateFlow(initialState)
+
+    /**
+     * Public immutable [StateFlow] observing the UI state.
+     */
+    val state: StateFlow<S> = _state.asStateFlow()
+
+    /**
+     * Synchronous getter for the current state snapshot.
+     */
+    val currentState: S
+        get() = _state.value
+
+    protected val _effects = Channel<UiEffect>(Channel.BUFFERED)
+
+    /**
+     * Flow exposing one-time UI side-effects.
+     */
+    val effects: Flow<UiEffect> = _effects.receiveAsFlow()
+
+    /**
+     * Main dispatch method to process incoming user events or UI actions.
+     */
+    abstract fun handleEvent(event: E)
+
+    /**
+     * Dispatch alias for handleEvent.
+     */
+    open fun onEvent(event: E) = handleEvent(event)
+
+    /**
+     * Atomically updates the current state via the given [reducer] block.
+     */
+    protected fun updateState(reducer: S.() -> S) {
+        _state.update { it.reducer() }
+    }
+
+    /**
+     * Directly replaces the state value.
+     */
+    protected fun setState(newState: S) {
+        _state.value = newState
+    }
+
+    /**
+     * Emits a one-time side effect to listeners.
+     */
+    protected fun emitEffect(effect: UiEffect) {
+        val result = _effects.trySend(effect)
+        if (result.isFailure) {
+            viewModelScope.launch {
+                _effects.send(effect)
+            }
+        }
     }
 }

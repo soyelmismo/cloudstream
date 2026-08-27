@@ -425,82 +425,87 @@ class SimklApi : SyncAPI() {
                     }
                 }
 
-                suspend fun execute(): Boolean {
-                    val time = getDateTime(APIHolder.unixTime)
-                    val headers = this.headers ?: emptyMap()
-                    return if (this.status == SimklListStatusType.None.value) {
-                        app.post(
-                            "$url/sync/history/remove",
-                            json = HistoryRequest(
-                                shows = listOf(HistoryMediaObject(ids = ids)),
-                                movies = emptyList(),
+                private suspend fun removeEntireHistory(headers: Map<String, String>): Boolean {
+                    return app.post(
+                        "$url/sync/history/remove",
+                        json = HistoryRequest(
+                            shows = listOf(HistoryMediaObject(ids = ids)),
+                            movies = emptyList(),
+                        ),
+                        headers = headers,
+                    ).isSuccessful
+                }
+
+                private suspend fun updateStatus(setStatus: Int, headers: Map<String, String>): Boolean {
+                    val newStatus = SimklListStatusType.entries.firstOrNull {
+                        it.value == setStatus
+                    }?.originalName ?: SimklListStatusType.Watching.originalName.orEmpty()
+                    return app.post(
+                        "${this.url}/sync/add-to-list",
+                        json = StatusRequest(
+                            shows = listOf(StatusMediaObject(null, null, ids, newStatus)),
+                            movies = emptyList(),
+                        ),
+                        headers = headers,
+                    ).isSuccessful
+                }
+
+                private suspend fun removeEpisodesHistory(
+                    episodesData: Pair<List<MediaObject.Season>?, List<MediaObject.Season.Episode>?>,
+                    headers: Map<String, String>
+                ): Boolean {
+                    val (seasons, episodes) = episodesData
+                    return app.post(
+                        "${this.url}/sync/history/remove",
+                        json = HistoryRequest(
+                            shows = listOf(
+                                HistoryMediaObject(
+                                    ids = ids,
+                                    seasons = seasons,
+                                    episodes = episodes,
+                                )
                             ),
-                            headers = headers,
-                        ).isSuccessful
-                    } else {
-                        val statusResponse = this.status?.let { setStatus ->
-                            val newStatus = SimklListStatusType.entries.firstOrNull {
-                                it.value == setStatus
-                            }?.originalName ?: SimklListStatusType.Watching.originalName!!
-                            app.post(
-                                "${this.url}/sync/add-to-list",
-                                json = StatusRequest(
-                                    shows = listOf(
-                                        StatusMediaObject(
-                                            null,
-                                            null,
-                                            ids,
-                                            newStatus,
-                                        ),
-                                    ),
-                                    movies = emptyList(),
-                                ),
-                                headers = headers,
-                            ).isSuccessful
-                        } ?: true
+                            movies = emptyList(),
+                        ),
+                        headers = headers,
+                    ).isSuccessful
+                }
 
-                        val episodeRemovalResponse = removeEpisodes?.let { (seasons, episodes) ->
-                            app.post(
-                                "${this.url}/sync/history/remove",
-                                json = HistoryRequest(
-                                    shows = listOf(
-                                        HistoryMediaObject(
-                                            ids = ids,
-                                            seasons = seasons,
-                                            episodes = episodes,
-                                        ),
-                                    ),
-                                    movies = emptyList(),
-                                ),
-                                headers = headers,
-                            ).isSuccessful
-                        } ?: true
+                private suspend fun updateHistory(headers: Map<String, String>, time: String?): Boolean {
+                    val shouldRate = score != null && status != SimklListStatusType.Planning.value
+                    if (addEpisodes == null && !shouldRate) return true
 
-                        val shouldRate = score != null && status != SimklListStatusType.Planning.value
-                        val realScore = if (shouldRate) score else null
-                        val historyResponse =
-                            if (addEpisodes != null || shouldRate) {
-                                app.post(
-                                    "${this.url}/sync/history",
-                                    json = HistoryRequest(
-                                        shows = listOf(
-                                            HistoryMediaObject(
-                                                null,
-                                                null,
-                                                ids,
-                                                addEpisodes?.first,
-                                                addEpisodes?.second,
-                                                realScore,
-                                                realScore?.let { time },
-                                            ),
-                                        ),
-                                        movies = emptyList(),
-                                    ),
-                                    headers = headers,
-                                ).isSuccessful
-                            } else true
-                        statusResponse && episodeRemovalResponse && historyResponse
+                    val realScore = if (shouldRate) score else null
+                    return app.post(
+                        "${this.url}/sync/history",
+                        json = HistoryRequest(
+                            shows = listOf(
+                                HistoryMediaObject(
+                                    null,
+                                    null,
+                                    ids,
+                                    addEpisodes?.first,
+                                    addEpisodes?.second,
+                                    realScore,
+                                    realScore?.let { time },
+                                )
+                            ),
+                            movies = emptyList(),
+                        ),
+                        headers = headers,
+                    ).isSuccessful
+                }
+
+                suspend fun execute(): Boolean {
+                    val headers = this.headers.orEmpty()
+                    if (this.status == SimklListStatusType.None.value) {
+                        return removeEntireHistory(headers)
                     }
+
+                    val statusOk = this.status?.let { updateStatus(it, headers) } ?: true
+                    val removeOk = this.removeEpisodes?.let { removeEpisodesHistory(it, headers) } ?: true
+                    val historyOk = updateHistory(headers, getDateTime(APIHolder.unixTime))
+                    return statusOk && removeOk && historyOk
                 }
             }
         }
@@ -935,37 +940,51 @@ class SimklApi : SyncAPI() {
         return tryParseJson<AllItemsResponse>(raw)
     }
 
+    private fun maxActivityTimestamp(vararg dates: String?): Long {
+        return dates.maxOf { getUnixTime(it) ?: -1L }
+    }
+
+    private suspend fun resolveSyncList(
+        auth: AuthData,
+        userId: String,
+        lastCacheUpdate: Long?,
+        lastRemoval: Long,
+        lastRealUpdate: Long
+    ): AllItemsResponse? {
+        if (lastCacheUpdate == null || lastCacheUpdate < lastRemoval) {
+            debugPrint { "Full list update in ${this.name}." }
+            AppPreferenceManager.setStringSync("$SIMKL_CACHED_LIST_TIME/$userId", lastRemoval.toString())
+            return getSyncListSince(auth, null)
+        }
+        if (lastCacheUpdate < lastRealUpdate || lastCacheUpdate < lastScoreTime) {
+            debugPrint { "Partial list update in ${this.name}." }
+            AppPreferenceManager.setStringSync("$SIMKL_CACHED_LIST_TIME/$userId", lastCacheUpdate.toString())
+            return AllItemsResponse.merge(
+                getSyncListCached(auth),
+                getSyncListSince(auth, lastCacheUpdate),
+            )
+        }
+        debugPrint { "Cached list update in ${this.name}." }
+        return getSyncListCached(auth)
+    }
+
     private suspend fun getSyncListSmart(auth: AuthData): AllItemsResponse? {
         val activities = getActivities(auth.token)
         val userId = auth.user.id.toString()
         val lastCacheUpdate = AppPreferenceManager.getStringSync("$SIMKL_CACHED_LIST_TIME/$userId")?.toLongOrNull()
-        val lastRemoval = listOf(
+        val lastRemoval = maxActivityTimestamp(
             activities?.tvShows?.removedFromList,
             activities?.anime?.removedFromList,
-            activities?.movies?.removedFromList,
-        ).maxOf { getUnixTime(it) ?: -1 }
-        val lastRealUpdate = listOf(
+            activities?.movies?.removedFromList
+        )
+        val lastRealUpdate = maxActivityTimestamp(
             activities?.tvShows?.all,
             activities?.anime?.all,
-            activities?.movies?.all,
-        ).maxOf { getUnixTime(it) ?: -1 }
+            activities?.movies?.all
+        )
 
         debugPrint { "Cache times: lastCacheUpdate=$lastCacheUpdate, lastRemoval=$lastRemoval, lastRealUpdate=$lastRealUpdate" }
-        val list = if (lastCacheUpdate == null || lastCacheUpdate < lastRemoval) {
-            debugPrint { "Full list update in ${this.name}." }
-            AppPreferenceManager.setStringSync("$SIMKL_CACHED_LIST_TIME/$userId", lastRemoval.toString())
-            getSyncListSince(auth, null)
-        } else if (lastCacheUpdate < lastRealUpdate || lastCacheUpdate < lastScoreTime) {
-            debugPrint { "Partial list update in ${this.name}." }
-            AppPreferenceManager.setStringSync("$SIMKL_CACHED_LIST_TIME/$userId", lastCacheUpdate.toString())
-            AllItemsResponse.merge(
-                getSyncListCached(auth),
-                getSyncListSince(auth, lastCacheUpdate),
-            )
-        } else {
-            debugPrint { "Cached list update in ${this.name}." }
-            getSyncListCached(auth)
-        }
+        val list = resolveSyncList(auth, userId, lastCacheUpdate, lastRemoval, lastRealUpdate)
 
         debugPrint { "List sizes: movies=${list?.movies?.size}, shows=${list?.shows?.size}, anime=${list?.anime?.size}" }
         if (list != null) {

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.Image
 import androidx.compose.material.CircularProgressIndicator
 import androidx.compose.material.IconButton
 import androidx.compose.material.MaterialTheme
@@ -32,19 +33,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.awt.SwingPanel
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 
-import androidx.compose.foundation.Image
-import androidx.compose.ui.layout.ContentScale
+private const val CONTROLS_AUTOHIDE_DELAY_MS = 4000L
 
-/**
- * Pure Compose Desktop video surface that renders decoded VLC video frames directly via Skia.
- * Eliminates all heavyweight AWT Canvas subwindows, white flashes, and overlay clipping.
- */
 @Composable
 fun DesktopVideoSurface(
     player: DesktopVideoPlayer,
@@ -75,11 +71,6 @@ fun DesktopVideoSurface(
     }
 }
 
-/**
- * Full Compose Desktop Video Player UI with interactive playback controls,
- * non-blocking loading state, buffering indicators, volume slider, seeking bar,
- * and state synchronization.
- */
 @Composable
 fun DesktopVideoPlayerView(
     player: DesktopVideoPlayer,
@@ -96,10 +87,9 @@ fun DesktopVideoPlayerView(
     var volume by remember { mutableStateOf(player.getVolume().toFloat()) }
     var isMuted by remember { mutableStateOf(player.isMuted()) }
 
-    // Auto-hide controls after 4 seconds of inactivity when playing
     LaunchedEffect(controlsVisible, state.isPlaying, isSeeking) {
         if (controlsVisible && state.isPlaying && !isSeeking) {
-            delay(4000)
+            delay(CONTROLS_AUTOHIDE_DELAY_MS)
             controlsVisible = false
         }
     }
@@ -115,13 +105,11 @@ fun DesktopVideoPlayerView(
                 controlsVisible = !controlsVisible
             }
     ) {
-        // Video Surface
         DesktopVideoSurface(
             player = player,
             modifier = Modifier.fillMaxSize()
         )
 
-        // Loading overlay during async backend initialization
         if (!isReady) {
             Box(
                 modifier = Modifier
@@ -148,7 +136,6 @@ fun DesktopVideoPlayerView(
             }
         }
 
-        // Buffering Indicator during playback
         if (isReady && state.isBuffering) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -161,10 +148,8 @@ fun DesktopVideoPlayerView(
             }
         }
 
-        // Custom Overlay Content (Subtitles, custom badges, etc.)
         overlayContent?.invoke()
 
-        // Controls Overlay
         if (showControlsOverlay && isReady) {
             AnimatedVisibility(
                 visible = controlsVisible,
@@ -186,7 +171,6 @@ fun DesktopVideoPlayerView(
                             )
                         )
                 ) {
-                    // Top Bar (Title & Info)
                     if (!title.isNullOrBlank()) {
                         Row(
                             modifier = Modifier
@@ -203,14 +187,12 @@ fun DesktopVideoPlayerView(
                         }
                     }
 
-                    // Bottom Bar (Progress Bar, Controls, Volume, Timestamps)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .align(Alignment.BottomCenter)
                             .padding(horizontal = 20.dp, vertical = 14.dp)
                     ) {
-                        // Seek Slider
                         val currentPos = if (isSeeking) seekPositionMs else state.positionMs.toFloat()
                         val duration = state.durationMs.toFloat().coerceAtLeast(1f)
 
@@ -254,13 +236,11 @@ fun DesktopVideoPlayerView(
                             )
                         }
 
-                        // Playback Action Buttons and Volume
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Left section: Volume Control
                             Row(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -296,12 +276,10 @@ fun DesktopVideoPlayerView(
                                 )
                             }
 
-                            // Center section: Play / Pause / Stop
                             Row(
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Play / Pause Toggle Button
                                 IconButton(
                                     onClick = {
                                         if (state.isPlaying) {
@@ -321,7 +299,6 @@ fun DesktopVideoPlayerView(
 
                                 Spacer(modifier = Modifier.width(16.dp))
 
-                                // Stop Button
                                 IconButton(
                                     onClick = {
                                         player.stop()
@@ -336,7 +313,6 @@ fun DesktopVideoPlayerView(
                                 }
                             }
 
-                            // Right spacer for visual balance
                             Spacer(modifier = Modifier.width(120.dp))
                         }
                     }
@@ -346,9 +322,6 @@ fun DesktopVideoPlayerView(
     }
 }
 
-/**
- * Formats milliseconds into standard HH:MM:SS or MM:SS format.
- */
 fun formatDuration(millis: Long): String {
     val totalSeconds = (millis / 1000).coerceAtLeast(0)
     val seconds = totalSeconds % 60

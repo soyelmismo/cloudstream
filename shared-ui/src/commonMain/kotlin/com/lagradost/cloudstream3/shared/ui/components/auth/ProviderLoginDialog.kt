@@ -53,9 +53,11 @@ import com.lagradost.cloudstream3.shared.ui.components.designsystem.CloudStreamT
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.GhostButton
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.PrimaryButton
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 /**
  * Standardized Provider Login Dialog for Compose Multiplatform.
@@ -117,16 +119,8 @@ fun ProviderLoginDialog(
     val isFormValid = isServerValid && isUsernameValid && isEmailValid && isPasswordValid
 
     fun submitLogin() {
-        if (isFormValid && !isLoading) {
-            onLogin(
-                AuthLoginResponse(
-                    username = if (requirements.username) username.trim() else null,
-                    password = if (requirements.password) password else null,
-                    email = if (requirements.email) email.trim() else null,
-                    server = if (requirements.server) server.trim() else null
-                )
-            )
-        }
+        if (!isFormValid || isLoading) return
+        onLogin(buildLoginResponse(requirements, username, password, email, server))
     }
 
     CloudStreamDialog(
@@ -138,9 +132,6 @@ fun ProviderLoginDialog(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // =============================================================
-            // 1. HEADER SECTION
-            // =============================================================
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -213,9 +204,6 @@ fun ProviderLoginDialog(
                 }
             }
 
-            // =============================================================
-            // 2. ERROR BANNER (if present)
-            // =============================================================
             AnimatedVisibility(
                 visible = !errorMessage.isNullOrBlank(),
                 enter = fadeIn(),
@@ -251,9 +239,6 @@ fun ProviderLoginDialog(
                 }
             }
 
-            // =============================================================
-            // 3. CREDENTIAL INPUT FIELDS
-            // =============================================================
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -368,9 +353,6 @@ fun ProviderLoginDialog(
                 }
             }
 
-            // =============================================================
-            // 4. CREATE ACCOUNT LINK (if available)
-            // =============================================================
             if (!createAccountUrl.isNullOrBlank()) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -400,9 +382,6 @@ fun ProviderLoginDialog(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // =============================================================
-            // 5. ACTION BUTTONS (Cancel & Login)
-            // =============================================================
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
@@ -427,3 +406,32 @@ fun ProviderLoginDialog(
         }
     }
 }
+
+private fun buildLoginResponse(
+    requirements: AuthLoginRequirement,
+    username: String,
+    password: String,
+    email: String,
+    server: String
+): AuthLoginResponse {
+    return AuthLoginResponse(
+        username = username.trim().takeIf { requirements.username },
+        password = password.takeIf { requirements.password },
+        email = email.trim().takeIf { requirements.email },
+        server = server.trim().takeIf { requirements.server }
+    )
+}
+
+@Preview
+@Composable
+private fun ProviderLoginDialogPreview() {
+    CloudStreamTheme {
+        ProviderLoginDialog(
+            providerName = "Test Provider",
+            requirements = AuthLoginRequirement(username = true, password = true, email = true),
+            onLogin = {},
+            onDismiss = {}
+        )
+    }
+}
+

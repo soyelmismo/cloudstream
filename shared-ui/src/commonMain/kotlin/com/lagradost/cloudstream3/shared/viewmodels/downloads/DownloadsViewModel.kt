@@ -1,5 +1,6 @@
 package com.lagradost.cloudstream3.shared.viewmodels.downloads
 
+import androidx.compose.runtime.Immutable
 import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.shared.downloads.DefaultDownloadDirectoryProvider
@@ -16,6 +17,12 @@ import com.lagradost.cloudstream3.shared.mvi.UiState
 import com.lagradost.cloudstream3.shared.persistence.dao.DownloadCacheDao
 import com.lagradost.cloudstream3.shared.persistence.entity.DownloadEpisodeEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.DownloadHeaderEntity
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableSet
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentSetOf
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toImmutableSet
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,17 +41,11 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.StringResource
 import kotlin.coroutines.CoroutineContext
 
-/**
- * Tab selection for Downloads screen.
- */
 enum class DownloadsTab {
     DOWNLOADING,
     COMPLETED
 }
 
-/**
- * Lifecycle state of an active download queue item.
- */
 enum class DownloadItemStatus {
     QUEUED,
     DOWNLOADING,
@@ -53,9 +54,7 @@ enum class DownloadItemStatus {
     COMPLETED
 }
 
-/**
- * Represents an in-flight or queued download.
- */
+@Immutable
 data class ActiveDownloadItem(
     val id: Int,
     val parentId: Int? = null,
@@ -64,7 +63,7 @@ data class ActiveDownloadItem(
     val episodeName: String? = null,
     val episodeIndex: Int? = null,
     val seasonIndex: Int? = null,
-    val progress: Float = 0f, // 0.0f to 1.0f
+    val progress: Float = 0f,
     val bytesDownloaded: Long = 0L,
     val totalBytes: Long = 0L,
     val speedBytesPerSec: Long = 0L,
@@ -91,12 +90,10 @@ data class ActiveDownloadItem(
         get() = if (totalBytes > 0) "$formattedDownloaded / $formattedTotal" else formattedDownloaded
 }
 
-/**
- * Grouped representation of completed downloads for a show or movie header.
- */
+@Immutable
 data class CompletedHeaderGroup(
     val header: DownloadHeaderEntity,
-    val episodes: List<DownloadEpisodeEntity> = emptyList(),
+    val episodes: ImmutableList<DownloadEpisodeEntity> = persistentListOf(),
     val totalEstimatedSizeBytes: Long = 0L
 ) {
     val episodeCount: Int
@@ -109,9 +106,7 @@ data class CompletedHeaderGroup(
         get() = formatBytes(totalEstimatedSizeBytes)
 }
 
-/**
- * Storage device capacity and app allocation information.
- */
+@Immutable
 data class StorageUsageInfo(
     val appBytes: Long = 0L,
     val usedBytes: Long = 0L,
@@ -140,16 +135,14 @@ data class StorageUsageInfo(
         get() = formatBytes(totalBytes)
 }
 
-/**
- * Immutable UI State for the Downloads Screen.
- */
+@Immutable
 data class DownloadsState(
     val selectedTab: DownloadsTab = DownloadsTab.DOWNLOADING,
-    val activeDownloads: List<ActiveDownloadItem> = emptyList(),
-    val completedGroups: List<CompletedHeaderGroup> = emptyList(),
+    val activeDownloads: ImmutableList<ActiveDownloadItem> = persistentListOf(),
+    val completedGroups: ImmutableList<CompletedHeaderGroup> = persistentListOf(),
     val storageUsage: StorageUsageInfo = StorageUsageInfo(),
     val searchQuery: String = "",
-    val expandedHeaderIds: Set<Int> = emptySet(),
+    val expandedHeaderIds: ImmutableSet<Int> = persistentSetOf(),
     val isLoading: Boolean = false,
     val errorMessage: String? = null
 ) : UiState {
@@ -162,25 +155,32 @@ data class DownloadsState(
     val formattedTotalSpeed: String
         get() = formatByteRate(totalActiveSpeedBytesPerSec)
 
-    val filteredCompletedGroups: List<CompletedHeaderGroup>
+    val filteredCompletedGroups: ImmutableList<CompletedHeaderGroup>
         get() {
             if (searchQuery.isBlank()) return completedGroups
             val query = searchQuery.trim().lowercase()
-            return completedGroups.mapNotNull { group ->
-                val matchesHeader = group.header.name.lowercase().contains(query)
-                val matchingEpisodes = group.episodes.filter { ep ->
-                    matchesHeader || (ep.name?.lowercase()?.contains(query) == true) || "ep ${ep.episode}".contains(query)
-                }
-                if (matchesHeader || matchingEpisodes.isNotEmpty()) {
-                    group.copy(episodes = if (matchesHeader) group.episodes else matchingEpisodes)
-                } else null
-            }
+            return completedGroups.mapNotNull { filterCompletedGroup(it, query) }.toImmutableList()
         }
 }
 
-/**
- * UI Events / Intents for Downloads.
- */
+private fun matchesEpisodeQuery(episode: DownloadEpisodeEntity, query: String): Boolean {
+    val matchesName = episode.name?.lowercase()?.contains(query) == true
+    val matchesEpisodeNumber = "ep ${episode.episode}".contains(query)
+    return matchesName || matchesEpisodeNumber
+}
+
+private fun filterCompletedGroup(group: CompletedHeaderGroup, query: String): CompletedHeaderGroup? {
+    val matchesHeader = group.header.name.lowercase().contains(query)
+    if (matchesHeader) return group
+
+    val matchingEpisodes = group.episodes.filter { matchesEpisodeQuery(it, query) }.toImmutableList()
+    return if (matchingEpisodes.isNotEmpty()) {
+        group.copy(episodes = matchingEpisodes)
+    } else {
+        null
+    }
+}
+
 sealed interface DownloadsEvent : UiEvent {
     data class SwitchTab(val tab: DownloadsTab) : DownloadsEvent
     data class PauseDownload(val id: Int) : DownloadsEvent
@@ -199,9 +199,6 @@ sealed interface DownloadsEvent : UiEvent {
     data object ClearError : DownloadsEvent
 }
 
-/**
- * Single-shot UI side effects for navigation and user notifications.
- */
 sealed interface DownloadsEffect : UiEffect {
     data class NavigateToPlayer(
         val title: String? = null,
@@ -218,9 +215,6 @@ sealed interface DownloadsEffect : UiEffect {
     data class ShowMessageRes(val messageRes: StringResource) : DownloadsEffect
 }
 
-/**
- * Legacy cross-platform Download Service Interface.
- */
 interface IDownloadService {
     val activeDownloadsFlow: StateFlow<List<ActiveDownloadItem>>
     fun pauseDownload(id: Int)
@@ -233,9 +227,6 @@ interface IDownloadService {
     fun enqueueDownload(item: ActiveDownloadItem)
 }
 
-/**
- * Adapts an [IDownloadService] into a [DownloadEngine].
- */
 class DownloadServiceEngineAdapter(
     private val downloadService: IDownloadService,
     coroutineContext: CoroutineContext = SupervisorJob() + Dispatchers.Default
@@ -308,9 +299,6 @@ class DownloadServiceEngineAdapter(
     }
 }
 
-/**
- * Pure Kotlin Multiplatform in-memory reactive download service.
- */
 class DefaultDownloadService : IDownloadService {
     private val _activeDownloads = MutableStateFlow<List<ActiveDownloadItem>>(emptyList())
     override val activeDownloadsFlow: StateFlow<List<ActiveDownloadItem>> = _activeDownloads.asStateFlow()
@@ -404,12 +392,6 @@ class DefaultDownloadService : IDownloadService {
     }
 }
 
-/**
- * DownloadsViewModel for Kotlin Multiplatform (MVI Architecture).
- *
- * Connects Room KMP [DownloadCacheDao] for persistent completed downloads and [DownloadEngine]
- * for live background download management, chunk streaming, progress tracking, and offline playback.
- */
 class DownloadsViewModel(
     private val downloadCacheDao: DownloadCacheDao,
     val downloadEngine: DownloadEngine = KmpDownloadEngineImpl(downloadCacheDao),
@@ -460,44 +442,50 @@ class DownloadsViewModel(
     private fun startObserving() {
         launchSafeJob(key = "observation") {
             refreshStorageMetrics()
+            observeActiveDownloads()
+            observeCompletedHeaders()
+        }
+    }
 
-            // 1. Observe active and queued downloads from DownloadEngine
-            launch {
-                combine(downloadEngine.queueFlow, downloadEngine.progressFlow) { queue, progresses ->
-                    queue.map { item ->
-                        val progress = progresses[item.id] ?: DownloadProgress(id = item.id, status = DownloadStatus.QUEUED)
-                        item.toActiveDownloadItem(progress)
-                    }
-                }.collectLatest { activeList ->
-                    updateState { copy(activeDownloads = activeList) }
+    private fun CoroutineScope.observeActiveDownloads() {
+        launch {
+            combine(downloadEngine.queueFlow, downloadEngine.progressFlow) { queue, progresses ->
+                queue.map { item ->
+                    val progress = progresses[item.id] ?: DownloadProgress(id = item.id, status = DownloadStatus.QUEUED)
+                    item.toActiveDownloadItem(progress)
                 }
+            }.collectLatest { activeList ->
+                updateState { copy(activeDownloads = activeList.toImmutableList()) }
             }
+        }
+    }
 
-            // 2. Observe completed headers & episodes from Room KMP
-            launch {
-                downloadCacheDao.getAllHeadersFlow().collectLatest { headers ->
-                    val groups = headers.map { header ->
-                        val episodes = downloadCacheDao.getEpisodesForParent(header.id)
-                        val totalEstimatedSize = episodes.sumOf { ep ->
-                            val file = directoryProvider.getEpisodeFile(header.id, ep.id)
-                            if (file.exists()) file.length() else 0L
-                        }
+    private suspend fun calculateEpisodeFileSize(headerId: Int, episodeId: Int): Long {
+        val file = directoryProvider.getEpisodeFile(headerId, episodeId)
+        return if (file.exists()) file.length() else 0L
+    }
 
-                        CompletedHeaderGroup(
-                            header = header,
-                            episodes = episodes,
-                            totalEstimatedSizeBytes = totalEstimatedSize
-                        )
-                    }
+    private suspend fun buildCompletedGroup(header: DownloadHeaderEntity): CompletedHeaderGroup {
+        val episodes = downloadCacheDao.getEpisodesForParent(header.id).toImmutableList()
+        val totalEstimatedSize = episodes.sumOf { calculateEpisodeFileSize(header.id, it.id) }
+        return CompletedHeaderGroup(
+            header = header,
+            episodes = episodes,
+            totalEstimatedSizeBytes = totalEstimatedSize
+        )
+    }
 
-                    updateState {
-                        copy(
-                            completedGroups = groups,
-                            isLoading = false
-                        )
-                    }
-                    refreshStorageMetrics(groups)
+    private fun CoroutineScope.observeCompletedHeaders() {
+        launch {
+            downloadCacheDao.getAllHeadersFlow().collectLatest { headers ->
+                val groups = headers.map { buildCompletedGroup(it) }.toImmutableList()
+                updateState {
+                    copy(
+                        completedGroups = groups,
+                        isLoading = false
+                    )
                 }
+                refreshStorageMetrics(groups)
             }
         }
     }
@@ -506,111 +494,167 @@ class DownloadsViewModel(
         launch { downloadEngine.action(id.toString()) }
     }
 
-    override fun handleEvent(event: DownloadsEvent) {
-        when (event) {
-            is DownloadsEvent.SwitchTab -> {
-                updateState { copy(selectedTab = event.tab) }
+    fun switchTab(tab: DownloadsTab) {
+        updateState { copy(selectedTab = tab) }
+    }
+
+    fun pauseDownload(id: Int) = downloadAction(id, DownloadEngine::pauseDownload)
+    fun resumeDownload(id: Int) = downloadAction(id, DownloadEngine::resumeDownload)
+    fun cancelDownload(id: Int) = downloadAction(id, DownloadEngine::cancelDownload)
+    fun retryDownload(id: Int) = downloadAction(id, DownloadEngine::retryDownload)
+
+    fun pauseAll() {
+        launch { downloadEngine.pauseAll() }
+    }
+
+    fun resumeAll() {
+        launch { downloadEngine.resumeAll() }
+    }
+
+    fun cancelAll() {
+        launch { downloadEngine.cancelAll() }
+    }
+
+    fun deleteCompletedHeader(id: Int) {
+        launchSafeJob(
+            key = "delete_header_$id",
+            onError = { e -> updateState { copy(errorMessage = e.message) } }
+        ) {
+            downloadCacheDao.deleteEpisodesForParent(id)
+            downloadCacheDao.deleteHeader(id)
+            val parentDir = directoryProvider.getParentDirectory(id)
+            if (parentDir.exists()) {
+                parentDir.deleteRecursively()
             }
-
-            is DownloadsEvent.PauseDownload -> downloadAction(event.id, DownloadEngine::pauseDownload)
-            is DownloadsEvent.ResumeDownload -> downloadAction(event.id, DownloadEngine::resumeDownload)
-            is DownloadsEvent.CancelDownload -> downloadAction(event.id, DownloadEngine::cancelDownload)
-            is DownloadsEvent.RetryDownload -> downloadAction(event.id, DownloadEngine::retryDownload)
-
-            DownloadsEvent.PauseAll -> {
-                launch { downloadEngine.pauseAll() }
-            }
-
-            DownloadsEvent.ResumeAll -> {
-                launch { downloadEngine.resumeAll() }
-            }
-
-            DownloadsEvent.CancelAll -> {
-                launch { downloadEngine.cancelAll() }
-            }
-
-            is DownloadsEvent.DeleteCompletedHeader -> {
-                launchSafeJob(
-                    key = "delete_header_${event.id}",
-                    onError = { e -> updateState { copy(errorMessage = e.message) } }
-                ) {
-                    downloadCacheDao.deleteEpisodesForParent(event.id)
-                    downloadCacheDao.deleteHeader(event.id)
-                    val parentDir = directoryProvider.getParentDirectory(event.id)
-                    if (parentDir.exists()) {
-                        parentDir.deleteRecursively()
-                    }
-                    refreshStorageMetrics()
-                    emitEffect(DownloadsEffect.ShowMessageRes(Res.string.delete_files))
-                }
-            }
-
-            is DownloadsEvent.DeleteCompletedEpisode -> {
-                launchSafeJob(
-                    key = "delete_episode_${event.id}",
-                    onError = { e -> updateState { copy(errorMessage = e.message) } }
-                ) {
-                    downloadCacheDao.deleteEpisode(event.id)
-                    val epFile = directoryProvider.getEpisodeFile(event.parentId, event.id)
-                    if (epFile.exists()) {
-                        epFile.delete()
-                    }
-                    val remaining = downloadCacheDao.getEpisodesForParent(event.parentId)
-                    if (remaining.isEmpty()) {
-                        downloadCacheDao.deleteHeader(event.parentId)
-                        val parentDir = directoryProvider.getParentDirectory(event.parentId)
-                        if (parentDir.exists() && (parentDir.listFiles()?.isEmpty() == true)) {
-                            parentDir.delete()
-                        }
-                    }
-                    refreshStorageMetrics()
-                    emitEffect(DownloadsEffect.ShowMessageRes(Res.string.delete_file))
-                }
-            }
-
-            is DownloadsEvent.PlayOffline -> {
-                val ep = event.episode
-                val header = event.header
-                val title = ep.name ?: header?.name
-                val epFile = directoryProvider.getEpisodeFile(header?.id ?: ep.parentId, ep.id)
-                val offlineUrl = if (epFile.exists()) epFile.toURI().toString() else "file://downloads/${header?.id ?: ep.parentId}/${ep.id}.mp4"
-
-                emitEffect(
-                    DownloadsEffect.NavigateToPlayer(
-                        title = title,
-                        titleRes = if (title == null) Res.string.offline_playback else null,
-                        url = offlineUrl,
-                        episodeIndex = ep.episode,
-                        seasonIndex = ep.season,
-                        headerId = header?.id ?: ep.parentId,
-                        episodeId = ep.id
-                    )
-                )
-            }
-
-            is DownloadsEvent.ToggleHeaderExpanded -> {
-                updateState {
-                    val nextExpanded = if (expandedHeaderIds.contains(event.headerId)) {
-                        expandedHeaderIds - event.headerId
-                    } else {
-                        expandedHeaderIds + event.headerId
-                    }
-                    copy(expandedHeaderIds = nextExpanded)
-                }
-            }
-
-            is DownloadsEvent.SearchQueryChanged -> {
-                updateState { copy(searchQuery = event.query) }
-            }
-
-            DownloadsEvent.Refresh -> {
-                startObserving()
-            }
-
-            DownloadsEvent.ClearError -> {
-                updateState { copy(errorMessage = null) }
-            }
+            refreshStorageMetrics()
+            emitEffect(DownloadsEffect.ShowMessageRes(Res.string.delete_files))
         }
+    }
+
+    fun deleteCompletedEpisode(id: Int, parentId: Int) {
+        launchSafeJob(
+            key = "delete_episode_$id",
+            onError = { e -> updateState { copy(errorMessage = e.message) } }
+        ) {
+            downloadCacheDao.deleteEpisode(id)
+            val epFile = directoryProvider.getEpisodeFile(parentId, id)
+            if (epFile.exists()) {
+                epFile.delete()
+            }
+            val remaining = downloadCacheDao.getEpisodesForParent(parentId)
+            if (remaining.isEmpty()) {
+                downloadCacheDao.deleteHeader(parentId)
+                val parentDir = directoryProvider.getParentDirectory(parentId)
+                if (parentDir.exists() && (parentDir.listFiles()?.isEmpty() == true)) {
+                    parentDir.delete()
+                }
+            }
+            refreshStorageMetrics()
+            emitEffect(DownloadsEffect.ShowMessageRes(Res.string.delete_file))
+        }
+    }
+
+    fun playOffline(episode: DownloadEpisodeEntity, header: DownloadHeaderEntity?) {
+        val title = episode.name ?: header?.name
+        val epFile = directoryProvider.getEpisodeFile(header?.id ?: episode.parentId, episode.id)
+        val offlineUrl = if (epFile.exists()) epFile.toURI().toString() else "file://downloads/${header?.id ?: episode.parentId}/${episode.id}.mp4"
+
+        emitEffect(
+            DownloadsEffect.NavigateToPlayer(
+                title = title,
+                titleRes = if (title == null) Res.string.offline_playback else null,
+                url = offlineUrl,
+                episodeIndex = episode.episode,
+                seasonIndex = episode.season,
+                headerId = header?.id ?: episode.parentId,
+                episodeId = episode.id
+            )
+        )
+    }
+
+    fun toggleHeaderExpanded(headerId: Int) {
+        updateState {
+            val nextExpanded = if (expandedHeaderIds.contains(headerId)) {
+                (expandedHeaderIds - headerId).toImmutableSet()
+            } else {
+                (expandedHeaderIds + headerId).toImmutableSet()
+            }
+            copy(expandedHeaderIds = nextExpanded)
+        }
+    }
+
+    fun searchQueryChanged(query: String) {
+        updateState { copy(searchQuery = query) }
+    }
+
+    fun refresh() {
+        startObserving()
+    }
+
+    fun clearError() {
+        updateState { copy(errorMessage = null) }
+    }
+
+    private fun handleViewStateEvent(event: DownloadsEvent): Boolean = when (event) {
+        is DownloadsEvent.SwitchTab -> {
+            switchTab(event.tab)
+            true
+        }
+        is DownloadsEvent.ToggleHeaderExpanded -> {
+            toggleHeaderExpanded(event.headerId)
+            true
+        }
+        is DownloadsEvent.SearchQueryChanged -> {
+            searchQueryChanged(event.query)
+            true
+        }
+        DownloadsEvent.Refresh -> {
+            refresh()
+            true
+        }
+        DownloadsEvent.ClearError -> {
+            clearError()
+            true
+        }
+        else -> false
+    }
+
+    private fun handleSingleEngineEvent(event: DownloadsEvent): Boolean = when (event) {
+        is DownloadsEvent.PauseDownload -> { pauseDownload(event.id); true }
+        is DownloadsEvent.ResumeDownload -> { resumeDownload(event.id); true }
+        is DownloadsEvent.CancelDownload -> { cancelDownload(event.id); true }
+        is DownloadsEvent.RetryDownload -> { retryDownload(event.id); true }
+        else -> false
+    }
+
+    private fun handleBatchEngineEvent(event: DownloadsEvent): Boolean = when (event) {
+        DownloadsEvent.PauseAll -> { pauseAll(); true }
+        DownloadsEvent.ResumeAll -> { resumeAll(); true }
+        DownloadsEvent.CancelAll -> { cancelAll(); true }
+        else -> false
+    }
+
+    private fun handleStorageEvent(event: DownloadsEvent): Boolean = when (event) {
+        is DownloadsEvent.DeleteCompletedHeader -> {
+            deleteCompletedHeader(event.id)
+            true
+        }
+        is DownloadsEvent.DeleteCompletedEpisode -> {
+            deleteCompletedEpisode(event.id, event.parentId)
+            true
+        }
+        is DownloadsEvent.PlayOffline -> {
+            playOffline(event.episode, event.header)
+            true
+        }
+        else -> false
+    }
+
+    override fun handleEvent(event: DownloadsEvent) {
+        if (handleViewStateEvent(event)) return
+        if (handleSingleEngineEvent(event)) return
+        if (handleBatchEngineEvent(event)) return
+        handleStorageEvent(event)
     }
 
     fun enqueueDownload(item: DownloadQueueItem) {
@@ -626,9 +670,6 @@ class DownloadsViewModel(
     }
 }
 
-/**
- * Converts a [DownloadQueueItem] to an [ActiveDownloadItem].
- */
 fun DownloadQueueItem.toActiveDownloadItem(
     progress: DownloadProgress = DownloadProgress(id = this.id)
 ): ActiveDownloadItem {
@@ -661,9 +702,6 @@ fun DownloadQueueItem.toActiveDownloadItem(
     )
 }
 
-/**
- * Converts an [ActiveDownloadItem] to a [DownloadQueueItem].
- */
 fun ActiveDownloadItem.toQueueItem(): DownloadQueueItem {
     return DownloadQueueItem(
         id = this.id.toString(),
@@ -679,9 +717,6 @@ fun ActiveDownloadItem.toQueueItem(): DownloadQueueItem {
     )
 }
 
-/**
- * Format raw bytes into human-readable representation (KB, MB, GB).
- */
 fun formatBytes(bytes: Long): String {
     if (bytes <= 0) return "0 B"
     val units = arrayOf("B", "KB", "MB", "GB", "TB")
@@ -700,9 +735,6 @@ fun formatBytes(bytes: Long): String {
     return "$formatted ${units[unitIndex]}"
 }
 
-/**
- * Format raw byte rate into human-readable speed (KB/s, MB/s).
- */
 fun formatByteRate(bytesPerSec: Long): String {
     if (bytesPerSec <= 0) return "0 KB/s"
     return "${formatBytes(bytesPerSec)}/s"

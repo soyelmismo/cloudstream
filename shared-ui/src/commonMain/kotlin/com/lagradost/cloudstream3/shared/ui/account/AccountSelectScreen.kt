@@ -75,13 +75,13 @@ import com.lagradost.cloudstream3.shared.ui.components.designsystem.SecondaryBut
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.SubtitleText
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.TitleText
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
-import com.lagradost.cloudstream3.shared.viewmodels.account.AccountEvent
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import com.lagradost.cloudstream3.shared.viewmodels.account.AccountState
 import com.lagradost.cloudstream3.shared.viewmodels.account.AccountViewModel
+import com.lagradost.cloudstream3.shared.viewmodels.settings.AppTheme
+import kotlinx.collections.immutable.persistentListOf
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
-/**
- * Screen for selecting, creating, editing, and managing user profiles.
- */
 @Composable
 fun AccountSelectScreen(
     viewModel: AccountViewModel,
@@ -89,6 +89,39 @@ fun AccountSelectScreen(
     modifier: Modifier = Modifier
 ) {
     val state by viewModel.state.collectAsState()
+    AccountSelectContent(
+        state = state,
+        onSelectAccount = viewModel::selectAccount,
+        onCreateAccount = viewModel::createAccount,
+        onUpdateAccount = viewModel::updateAccount,
+        onDeleteAccount = viewModel::deleteAccount,
+        onToggleManageMode = viewModel::toggleManageMode,
+        onOpenCreateDialog = viewModel::openCreateDialog,
+        onCloseCreateDialog = viewModel::closeCreateDialog,
+        onOpenEditDialog = viewModel::openEditDialog,
+        onCloseEditDialog = viewModel::closeEditDialog,
+        onDismissPinPrompt = viewModel::dismissPinPrompt,
+        onProfileSelected = onProfileSelected,
+        modifier = modifier
+    )
+}
+
+@Composable
+fun AccountSelectContent(
+    state: AccountState,
+    onSelectAccount: (AccountEntity, String?) -> Unit,
+    onCreateAccount: (String, Int, String?) -> Unit,
+    onUpdateAccount: (Int, String, Int, String?) -> Unit,
+    onDeleteAccount: (Int) -> Unit,
+    onToggleManageMode: () -> Unit,
+    onOpenCreateDialog: () -> Unit,
+    onCloseCreateDialog: () -> Unit,
+    onOpenEditDialog: (AccountEntity) -> Unit,
+    onCloseEditDialog: () -> Unit,
+    onDismissPinPrompt: () -> Unit,
+    onProfileSelected: (AccountEntity) -> Unit,
+    modifier: Modifier = Modifier
+) {
     var deletingAccount by remember { mutableStateOf<AccountEntity?>(null) }
 
     Box(
@@ -103,147 +136,205 @@ fun AccountSelectScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Header Section
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(top = 16.dp)
-            ) {
-                TitleText(
-                    textRes = if (state.isManageMode) Res.string.manageProfiles else Res.string.whoIsWatching,
-                    fontSize = 28.sp,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                BodyMutedText(
-                    textRes = if (state.isManageMode) Res.string.select_profile_to_manage else Res.string.select_profile_to_watch,
-                    fontSize = 14.sp,
-                    textAlign = TextAlign.Center
-                )
-            }
+            AccountSelectHeader(isManageMode = state.isManageMode)
 
-            // Profiles Grid
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 130.dp),
-                horizontalArrangement = Arrangement.spacedBy(28.dp, Alignment.CenterHorizontally),
-                verticalArrangement = Arrangement.spacedBy(28.dp),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp),
+            AccountProfilesGrid(
+                accounts = state.accounts,
+                activeAccount = state.activeAccount,
+                isManageMode = state.isManageMode,
+                onOpenEditDialog = onOpenEditDialog,
+                onSelectAccount = onSelectAccount,
+                onProfileSelected = onProfileSelected,
+                onOpenCreateDialog = onOpenCreateDialog,
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f, fill = false)
-            ) {
-                items(state.accounts, key = { it.keyIndex }) { account ->
-                    ProfileCard(
-                        account = account,
-                        isActive = account == state.activeAccount,
-                        isManageMode = state.isManageMode,
-                        onClick = {
-                            if (state.isManageMode) {
-                                viewModel.onEvent(AccountEvent.OpenEditDialog(account))
-                            } else {
-                                if (!account.lockPin.isNullOrBlank()) {
-                                    viewModel.onEvent(AccountEvent.SelectAccount(account))
-                                } else {
-                                    onProfileSelected(account)
-                                }
-                            }
-                        }
-                    )
-                }
+            )
 
-                // Add Profile button if max accounts limit not reached (e.g. 6)
-                if (state.accounts.size < 6) {
-                    item {
-                        AddProfileCard(
-                            onClick = {
-                                viewModel.onEvent(AccountEvent.OpenCreateDialog)
-                            }
-                        )
-                    }
-                }
-            }
-
-            // Footer / Bottom Actions
-            Row(
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp)
-            ) {
-                OutlinedActionButton(
-                    textRes = if (state.isManageMode) Res.string.doneManagingProfiles else Res.string.manageProfiles,
-                    onClick = { viewModel.onEvent(AccountEvent.ToggleManageMode) },
-                    icon = if (state.isManageMode) Icons.Default.Check else Icons.Default.Edit,
-                    borderColor = if (state.isManageMode) CloudStreamColors.Primary else CloudStreamColors.Divider,
-                    contentColor = if (state.isManageMode) CloudStreamColors.Primary else CloudStreamColors.TextSecondary,
-                    shape = RoundedCornerShape(20.dp),
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 10.dp)
-                )
-            }
-        }
-
-        // Dialogs for Create / Edit / PIN Entry
-        if (state.isCreateDialogOpen) {
-            ProfileFormDialog(
-                titleRes = Res.string.addProfile,
-                confirmButtonTextRes = Res.string.createProfile,
-                initialName = "",
-                initialAvatarIndex = state.accounts.size % AccountViewModel.AVATAR_COLORS.size,
-                initialPin = "",
-                onDismiss = { viewModel.onEvent(AccountEvent.CloseCreateDialog) },
-                onConfirm = { name, avatarIndex, pin ->
-                    viewModel.onEvent(AccountEvent.CreateAccount(name, avatarIndex, pin))
-                }
+            AccountManageModeButton(
+                isManageMode = state.isManageMode,
+                onToggleManageMode = onToggleManageMode
             )
         }
 
-        state.editingAccount?.let { account ->
-            ProfileFormDialog(
-                titleRes = Res.string.editProfile,
-                confirmButtonTextRes = Res.string.apply,
-                initialName = account.name,
-                initialAvatarIndex = account.defaultImageIndex,
-                initialPin = account.lockPin ?: "",
-                isEditing = true,
-                onDismiss = { viewModel.onEvent(AccountEvent.CloseEditDialog) },
-                onConfirm = { name, avatarIndex, pin ->
-                    viewModel.onEvent(AccountEvent.UpdateAccount(account.keyIndex, name, avatarIndex, pin))
-                },
-                onDelete = if (state.accounts.size > 1) {
-                    {
-                        viewModel.onEvent(AccountEvent.CloseEditDialog)
-                        deletingAccount = account
-                    }
-                } else null
-            )
-        }
+        AccountDialogsHost(
+            state = state,
+            deletingAccount = deletingAccount,
+            onCreateAccount = onCreateAccount,
+            onUpdateAccount = onUpdateAccount,
+            onDeleteAccount = onDeleteAccount,
+            onCloseCreateDialog = onCloseCreateDialog,
+            onCloseEditDialog = onCloseEditDialog,
+            onDismissPinPrompt = onDismissPinPrompt,
+            onSelectAccount = onSelectAccount,
+            onProfileSelected = onProfileSelected,
+            onRequestDelete = {
+                onCloseEditDialog()
+                deletingAccount = it
+            },
+            onDismissDelete = { deletingAccount = null }
+        )
+    }
+}
 
-        deletingAccount?.let { account ->
-            ConfirmDeleteDialog(
-                onConfirm = {
-                    viewModel.onEvent(AccountEvent.DeleteAccount(account.keyIndex))
-                    deletingAccount = null
-                },
-                onDismiss = { deletingAccount = null },
-                titleRes = Res.string.deleteProfileConfirmTitle,
-                messageRes = Res.string.deleteProfileConfirmDesc,
-                confirmTextRes = Res.string.deleteProfile
-            )
-        }
+@Composable
+private fun AccountSelectHeader(isManageMode: Boolean) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(top = 16.dp)
+    ) {
+        TitleText(
+            textRes = if (isManageMode) Res.string.manageProfiles else Res.string.whoIsWatching,
+            fontSize = 28.sp,
+            textAlign = TextAlign.Center
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        BodyMutedText(
+            textRes = if (isManageMode) Res.string.select_profile_to_manage else Res.string.select_profile_to_watch,
+            fontSize = 14.sp,
+            textAlign = TextAlign.Center
+        )
+    }
+}
 
-        state.pinPromptAccount?.let { account ->
-            PinEntryDialog(
+@Composable
+private fun AccountProfilesGrid(
+    accounts: List<AccountEntity>,
+    activeAccount: AccountEntity?,
+    isManageMode: Boolean,
+    onOpenEditDialog: (AccountEntity) -> Unit,
+    onSelectAccount: (AccountEntity, String?) -> Unit,
+    onProfileSelected: (AccountEntity) -> Unit,
+    onOpenCreateDialog: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(minSize = 130.dp),
+        horizontalArrangement = Arrangement.spacedBy(28.dp, Alignment.CenterHorizontally),
+        verticalArrangement = Arrangement.spacedBy(28.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 24.dp),
+        modifier = modifier
+    ) {
+        items(accounts, key = { it.keyIndex }) { account ->
+            ProfileCard(
                 account = account,
-                hasError = state.pinError,
-                onDismiss = { viewModel.onEvent(AccountEvent.DismissPinPrompt) },
-                onSubmitPin = { enteredPin ->
-                    viewModel.onEvent(AccountEvent.SelectAccount(account, enteredPin))
-                    if (account.lockPin == enteredPin) {
+                isActive = account == activeAccount,
+                isManageMode = isManageMode,
+                onClick = {
+                    if (isManageMode) {
+                        onOpenEditDialog(account)
+                    } else if (!account.lockPin.isNullOrBlank()) {
+                        onSelectAccount(account, null)
+                    } else {
                         onProfileSelected(account)
                     }
                 }
             )
         }
+
+        if (accounts.size < 6) {
+            item {
+                AddProfileCard(onClick = onOpenCreateDialog)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccountManageModeButton(
+    isManageMode: Boolean,
+    onToggleManageMode: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(bottom = 16.dp)
+    ) {
+        OutlinedActionButton(
+            textRes = if (isManageMode) Res.string.doneManagingProfiles else Res.string.manageProfiles,
+            onClick = onToggleManageMode,
+            icon = if (isManageMode) Icons.Default.Check else Icons.Default.Edit,
+            borderColor = if (isManageMode) CloudStreamColors.Primary else CloudStreamColors.Divider,
+            contentColor = if (isManageMode) CloudStreamColors.Primary else CloudStreamColors.TextSecondary,
+            shape = RoundedCornerShape(20.dp),
+            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 10.dp)
+        )
+    }
+}
+
+@Composable
+private fun AccountDialogsHost(
+    state: AccountState,
+    deletingAccount: AccountEntity?,
+    onCreateAccount: (String, Int, String?) -> Unit,
+    onUpdateAccount: (Int, String, Int, String?) -> Unit,
+    onDeleteAccount: (Int) -> Unit,
+    onCloseCreateDialog: () -> Unit,
+    onCloseEditDialog: () -> Unit,
+    onDismissPinPrompt: () -> Unit,
+    onSelectAccount: (AccountEntity, String?) -> Unit,
+    onProfileSelected: (AccountEntity) -> Unit,
+    onRequestDelete: (AccountEntity) -> Unit,
+    onDismissDelete: () -> Unit
+) {
+    if (state.isCreateDialogOpen) {
+        ProfileFormDialog(
+            titleRes = Res.string.addProfile,
+            confirmButtonTextRes = Res.string.createProfile,
+            initialName = "",
+            initialAvatarIndex = state.accounts.size % AccountViewModel.AVATAR_COLORS.size,
+            initialPin = "",
+            onDismiss = onCloseCreateDialog,
+            onConfirm = onCreateAccount
+        )
+    }
+
+    state.editingAccount?.let { account ->
+        ProfileFormDialog(
+            titleRes = Res.string.editProfile,
+            confirmButtonTextRes = Res.string.apply,
+            initialName = account.name,
+            initialAvatarIndex = account.defaultImageIndex,
+            initialPin = account.lockPin ?: "",
+            isEditing = true,
+            onDismiss = onCloseEditDialog,
+            onConfirm = { name, avatarIndex, pin ->
+                onUpdateAccount(account.keyIndex, name, avatarIndex, pin)
+            },
+            onDelete = if (state.accounts.size > 1) {
+                { onRequestDelete(account) }
+            } else null
+        )
+    }
+
+    deletingAccount?.let { account ->
+        ConfirmDeleteDialog(
+            onConfirm = {
+                onDeleteAccount(account.keyIndex)
+                onDismissDelete()
+            },
+            onDismiss = onDismissDelete,
+            titleRes = Res.string.deleteProfileConfirmTitle,
+            messageRes = Res.string.deleteProfileConfirmDesc,
+            confirmTextRes = Res.string.deleteProfile
+        )
+    }
+
+    state.pinPromptAccount?.let { account ->
+        PinEntryDialog(
+            account = account,
+            hasError = state.pinError,
+            onDismiss = onDismissPinPrompt,
+            onSubmitPin = { enteredPin ->
+                onSelectAccount(account, enteredPin)
+                if (account.lockPin == enteredPin) {
+                    onProfileSelected(account)
+                }
+            }
+        )
     }
 }
 
@@ -289,7 +380,6 @@ private fun ProfileCard(
             contentAlignment = Alignment.Center,
             modifier = Modifier.size(96.dp)
         ) {
-            // Main Avatar Circle
             Box(
                 modifier = Modifier
                     .size(88.dp)
@@ -321,7 +411,6 @@ private fun ProfileCard(
                 )
             }
 
-            // Edit Overlay Icon when in Manage Mode
             if (isManageMode) {
                 Box(
                     modifier = Modifier
@@ -339,7 +428,6 @@ private fun ProfileCard(
                 }
             }
 
-            // Lock PIN indicator
             if (account.lockPin != null && account.lockPin.isNotBlank() && !isManageMode) {
                 Box(
                     modifier = Modifier
@@ -362,7 +450,6 @@ private fun ProfileCard(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // Profile Name
         Text(
             text = account.name,
             style = MaterialTheme.typography.body1.copy(
@@ -377,9 +464,6 @@ private fun ProfileCard(
     }
 }
 
-/**
- * Card for creating a new profile.
- */
 @Composable
 private fun AddProfileCard(
     onClick: () -> Unit,
@@ -444,9 +528,6 @@ private fun AddProfileCard(
     }
 }
 
-/**
- * Modal dialog to Create or Edit a user profile using Design System ActionDialog and CloudStreamTextField.
- */
 @Composable
 private fun ProfileFormDialog(
     titleRes: org.jetbrains.compose.resources.StringResource,
@@ -484,7 +565,6 @@ private fun ProfileFormDialog(
                     .padding(vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Name Field
                 CloudStreamTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -493,7 +573,6 @@ private fun ProfileFormDialog(
                     singleLine = true
                 )
 
-                // Avatar Color Palette with focus support
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SubtitleText(
                         textRes = Res.string.chooseAvatar,
@@ -550,7 +629,6 @@ private fun ProfileFormDialog(
                     }
                 }
 
-                // Optional PIN Field
                 CloudStreamTextField(
                     value = pin,
                     onValueChange = { if (it.length <= 4 && it.all { char -> char.isDigit() }) pin = it },
@@ -564,9 +642,6 @@ private fun ProfileFormDialog(
     )
 }
 
-/**
- * Dialog for entering 4-digit PIN lock to switch profile using ActionDialog and CloudStreamTextField.
- */
 @Composable
 private fun PinEntryDialog(
     account: AccountEntity,
@@ -611,6 +686,61 @@ private fun PinEntryDialog(
             }
         }
     )
+}
+
+@Preview
+@Composable
+private fun AccountSelectScreenPreview() {
+    CloudStreamTheme {
+        AccountSelectContent(
+            state = AccountState(
+                accounts = persistentListOf(
+                    AccountEntity(keyIndex = 0, name = "Main User", defaultImageIndex = 0),
+                    AccountEntity(keyIndex = 1, name = "Kids", defaultImageIndex = 1),
+                    AccountEntity(keyIndex = 2, name = "Private Profile", defaultImageIndex = 2, lockPin = "1234")
+                ),
+                activeAccountId = 0
+            ),
+            onSelectAccount = { _, _ -> },
+            onCreateAccount = { _, _, _ -> },
+            onUpdateAccount = { _, _, _, _ -> },
+            onDeleteAccount = {},
+            onToggleManageMode = {},
+            onOpenCreateDialog = {},
+            onCloseCreateDialog = {},
+            onOpenEditDialog = {},
+            onCloseEditDialog = {},
+            onDismissPinPrompt = {},
+            onProfileSelected = {}
+        )
+    }
+}
+
+@Preview
+@Composable
+private fun AccountSelectScreenAmoledLightPreview() {
+    CloudStreamTheme(theme = AppTheme.AMOLED, isDarkMode = false) {
+        AccountSelectContent(
+            state = AccountState(
+                accounts = persistentListOf(
+                    AccountEntity(keyIndex = 0, name = "Main User", defaultImageIndex = 0),
+                    AccountEntity(keyIndex = 1, name = "Guest", defaultImageIndex = 3)
+                ),
+                activeAccountId = 0
+            ),
+            onSelectAccount = { _, _ -> },
+            onCreateAccount = { _, _, _ -> },
+            onUpdateAccount = { _, _, _, _ -> },
+            onDeleteAccount = {},
+            onToggleManageMode = {},
+            onOpenCreateDialog = {},
+            onCloseCreateDialog = {},
+            onOpenEditDialog = {},
+            onCloseEditDialog = {},
+            onDismissPinPrompt = {},
+            onProfileSelected = {}
+        )
+    }
 }
 
 

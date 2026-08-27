@@ -114,3 +114,43 @@ jobs:
           name: cloudstream-linux-desktop
           path: build-outputs/linux/*
           retention-days: 14
+
+  build-windows:
+    name: Build Windows Desktop (Installer & Portable)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+
+      - name: Build Windows Desktop Distributable & Installers
+        run: ./gradlew :desktop:createDistributable :desktop:packageMsi :desktop:packageExe
+
+      - name: Package Windows Standalone Bundle & Installers
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build-outputs/windows
+          if (Test-Path "desktop/build/compose/binaries/main/msi/*.msi") {
+            Copy-Item "desktop/build/compose/binaries/main/msi/*.msi" "build-outputs/windows/"
+          }
+          if (Test-Path "desktop/build/compose/binaries/main/exe/*.exe") {
+            Copy-Item "desktop/build/compose/binaries/main/exe/*.exe" "build-outputs/windows/"
+          }
+          Compress-Archive -Path "desktop/build/compose/binaries/main/app/*" -DestinationPath "build-outputs/windows/cloudstream-windows-x64-portable.zip"
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudstream-windows-desktop
+          path: build-outputs/windows/*
+          retention-days: 14

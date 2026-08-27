@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION", "DEPRECATION_ERROR")
+
 package com.lagradost.cloudstream3.shared.ui.home
 
 import com.lagradost.cloudstream3.utils.asString
@@ -71,6 +73,8 @@ import org.jetbrains.compose.resources.stringResource
 import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.shared.viewmodels.HomeState
 import com.lagradost.cloudstream3.shared.viewmodels.HomeViewModel
+import com.lagradost.cloudstream3.shared.ui.layout.Layout
+import com.lagradost.cloudstream3.shared.ui.layout.isLayout
 import kotlinx.coroutines.flow.collectLatest
 
 /**
@@ -373,4 +377,51 @@ private fun HomeErrorView(
         modifier = modifier
     )
 }
+
+@Suppress("DEPRECATION")
+@org.jetbrains.compose.ui.tooling.preview.Preview
+@Composable
+private fun HomeScreenPreview() {
+    CloudStreamTheme {
+        HomeScreenContent(
+            state = HomeState(
+                carousels = kotlinx.collections.immutable.persistentListOf(
+                    HomeCarousel(
+                        name = "Trending Now",
+                        items = kotlinx.collections.immutable.persistentListOf(
+                            com.lagradost.cloudstream3.MovieSearchResponse(
+                                name = "Example Movie",
+                                url = "https://example.com/movie",
+                                apiName = "ExampleProvider",
+                                type = com.lagradost.cloudstream3.TvType.Movie,
+                                posterUrl = null,
+                                year = 2024,
+                                id = 1,
+                                quality = com.lagradost.cloudstream3.SearchQuality.HD,
+                                posterHeaders = null,
+                                score = null
+                            )
+                        )
+                    )
+                ),
+                featuredItems = kotlinx.collections.immutable.persistentListOf(
+                    com.lagradost.cloudstream3.MovieSearchResponse(
+                        name = "Featured Movie",
+                        url = "https://example.com/featured",
+                        apiName = "ExampleProvider",
+                        type = com.lagradost.cloudstream3.TvType.Movie,
+                        posterUrl = null,
+                        year = 2024,
+                        id = 2,
+                        quality = com.lagradost.cloudstream3.SearchQuality.FourK,
+                        posterHeaders = null,
+                        score = null
+                    )
+                )
+            ),
+            onEvent = {}
+        )
+    }
+}
+
 

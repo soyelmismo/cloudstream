@@ -129,6 +129,12 @@ import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
+import com.lagradost.cloudstream3.shared.ui.layout.Layout
+import com.lagradost.cloudstream3.shared.ui.layout.isLayout
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 /**
  * Stateful Library & Bookmarks Screen observing [LibraryViewModel].
@@ -214,72 +220,28 @@ fun LibraryScreenContent(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // -------------------------------------------------------------
-            // Top Section: Header with Title, Provider Selector, Search Bar, and Filter Bar
-            // -------------------------------------------------------------
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(CloudStreamColors.Surface)
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-            ) {
-                if (isSelectionMode) {
-                    LibraryBatchActionBar(
-                        selectedCount = selectedItemIds.size,
-                        totalCount = displayedItems.size,
-                        onSelectAll = {
-                            selectedItemIds = if (selectedItemIds.size == displayedItems.size) {
-                                emptySet()
-                            } else {
-                                displayedItems.mapNotNull { it.id.toIntOrNull() }.toSet()
-                            }
-                        },
-                        onClearSelection = { selectedItemIds = emptySet() },
-                        onOpenMoveDialog = { isBatchMoveDialogOpen = true },
-                        onOpenDeleteDialog = { isBatchDeleteDialogOpen = true }
-                    )
-                } else {
-                    // Header Row: Title, Provider Selector (if > 1), Search Bar, and Refresh Button
-                    LibraryTopHeader(
-                        searchQuery = state.searchQuery,
-                        onSearchQueryChange = { query ->
-                            onEvent(LibraryEvent.Search(query))
-                        },
-                        onClearSearch = {
-                            onEvent(LibraryEvent.ClearSearch)
-                        },
-                        availableProviders = state.availableProviders,
-                        selectedProviderId = state.selectedProviderId,
-                        onSelectProvider = { providerId ->
-                            selectedItemIds = emptySet()
-                            onEvent(LibraryEvent.SelectProvider(providerId))
-                        },
-                        isRefreshing = state.isRefreshing,
-                        onRefresh = {
-                            onEvent(LibraryEvent.RefreshLibrary)
-                        }
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Media Type & Sort Order Filter Chips Row
-                    LibraryFiltersBar(
-                        selectedType = state.selectedType,
-                        sortOrder = state.sortOrder,
-                        onSelectType = { type ->
-                            onEvent(LibraryEvent.SetFilterType(type))
-                        },
-                        onSelectSortOrder = { sort ->
-                            onEvent(LibraryEvent.SetSortOrder(sort))
-                        },
-                        onClearFilters = {
-                            onEvent(LibraryEvent.ClearFilters)
-                        }
-                    )
+            LibraryTopSection(
+                state = state,
+                isSelectionMode = isSelectionMode,
+                selectedItemIds = selectedItemIds,
+                displayedItemsCount = displayedItems.size,
+                onEvent = onEvent,
+                onSelectAll = {
+                    selectedItemIds = if (selectedItemIds.size == displayedItems.size) {
+                        emptySet()
+                    } else {
+                        displayedItems.mapNotNull { it.id.toIntOrNull() }.toSet()
+                    }
+                },
+                onClearSelection = { selectedItemIds = emptySet() },
+                onOpenMoveDialog = { isBatchMoveDialogOpen = true },
+                onOpenDeleteDialog = { isBatchDeleteDialogOpen = true },
+                onSelectProvider = { providerId ->
+                    selectedItemIds = emptySet()
+                    onEvent(LibraryEvent.SelectProvider(providerId))
                 }
-            }
+            )
 
-            // Subtle Refresh Progress Indicator
             if (state.isRefreshing) {
                 LinearProgressIndicator(
                     modifier = Modifier
@@ -290,12 +252,9 @@ fun LibraryScreenContent(
                 )
             }
 
-            // -------------------------------------------------------------
-            // Scrollable Dynamic Tab Bar with Counters
-            // -------------------------------------------------------------
             if (!isSelectionMode) {
                 LibraryTabBar(
-                    tabs = state.currentTabs,
+                    tabs = state.currentTabs.toImmutableList(),
                     selectedTabIndex = state.selectedTabIndex,
                     selectedTab = state.selectedTab,
                     tabCounts = state.tabCounts,
@@ -310,122 +269,207 @@ fun LibraryScreenContent(
                 )
             }
 
-            // -------------------------------------------------------------
-            // Content Area: Loading, Empty States, or Responsive Grid
-            // -------------------------------------------------------------
-            Box(
+            LibraryContentBody(
+                state = state,
+                displayedItems = displayedItems.toImmutableList(),
+                selectedItemIds = selectedItemIds,
+                isSelectionMode = isSelectionMode,
+                isLocal = isLocal,
+                onEvent = onEvent,
+                onNavigateToHome = onNavigateToHome,
+                onToggleItemSelection = { intId ->
+                    selectedItemIds = if (selectedItemIds.contains(intId)) {
+                        selectedItemIds - intId
+                    } else {
+                        selectedItemIds + intId
+                    }
+                },
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-            ) {
-                when {
-                    state.isLoading -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(
-                                color = CloudStreamColors.Primary,
-                                modifier = Modifier.size(40.dp)
-                            )
-                        }
-                    }
-
-                    state.isLibraryEmpty -> {
-                        LibraryTotalEmptyView(
-                            onExplore = onNavigateToHome,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-
-                    state.isFilteredEmpty -> {
-                        LibraryFilteredEmptyView(
-                            searchQuery = state.searchQuery,
-                            onClearFilters = {
-                                onEvent(LibraryEvent.ClearFilters)
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-
-                    else -> {
-                        LibraryGrid(
-                            items = displayedItems,
-                            selectedItemIds = selectedItemIds,
-                            isSelectionMode = isSelectionMode,
-                            isLocal = isLocal,
-                            onItemClick = { item ->
-                                val intId = item.id.toIntOrNull()
-                                if (isSelectionMode && intId != null) {
-                                    selectedItemIds = if (selectedItemIds.contains(intId)) {
-                                        selectedItemIds - intId
-                                    } else {
-                                        selectedItemIds + intId
-                                    }
-                                } else {
-                                    onEvent(LibraryEvent.SelectItem(item))
-                                }
-                            },
-                            onItemLongClick = { item ->
-                                val intId = item.id.toIntOrNull()
-                                if (isLocal && intId != null) {
-                                    selectedItemIds = if (selectedItemIds.contains(intId)) {
-                                        selectedItemIds - intId
-                                    } else {
-                                        selectedItemIds + intId
-                                    }
-                                }
-                            },
-                            onRemoveItem = { item ->
-                                item.id.toIntOrNull()?.let { id ->
-                                    onEvent(LibraryEvent.RemoveBookmark(id))
-                                }
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                }
-            }
+            )
         }
     }
 
-    // Modal: Batch Move / Change Watch Status Dialog
-    if (isBatchMoveDialogOpen) {
+    LibraryModalsHost(
+        isBatchMoveOpen = isBatchMoveDialogOpen,
+        isBatchDeleteOpen = isBatchDeleteDialogOpen,
+        selectedCount = selectedItemIds.size,
+        onSelectMoveStatus = { newStatus ->
+            onEvent(LibraryEvent.BatchSetWatchStatus(selectedItemIds, newStatus))
+            selectedItemIds = emptySet()
+            isBatchMoveDialogOpen = false
+        },
+        onConfirmBatchDelete = {
+            onEvent(LibraryEvent.BatchRemoveBookmarks(selectedItemIds))
+            selectedItemIds = emptySet()
+            isBatchDeleteDialogOpen = false
+        },
+        onDismissMove = { isBatchMoveDialogOpen = false },
+        onDismissDelete = { isBatchDeleteDialogOpen = false }
+    )
+}
+
+@Composable
+private fun LibraryTopSection(
+    state: LibraryState,
+    isSelectionMode: Boolean,
+    selectedItemIds: Set<Int>,
+    displayedItemsCount: Int,
+    onEvent: (LibraryEvent) -> Unit,
+    onSelectAll: () -> Unit,
+    onClearSelection: () -> Unit,
+    onOpenMoveDialog: () -> Unit,
+    onOpenDeleteDialog: () -> Unit,
+    onSelectProvider: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(CloudStreamColors.Surface)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        if (isSelectionMode) {
+            LibraryBatchActionBar(
+                selectedCount = selectedItemIds.size,
+                totalCount = displayedItemsCount,
+                onSelectAll = onSelectAll,
+                onClearSelection = onClearSelection,
+                onOpenMoveDialog = onOpenMoveDialog,
+                onOpenDeleteDialog = onOpenDeleteDialog
+            )
+        } else {
+            LibraryTopHeader(
+                searchQuery = state.searchQuery,
+                onSearchQueryChange = { onEvent(LibraryEvent.Search(it)) },
+                onClearSearch = { onEvent(LibraryEvent.ClearSearch) },
+                availableProviders = state.availableProviders.toImmutableList(),
+                selectedProviderId = state.selectedProviderId,
+                onSelectProvider = onSelectProvider,
+                isRefreshing = state.isRefreshing,
+                onRefresh = { onEvent(LibraryEvent.RefreshLibrary) }
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            LibraryFiltersBar(
+                selectedType = state.selectedType,
+                sortOrder = state.sortOrder,
+                onSelectType = { onEvent(LibraryEvent.SetFilterType(it)) },
+                onSelectSortOrder = { onEvent(LibraryEvent.SetSortOrder(it)) },
+                onClearFilters = { onEvent(LibraryEvent.ClearFilters) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun LibraryContentBody(
+    state: LibraryState,
+    displayedItems: ImmutableList<UnifiedLibraryItem>,
+    selectedItemIds: Set<Int>,
+    isSelectionMode: Boolean,
+    isLocal: Boolean,
+    onEvent: (LibraryEvent) -> Unit,
+    onNavigateToHome: () -> Unit,
+    onToggleItemSelection: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier = modifier) {
+        when {
+            state.isLoading -> {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        color = CloudStreamColors.Primary,
+                        modifier = Modifier.size(40.dp)
+                    )
+                }
+            }
+
+            state.isLibraryEmpty -> {
+                LibraryTotalEmptyView(
+                    onExplore = onNavigateToHome,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            state.isFilteredEmpty -> {
+                LibraryFilteredEmptyView(
+                    searchQuery = state.searchQuery,
+                    onClearFilters = { onEvent(LibraryEvent.ClearFilters) },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            else -> {
+                LibraryGrid(
+                    items = displayedItems,
+                    selectedItemIds = selectedItemIds,
+                    isSelectionMode = isSelectionMode,
+                    isLocal = isLocal,
+                    onItemClick = { item ->
+                        val intId = item.id.toIntOrNull()
+                        if (isSelectionMode && intId != null) {
+                            onToggleItemSelection(intId)
+                        } else {
+                            onEvent(LibraryEvent.SelectItem(item))
+                        }
+                    },
+                    onItemLongClick = { item ->
+                        val intId = item.id.toIntOrNull()
+                        if (isLocal && intId != null) {
+                            onToggleItemSelection(intId)
+                        }
+                    },
+                    onRemoveItem = { item ->
+                        item.id.toIntOrNull()?.let { id ->
+                            onEvent(LibraryEvent.RemoveBookmark(id))
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryModalsHost(
+    isBatchMoveOpen: Boolean,
+    isBatchDeleteOpen: Boolean,
+    selectedCount: Int,
+    onSelectMoveStatus: (WatchStatus) -> Unit,
+    onConfirmBatchDelete: () -> Unit,
+    onDismissMove: () -> Unit,
+    onDismissDelete: () -> Unit
+) {
+    if (isBatchMoveOpen) {
         LibraryBatchMoveDialog(
-            onSelectStatus = { newStatus ->
-                onEvent(LibraryEvent.BatchSetWatchStatus(selectedItemIds, newStatus))
-                selectedItemIds = emptySet()
-                isBatchMoveDialogOpen = false
-            },
-            onDismiss = { isBatchMoveDialogOpen = false }
+            onSelectStatus = onSelectMoveStatus,
+            onDismiss = onDismissMove
         )
     }
 
-    // Modal: Batch Delete Confirmation Dialog
-    if (isBatchDeleteDialogOpen) {
+    if (isBatchDeleteOpen) {
         ConfirmDeleteDialog(
-            onConfirm = {
-                onEvent(LibraryEvent.BatchRemoveBookmarks(selectedItemIds))
-                selectedItemIds = emptySet()
-                isBatchDeleteDialogOpen = false
-            },
-            onDismiss = { isBatchDeleteDialogOpen = false },
+            onConfirm = onConfirmBatchDelete,
+            onDismiss = onDismissDelete,
             titleRes = Res.string.action_remove_from_bookmarks,
-            message = "${stringResource(Res.string.delete)} (${selectedItemIds.size})",
+            message = "${stringResource(Res.string.delete)} ($selectedCount)",
             confirmTextRes = Res.string.delete
         )
     }
 }
 
-/**
- * Top Header bar with screen title, provider selector, quick search bar, and refresh button.
- */
 @Composable
 private fun LibraryTopHeader(
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     onClearSearch: () -> Unit,
-    availableProviders: List<LibraryProvider>,
+    availableProviders: ImmutableList<LibraryProvider>,
     selectedProviderId: String,
     onSelectProvider: (String) -> Unit,
     isRefreshing: Boolean,
@@ -433,17 +477,6 @@ private fun LibraryTopHeader(
     modifier: Modifier = Modifier
 ) {
     var localQuery by remember(searchQuery) { mutableStateOf(searchQuery) }
-    var isProviderDropdownOpen by remember { mutableStateOf(false) }
-
-    val infiniteTransition = rememberInfiniteTransition()
-    val rotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        )
-    )
 
     LaunchedEffect(localQuery) {
         if (localQuery == searchQuery) return@LaunchedEffect
@@ -456,113 +489,141 @@ private fun LibraryTopHeader(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Screen Title & Provider Dropdown Selector
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                text = stringResource(Res.string.libraryTitle),
-                style = MaterialTheme.typography.h5.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = CloudStreamColors.TextPrimary
-                )
+        LibraryHeaderTitleSection(
+            availableProviders = availableProviders,
+            selectedProviderId = selectedProviderId,
+            onSelectProvider = onSelectProvider
+        )
+
+        LibraryHeaderSearchBar(
+            query = localQuery,
+            onQueryChange = { localQuery = it },
+            onClear = {
+                localQuery = ""
+                onClearSearch()
+            },
+            modifier = Modifier.weight(1f)
+        )
+
+        LibraryHeaderRefreshButton(
+            isRefreshing = isRefreshing,
+            onRefresh = onRefresh
+        )
+    }
+}
+
+@Composable
+private fun LibraryHeaderTitleSection(
+    availableProviders: ImmutableList<LibraryProvider>,
+    selectedProviderId: String,
+    onSelectProvider: (String) -> Unit
+) {
+    var isProviderDropdownOpen by remember { mutableStateOf(false) }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = stringResource(Res.string.libraryTitle),
+            style = MaterialTheme.typography.h5.copy(
+                fontWeight = FontWeight.Bold,
+                color = CloudStreamColors.TextPrimary
             )
+        )
 
-            // Provider Selector Dropdown (if multiple providers are available)
-            if (availableProviders.size > 1) {
-                val currentProvider = availableProviders.find { it.id == selectedProviderId }
-                    ?: availableProviders.firstOrNull()
+        if (availableProviders.size > 1) {
+            val currentProvider = availableProviders.find { it.id == selectedProviderId }
+                ?: availableProviders.firstOrNull()
 
-                Box {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = CloudStreamColors.SurfaceVariant,
-                        border = BorderStroke(1.dp, MaterialTheme.colors.onSurface.copy(alpha = 0.15f)),
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { isProviderDropdownOpen = true }
-                            .pointerHoverIcon(PointerIcon.Hand)
+            Box {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = CloudStreamColors.SurfaceVariant,
+                    border = BorderStroke(1.dp, MaterialTheme.colors.onSurface.copy(alpha = 0.15f)),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { isProviderDropdownOpen = true }
+                        .pointerHoverIcon(PointerIcon.Hand)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            val providerIcon = getProviderIcon(currentProvider?.id ?: "local")
-                            Icon(
-                                painter = painterResource(providerIcon),
-                                contentDescription = currentProvider?.let { getProviderDisplayName(it) },
-                                tint = CloudStreamColors.Primary,
-                                modifier = Modifier.size(16.dp)
-                            )
+                        val providerIcon = getProviderIcon(currentProvider?.id ?: "local")
+                        Icon(
+                            painter = painterResource(providerIcon),
+                            contentDescription = currentProvider?.let { getProviderDisplayName(it) },
+                            tint = CloudStreamColors.Primary,
+                            modifier = Modifier.size(16.dp)
+                        )
 
-                            Text(
-                                text = currentProvider?.let { getProviderDisplayName(it) } ?: "",
-                                style = MaterialTheme.typography.body2.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = CloudStreamColors.TextPrimary,
-                                    fontSize = 13.sp
-                                )
+                        Text(
+                            text = currentProvider?.let { getProviderDisplayName(it) } ?: "",
+                            style = MaterialTheme.typography.body2.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                color = CloudStreamColors.TextPrimary,
+                                fontSize = 13.sp
                             )
+                        )
 
-                            Icon(
-                                imageVector = Icons.Default.ArrowDropDown,
-                                contentDescription = null,
-                                tint = CloudStreamColors.TextMuted,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown,
+                            contentDescription = null,
+                            tint = CloudStreamColors.TextMuted,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
+                }
 
-                    DropdownMenu(
-                        expanded = isProviderDropdownOpen,
-                        onDismissRequest = { isProviderDropdownOpen = false },
-                        modifier = Modifier
-                            .background(CloudStreamColors.SurfaceElevated)
-                            .widthIn(min = 180.dp)
-                    ) {
-                        availableProviders.forEach { provider ->
-                            val isSelected = provider.id == selectedProviderId
-                            DropdownMenuItem(
-                                onClick = {
-                                    isProviderDropdownOpen = false
-                                    onSelectProvider(provider.id)
-                                },
-                                modifier = Modifier.background(
-                                    if (isSelected) CloudStreamColors.Primary.copy(alpha = 0.12f)
-                                    else Color.Transparent
-                                )
+                DropdownMenu(
+                    expanded = isProviderDropdownOpen,
+                    onDismissRequest = { isProviderDropdownOpen = false },
+                    modifier = Modifier
+                        .background(CloudStreamColors.SurfaceElevated)
+                        .widthIn(min = 180.dp)
+                ) {
+                    availableProviders.forEach { provider ->
+                        val isSelected = provider.id == selectedProviderId
+                        DropdownMenuItem(
+                            onClick = {
+                                isProviderDropdownOpen = false
+                                onSelectProvider(provider.id)
+                            },
+                            modifier = Modifier.background(
+                                if (isSelected) CloudStreamColors.Primary.copy(alpha = 0.12f)
+                                else Color.Transparent
+                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
+                                Icon(
+                                    painter = painterResource(getProviderIcon(provider.id)),
+                                    contentDescription = getProviderDisplayName(provider),
+                                    tint = if (isSelected) CloudStreamColors.Primary else CloudStreamColors.TextSecondary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+
+                                Text(
+                                    text = getProviderDisplayName(provider),
+                                    style = MaterialTheme.typography.body2.copy(
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) CloudStreamColors.Primary else CloudStreamColors.TextPrimary
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                if (isSelected) {
                                     Icon(
-                                        painter = painterResource(getProviderIcon(provider.id)),
-                                        contentDescription = getProviderDisplayName(provider),
-                                        tint = if (isSelected) CloudStreamColors.Primary else CloudStreamColors.TextSecondary,
-                                        modifier = Modifier.size(18.dp)
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = null,
+                                        tint = CloudStreamColors.Primary,
+                                        modifier = Modifier.size(16.dp)
                                     )
-
-                                    Text(
-                                        text = getProviderDisplayName(provider),
-                                        style = MaterialTheme.typography.body2.copy(
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            color = if (isSelected) CloudStreamColors.Primary else CloudStreamColors.TextPrimary
-                                        ),
-                                        modifier = Modifier.weight(1f)
-                                    )
-
-                                    if (isSelected) {
-                                        Icon(
-                                            imageVector = Icons.Default.Check,
-                                            contentDescription = null,
-                                            tint = CloudStreamColors.Primary,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
                                 }
                             }
                         }
@@ -570,97 +631,116 @@ private fun LibraryTopHeader(
                 }
             }
         }
+    }
+}
 
-        // Quick Search Bar
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colors.background,
-            border = BorderStroke(1.dp, MaterialTheme.colors.onSurface.copy(alpha = 0.12f)),
-            modifier = Modifier.weight(1f)
+@Composable
+private fun LibraryHeaderSearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colors.background,
+        border = BorderStroke(1.dp, MaterialTheme.colors.onSurface.copy(alpha = 0.12f)),
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
+            Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = stringResource(Res.string.search),
+                tint = if (query.isNotBlank()) MaterialTheme.colors.primary else CloudStreamColors.TextMuted,
+                modifier = Modifier.size(18.dp)
+            )
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .weight(1f)
+                    .padding(vertical = 2.dp),
+                contentAlignment = Alignment.CenterStart
             ) {
-                Icon(
-                    imageVector = Icons.Default.Search,
-                    contentDescription = stringResource(Res.string.search),
-                    tint = if (localQuery.isNotBlank()) MaterialTheme.colors.primary else CloudStreamColors.TextMuted,
-                    modifier = Modifier.size(18.dp)
-                )
-
-                Spacer(modifier = Modifier.width(6.dp))
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(vertical = 2.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    if (localQuery.isEmpty()) {
-                        Text(
-                            text = stringResource(Res.string.searchLibraryPlaceholder),
-                            style = TextStyle(
-                                color = CloudStreamColors.TextMuted.copy(alpha = 0.7f),
-                                fontSize = 13.sp
-                            )
-                        )
-                    }
-
-                    BasicTextField(
-                        value = localQuery,
-                        onValueChange = { localQuery = it },
-                        singleLine = true,
-                        textStyle = TextStyle(
-                            color = CloudStreamColors.TextPrimary,
+                if (query.isEmpty()) {
+                    Text(
+                        text = stringResource(Res.string.searchLibraryPlaceholder),
+                        style = TextStyle(
+                            color = CloudStreamColors.TextMuted.copy(alpha = 0.7f),
                             fontSize = 13.sp
-                        ),
-                        cursorBrush = SolidColor(MaterialTheme.colors.primary),
-                        modifier = Modifier.fillMaxWidth()
+                        )
                     )
                 }
 
-                if (localQuery.isNotEmpty()) {
-                    IconButton(
-                        onClick = {
-                            localQuery = ""
-                            onClearSearch()
-                        },
-                        modifier = Modifier
-                            .size(24.dp)
-                            .pointerHoverIcon(PointerIcon.Hand)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = stringResource(Res.string.clear),
-                            tint = CloudStreamColors.TextMuted,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        color = CloudStreamColors.TextPrimary,
+                        fontSize = 13.sp
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colors.primary),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            if (query.isNotEmpty()) {
+                IconButton(
+                    onClick = onClear,
+                    modifier = Modifier
+                        .size(24.dp)
+                        .pointerHoverIcon(PointerIcon.Hand)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = stringResource(Res.string.clear),
+                        tint = CloudStreamColors.TextMuted,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
         }
+    }
+}
 
-        // Refresh Button
-        IconButton(
-            onClick = onRefresh,
+@Composable
+private fun LibraryHeaderRefreshButton(
+    isRefreshing: Boolean,
+    onRefresh: () -> Unit
+) {
+    val infiniteTransition = rememberInfiniteTransition()
+    val rotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        )
+    )
+
+    IconButton(
+        onClick = onRefresh,
+        modifier = Modifier
+            .size(36.dp)
+            .clip(CircleShape)
+            .background(CloudStreamColors.SurfaceVariant)
+            .pointerHoverIcon(PointerIcon.Hand)
+    ) {
+        Icon(
+            imageVector = Icons.Default.Refresh,
+            contentDescription = stringResource(Res.string.reload_provider),
+            tint = if (isRefreshing) CloudStreamColors.Primary else CloudStreamColors.TextSecondary,
             modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(CloudStreamColors.SurfaceVariant)
-                .pointerHoverIcon(PointerIcon.Hand)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Refresh,
-                contentDescription = stringResource(Res.string.reload_provider),
-                tint = if (isRefreshing) CloudStreamColors.Primary else CloudStreamColors.TextSecondary,
-                modifier = Modifier
-                    .size(20.dp)
-                    .then(if (isRefreshing) Modifier.rotate(rotation) else Modifier)
-            )
-        }
+                .size(20.dp)
+                .then(if (isRefreshing) Modifier.rotate(rotation) else Modifier)
+        )
     }
 }
 
@@ -753,7 +833,7 @@ private fun LibraryFiltersBar(
  */
 @Composable
 private fun LibraryTabBar(
-    tabs: List<LibraryTab>,
+    tabs: ImmutableList<LibraryTab>,
     selectedTabIndex: Int,
     selectedTab: WatchStatus,
     tabCounts: Map<WatchStatus, Int>,
@@ -913,7 +993,7 @@ private fun LibraryTabItem(
  */
 @Composable
 private fun LibraryGrid(
-    items: List<UnifiedLibraryItem>,
+    items: ImmutableList<UnifiedLibraryItem>,
     selectedItemIds: Set<Int>,
     isSelectionMode: Boolean,
     isLocal: Boolean,
@@ -922,14 +1002,15 @@ private fun LibraryGrid(
     onRemoveItem: (UnifiedLibraryItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isTV = isLayout(Layout.TV)
     val gridState = rememberLazyGridState()
 
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 140.dp),
+        columns = GridCells.Adaptive(minSize = if (isTV) 160.dp else 140.dp),
         state = gridState,
-        contentPadding = PaddingValues(16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(if (isTV) 24.dp else 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(if (isTV) 16.dp else 12.dp),
+        verticalArrangement = Arrangement.spacedBy(if (isTV) 20.dp else 16.dp),
         modifier = modifier
     ) {
         items(
@@ -992,269 +1073,30 @@ private fun LibraryCard(
     }
 
     val localItem = item.originalItem as? LibraryItem
-    val searchResponse = localItem?.toSearchResponse()
 
     Column(
         modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .hoverable(interactionSource = interactionSource)
-            .combinedClickable(
+            .libraryCardInteractive(
+                scale = scale,
                 interactionSource = interactionSource,
-                indication = null,
                 onClick = onClick,
                 onLongClick = onLongClick
             )
-            .focusable(interactionSource = interactionSource)
-            .onKeyEvent { keyEvent ->
-                if (keyEvent.type == KeyEventType.KeyDown) {
-                    when (keyEvent.key) {
-                        Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar -> {
-                            onClick()
-                            true
-                        }
-                        Key.Menu -> {
-                            onLongClick()
-                            true
-                        }
-                        else -> false
-                    }
-                } else {
-                    false
-                }
-            }
     ) {
-        // Poster Card Surface with 2:3 Cinematic Aspect Ratio
-        Card(
-            shape = RoundedCornerShape(12.dp),
-            backgroundColor = CloudStreamColors.Surface,
+        LibraryCardPoster(
+            item = item,
+            localItem = localItem,
+            isSelected = isSelected,
+            isSelectionMode = isSelectionMode,
+            isLocal = isLocal,
+            isHovered = isHovered,
             elevation = elevation,
-            border = BorderStroke(if (isSelected) 2.dp else if (isHovered) 1.5.dp else 0.5.dp, borderColor),
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(2f / 3f)
-        ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Poster Image
-                AsyncImage(
-                    url = item.posterUrl,
-                    contentDescription = item.name,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-
-                // Top Gradient for Badge Legibility
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(54.dp)
-                        .align(Alignment.TopCenter)
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    CloudStreamColors.Background.copy(alpha = 0.75f),
-                                    CloudStreamColors.Background.copy(alpha = 0.25f),
-                                    Color.Transparent
-                                )
-                            )
-                        )
-                )
-
-                // Badges Row (Top)
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.TopStart)
-                        .padding(6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Left: Quality & Type & Episode Progress Badge
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (localItem?.quality != null) {
-                            QualityBadge(quality = localItem.quality)
-                        }
-                        TypeBadge(type = item.type)
-
-                        if (item.episodesText != null) {
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = CloudStreamColors.Background.copy(alpha = 0.85f)
-                            ) {
-                                Text(
-                                    text = item.episodesText,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = CloudStreamColors.Secondary,
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    // Right: Selection Checkbox Badge or Favorite Icon or Score or Dub/Sub
-                    if (isSelectionMode) {
-                        Surface(
-                            shape = CircleShape,
-                            color = if (isSelected) CloudStreamColors.Primary else CloudStreamColors.Background.copy(alpha = 0.6f),
-                            border = if (!isSelected) BorderStroke(1.5.dp, MaterialTheme.colors.onPrimary.copy(alpha = 0.8f)) else null,
-                            modifier = Modifier.size(22.dp)
-                        ) {
-                            if (isSelected) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = stringResource(Res.string.select_all),
-                                        tint = MaterialTheme.colors.onPrimary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                }
-                            }
-                        }
-                    } else if (item.isFavorite) {
-                        Surface(
-                            shape = CircleShape,
-                            color = CloudStreamColors.Error.copy(alpha = 0.85f),
-                            modifier = Modifier.size(20.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Favorite,
-                                    contentDescription = stringResource(Res.string.action_add_to_favorites),
-                                    tint = MaterialTheme.colors.onError,
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            }
-                        }
-                    } else if (searchResponse != null) {
-                        DubSubBadges(searchResponse = searchResponse)
-                    } else if (item.score != null && item.score > 0) {
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = CloudStreamColors.Background.copy(alpha = 0.85f)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Star,
-                                    contentDescription = null,
-                                    tint = CloudStreamColors.Warning,
-                                    modifier = Modifier.size(10.dp)
-                                )
-                                Text(
-                                    text = formatScore(item.score),
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = CloudStreamColors.TextPrimary
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Bottom Overlay: Watch Status Pill & Progress Bar
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                ) {
-                    // Status Badge & Progress Percentage Row
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(Color.Transparent, CloudStreamColors.Background.copy(alpha = 0.85f))
-                                )
-                            )
-                            .padding(horizontal = 6.dp, vertical = 4.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // Watch Status Pill (if local item has non-ALL status)
-                            if (localItem != null && localItem.watchStatus != WatchStatus.ALL) {
-                                WatchStatusBadge(status = localItem.watchStatus)
-                            } else {
-                                Spacer(modifier = Modifier.width(1.dp))
-                            }
-
-                            // Progress Percentage if available
-                            if (item.progressPercentage > 0.02f) {
-                                val percent = (item.progressPercentage * 100).toInt()
-                                Text(
-                                    text = "$percent%",
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (item.isWatched) CloudStreamColors.Success else CloudStreamColors.Secondary
-                                )
-                            }
-                        }
-                    }
-
-                    // Linear Watch Progress Bar
-                    if (item.progressPercentage > 0.02f) {
-                        LinearProgressIndicator(
-                            progress = item.progressPercentage,
-                            color = if (item.isWatched) CloudStreamColors.Success else CloudStreamColors.Secondary,
-                            backgroundColor = MaterialTheme.colors.onSurface.copy(alpha = 0.25f),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(3.5.dp)
-                        )
-                    }
-                }
-
-                // Hover Actions Overlay (Desktop / TV focus: Delete action for local items)
-                if (isLocal) {
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = isHovered,
-                        enter = fadeIn(tween(150)),
-                        exit = fadeOut(tween(150)),
-                        modifier = Modifier.fillMaxSize()
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(CloudStreamColors.Background.copy(alpha = 0.45f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Surface(
-                                shape = CircleShape,
-                                color = MaterialTheme.colors.error.copy(alpha = 0.9f),
-                                elevation = 6.dp,
-                                modifier = Modifier
-                                    .size(36.dp)
-                                    .clickable(onClick = onRemove)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = stringResource(Res.string.delete),
-                                        tint = MaterialTheme.colors.onError,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+            borderColor = borderColor,
+            onRemove = onRemove
+        )
 
         Spacer(modifier = Modifier.height(6.dp))
 
-        // Title
         Text(
             text = item.name,
             style = MaterialTheme.typography.caption.copy(
@@ -1268,49 +1110,363 @@ private fun LibraryCard(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // Metadata: Year, Episode progress or Provider
+        LibraryCardMetadata(item = item)
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+private fun Modifier.libraryCardInteractive(
+    scale: Float,
+    interactionSource: MutableInteractionSource,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+): Modifier = this
+    .graphicsLayer {
+        scaleX = scale
+        scaleY = scale
+    }
+    .hoverable(interactionSource = interactionSource)
+    .combinedClickable(
+        interactionSource = interactionSource,
+        indication = null,
+        onClick = onClick,
+        onLongClick = onLongClick
+    )
+    .focusable(interactionSource = interactionSource)
+    .onKeyEvent { keyEvent ->
+        if (keyEvent.type == KeyEventType.KeyDown) {
+            when (keyEvent.key) {
+                Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar -> {
+                    onClick()
+                    true
+                }
+                Key.Menu -> {
+                    onLongClick()
+                    true
+                }
+                else -> false
+            }
+        } else {
+            false
+        }
+    }
+
+@Composable
+private fun LibraryCardPoster(
+    item: UnifiedLibraryItem,
+    localItem: LibraryItem?,
+    isSelected: Boolean,
+    isSelectionMode: Boolean,
+    isLocal: Boolean,
+    isHovered: Boolean,
+    elevation: androidx.compose.ui.unit.Dp,
+    borderColor: Color,
+    onRemove: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        backgroundColor = CloudStreamColors.Surface,
+        elevation = elevation,
+        border = BorderStroke(if (isSelected) 2.dp else if (isHovered) 1.5.dp else 0.5.dp, borderColor),
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(2f / 3f)
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            AsyncImage(
+                url = item.posterUrl,
+                contentDescription = item.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp)
+                    .align(Alignment.TopCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                CloudStreamColors.Background.copy(alpha = 0.75f),
+                                CloudStreamColors.Background.copy(alpha = 0.25f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+
+            LibraryCardTopBadges(
+                item = item,
+                localItem = localItem,
+                isSelected = isSelected,
+                isSelectionMode = isSelectionMode,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+            )
+
+            LibraryCardBottomOverlay(
+                item = item,
+                localItem = localItem,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.BottomCenter)
+            )
+
+            if (isLocal) {
+                LibraryCardHoverAction(
+                    visible = isHovered,
+                    onRemove = onRemove,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryCardTopBadges(
+    item: UnifiedLibraryItem,
+    localItem: LibraryItem?,
+    isSelected: Boolean,
+    isSelectionMode: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val searchResponse = localItem?.toSearchResponse()
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 2.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (item.year != null && item.year > 0) {
-                Text(
-                    text = item.year.toString(),
-                    style = MaterialTheme.typography.caption.copy(
-                        fontSize = 11.sp,
-                        color = CloudStreamColors.TextMuted,
-                        fontWeight = FontWeight.Medium
-                    ),
-                    maxLines = 1
-                )
-            } else if (item.episodesText != null) {
-                Text(
-                    text = item.episodesText,
-                    style = MaterialTheme.typography.caption.copy(
-                        fontSize = 11.sp,
-                        color = CloudStreamColors.Secondary,
-                        fontWeight = FontWeight.Medium
-                    ),
-                    maxLines = 1
-                )
+            if (localItem?.quality != null) {
+                QualityBadge(quality = localItem.quality)
             }
+            TypeBadge(type = item.type)
 
-            if (item.apiName.isNotBlank()) {
-                Text(
-                    text = item.apiName,
-                    style = MaterialTheme.typography.caption.copy(
-                        fontSize = 10.sp,
-                        color = CloudStreamColors.TextMuted.copy(alpha = 0.8f),
-                        fontWeight = FontWeight.Normal
-                    ),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false).padding(start = 4.dp)
-                )
+            if (item.episodesText != null) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = CloudStreamColors.Background.copy(alpha = 0.85f)
+                ) {
+                    Text(
+                        text = item.episodesText,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = CloudStreamColors.Secondary,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
             }
+        }
+
+        if (isSelectionMode) {
+            Surface(
+                shape = CircleShape,
+                color = if (isSelected) CloudStreamColors.Primary else CloudStreamColors.Background.copy(alpha = 0.6f),
+                border = if (!isSelected) BorderStroke(1.5.dp, MaterialTheme.colors.onPrimary.copy(alpha = 0.8f)) else null,
+                modifier = Modifier.size(22.dp)
+            ) {
+                if (isSelected) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = stringResource(Res.string.select_all),
+                            tint = MaterialTheme.colors.onPrimary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+            }
+        } else if (item.isFavorite) {
+            Surface(
+                shape = CircleShape,
+                color = CloudStreamColors.Error.copy(alpha = 0.85f),
+                modifier = Modifier.size(20.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Favorite,
+                        contentDescription = stringResource(Res.string.action_add_to_favorites),
+                        tint = MaterialTheme.colors.onError,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+            }
+        } else if (searchResponse != null) {
+            DubSubBadges(searchResponse = searchResponse)
+        } else if (item.score != null && item.score > 0) {
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = CloudStreamColors.Background.copy(alpha = 0.85f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Star,
+                        contentDescription = null,
+                        tint = CloudStreamColors.Warning,
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Text(
+                        text = formatScore(item.score),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = CloudStreamColors.TextPrimary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryCardBottomOverlay(
+    item: UnifiedLibraryItem,
+    localItem: LibraryItem?,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(Color.Transparent, CloudStreamColors.Background.copy(alpha = 0.85f))
+                    )
+                )
+                .padding(horizontal = 6.dp, vertical = 4.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (localItem != null && localItem.watchStatus != WatchStatus.ALL) {
+                    WatchStatusBadge(status = localItem.watchStatus)
+                } else {
+                    Spacer(modifier = Modifier.width(1.dp))
+                }
+
+                if (item.progressPercentage > 0.02f) {
+                    val percent = (item.progressPercentage * 100).toInt()
+                    Text(
+                        text = "$percent%",
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (item.isWatched) CloudStreamColors.Success else CloudStreamColors.Secondary
+                    )
+                }
+            }
+        }
+
+        if (item.progressPercentage > 0.02f) {
+            LinearProgressIndicator(
+                progress = item.progressPercentage,
+                color = if (item.isWatched) CloudStreamColors.Success else CloudStreamColors.Secondary,
+                backgroundColor = MaterialTheme.colors.onSurface.copy(alpha = 0.25f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.5.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun LibraryCardHoverAction(
+    visible: Boolean,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    androidx.compose.animation.AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(150)),
+        exit = fadeOut(tween(150)),
+        modifier = modifier
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(CloudStreamColors.Background.copy(alpha = 0.45f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colors.error.copy(alpha = 0.9f),
+                elevation = 6.dp,
+                modifier = Modifier
+                    .size(36.dp)
+                    .clickable(onClick = onRemove)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = stringResource(Res.string.delete),
+                        tint = MaterialTheme.colors.onError,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryCardMetadata(
+    item: UnifiedLibraryItem,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (item.year != null && item.year > 0) {
+            Text(
+                text = item.year.toString(),
+                style = MaterialTheme.typography.caption.copy(
+                    fontSize = 11.sp,
+                    color = CloudStreamColors.TextMuted,
+                    fontWeight = FontWeight.Medium
+                ),
+                maxLines = 1
+            )
+        } else if (item.episodesText != null) {
+            Text(
+                text = item.episodesText,
+                style = MaterialTheme.typography.caption.copy(
+                    fontSize = 11.sp,
+                    color = CloudStreamColors.Secondary,
+                    fontWeight = FontWeight.Medium
+                ),
+                maxLines = 1
+            )
+        }
+
+        if (item.apiName.isNotBlank()) {
+            Text(
+                text = item.apiName,
+                style = MaterialTheme.typography.caption.copy(
+                    fontSize = 10.sp,
+                    color = CloudStreamColors.TextMuted.copy(alpha = 0.8f),
+                    fontWeight = FontWeight.Normal
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false).padding(start = 4.dp)
+            )
         }
     }
 }
@@ -1600,3 +1756,32 @@ private fun formatScore(score: Double): String {
         ((score * 10).toInt() / 10.0).toString()
     }
 }
+
+@Preview
+@Composable
+private fun LibraryScreenPreview() {
+    com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme {
+        LibraryScreenContent(
+            state = LibraryState(
+                isLoading = false,
+                displayedItems = persistentListOf(
+                    UnifiedLibraryItem(
+                        id = "1",
+                        name = "Example Bookmarked Show",
+                        url = "https://example.com/show",
+                        apiName = "ExampleProvider",
+                        type = TvType.TvSeries,
+                        posterUrl = null,
+                        year = 2024,
+                        score = 8.5,
+                        originalItem = Unit
+                    )
+                )
+            ),
+            onEvent = {},
+            onNavigateToDetails = { _, _ -> },
+            onNavigateToHome = {}
+        )
+    }
+}
+

@@ -40,8 +40,10 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 
 /**
  * Base standardized dialog container for the CloudStream Design System.
@@ -151,9 +153,6 @@ fun ActionDialog(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // =============================================================
-            // 1. HEADER SECTION
-            // =============================================================
             if (titleContent != null || resolvedTitle != null || icon != null || iconVector != null || showCloseButton) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -228,9 +227,6 @@ fun ActionDialog(
                 }
             }
 
-            // =============================================================
-            // 2. BODY CONTENT SECTION
-            // =============================================================
             if (content != null || resolvedMessage != null) {
                 Column(
                     modifier = Modifier
@@ -252,9 +248,6 @@ fun ActionDialog(
                 }
             }
 
-            // =============================================================
-            // 3. ACTION BUTTONS SECTION
-            // =============================================================
             if (buttons != null) {
                 buttons()
             } else if (onConfirm != null || onCancel != null || onDismiss != null || onNeutral != null) {
@@ -310,10 +303,6 @@ fun ActionDialog(
         }
     }
 }
-
-// =============================================================================
-// CONFIRM DELETE DIALOG
-// =============================================================================
 
 /**
  * Pre-configured danger confirmation dialog with localized cancel/confirm and warning indicator.
@@ -372,4 +361,20 @@ fun ConfirmDeleteDialog(
         onCancel = onDismiss,
         showCloseButton = true
     )
+}
+
+@Preview
+@Composable
+private fun ActionDialogPreview() {
+    CloudStreamTheme {
+        ActionDialog(
+            onDismissRequest = {},
+            title = "Action Dialog Title",
+            subtitle = "Dialog subtitle description",
+            message = "Are you sure you want to perform this operation?",
+            confirmText = "Confirm",
+            cancelText = "Cancel",
+            onConfirm = {}
+        )
+    }
 }

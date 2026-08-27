@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import cloudstream.shared_ui.generated.resources.*
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.ActionDialog
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.BodyMutedText
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.CloudStreamTextField
@@ -35,9 +36,9 @@ import com.lagradost.cloudstream3.shared.ui.components.designsystem.NumberStepAd
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.PrimaryButton
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.SecondaryButton
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.SelectableOptionCard
-import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerAspectRatio
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerEpisode
+import kotlinx.collections.immutable.ImmutableList
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
@@ -130,7 +131,7 @@ fun PlayerAspectRatioDialog(
  */
 @Composable
 fun PlayerEpisodeSwitcherDialog(
-    playlist: List<PlayerEpisode>,
+    playlist: ImmutableList<PlayerEpisode>,
     currentIndex: Int,
     onSelectEpisode: (Int) -> Unit,
     onDismiss: () -> Unit
@@ -231,7 +232,7 @@ fun PlayerEpisodeSwitcherDialog(
  */
 @Composable
 fun PlayerEpisodesFastSwitcherDialog(
-    playlist: List<PlayerEpisode>,
+    playlist: ImmutableList<PlayerEpisode>,
     currentIndex: Int,
     onSelectEpisode: (Int) -> Unit,
     onDismiss: () -> Unit

@@ -52,9 +52,11 @@ import com.lagradost.cloudstream3.shared.ui.components.designsystem.CloudStreamD
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.GhostButton
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.PrimaryButton
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import org.jetbrains.compose.resources.DrawableResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 /**
  * Standardized Device PIN Dialog for Compose Multiplatform.
@@ -119,9 +121,6 @@ fun ProviderPinDialog(
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // =============================================================
-            // 1. HEADER SECTION
-            // =============================================================
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -193,9 +192,6 @@ fun ProviderPinDialog(
                 }
             }
 
-            // =============================================================
-            // 2. ERROR BANNER (if present)
-            // =============================================================
             AnimatedVisibility(
                 visible = !errorMessage.isNullOrBlank(),
                 enter = fadeIn(),
@@ -231,9 +227,6 @@ fun ProviderPinDialog(
                 }
             }
 
-            // =============================================================
-            // 3. LARGE PIN CODE DISPLAY
-            // =============================================================
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = CloudStreamColors.SurfaceVariant,
@@ -298,9 +291,6 @@ fun ProviderPinDialog(
                 }
             }
 
-            // =============================================================
-            // 4. INSTRUCTIONS & URL HIGHLIGHT
-            // =============================================================
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -347,9 +337,6 @@ fun ProviderPinDialog(
                 }
             }
 
-            // =============================================================
-            // 5. OPEN IN BROWSER PRIMARY ACTION BUTTON
-            // =============================================================
             PrimaryButton(
                 textRes = Res.string.auth_open_browser,
                 onClick = {
@@ -370,9 +357,6 @@ fun ProviderPinDialog(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            // =============================================================
-            // 6. LIVE VERIFICATION STATUS SPINNER / COUNTDOWN
-            // =============================================================
             if (isVerifying) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -395,9 +379,6 @@ fun ProviderPinDialog(
                 }
             }
 
-            // =============================================================
-            // 7. FOOTER / CANCEL BUTTON
-            // =============================================================
             GhostButton(
                 textRes = Res.string.cancel,
                 onClick = onDismiss,
@@ -407,3 +388,18 @@ fun ProviderPinDialog(
         }
     }
 }
+
+@Preview
+@Composable
+private fun ProviderPinDialogPreview() {
+    CloudStreamTheme {
+        ProviderPinDialog(
+            userCode = "ABCD-1234",
+            verificationUrl = "https://example.com/activate",
+            providerName = "Test Provider",
+            isVerifying = true,
+            onDismiss = {}
+        )
+    }
+}
+

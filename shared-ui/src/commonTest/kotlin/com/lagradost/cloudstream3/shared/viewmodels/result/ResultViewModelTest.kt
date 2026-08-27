@@ -26,6 +26,9 @@ import com.lagradost.cloudstream3.shared.persistence.repository.WatchProgressRep
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.newExtractorLink
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,20 +51,20 @@ import kotlin.test.assertTrue
 
 class FakeSyncMappingRepository : SyncMappingRepository {
     private val data = mutableMapOf<Triple<Int, Int, String>, SyncMappingEntity>()
-    private val flows = mutableMapOf<Pair<Int, Int>, MutableStateFlow<List<SyncMappingEntity>>>()
+    private val flows = mutableMapOf<Pair<Int, Int>, MutableStateFlow<ImmutableList<SyncMappingEntity>>>()
 
-    override suspend fun getSyncMappings(accountId: Int, mediaId: Int): List<SyncMappingEntity> {
-        return data.filterKeys { it.first == accountId && it.second == mediaId }.values.toList()
+    override suspend fun getSyncMappings(accountId: Int, mediaId: Int): ImmutableList<SyncMappingEntity> {
+        return data.filterKeys { it.first == accountId && it.second == mediaId }.values.toImmutableList()
     }
 
-    override fun getSyncMappingsFlow(accountId: Int, mediaId: Int): Flow<List<SyncMappingEntity>> {
+    override fun getSyncMappingsFlow(accountId: Int, mediaId: Int): Flow<ImmutableList<SyncMappingEntity>> {
         return flows.getOrPut(accountId to mediaId) {
             MutableStateFlow(getSyncMappingsDirect(accountId, mediaId))
         }
     }
 
-    private fun getSyncMappingsDirect(accountId: Int, mediaId: Int): List<SyncMappingEntity> {
-        return data.filterKeys { it.first == accountId && it.second == mediaId }.values.toList()
+    private fun getSyncMappingsDirect(accountId: Int, mediaId: Int): ImmutableList<SyncMappingEntity> {
+        return data.filterKeys { it.first == accountId && it.second == mediaId }.values.toImmutableList()
     }
 
     override suspend fun getSyncMapping(accountId: Int, mediaId: Int, syncPrefix: String): SyncMappingEntity? {
@@ -82,14 +85,14 @@ class FakeSyncMappingRepository : SyncMappingRepository {
 
     override suspend fun clearSyncMappings(accountId: Int, mediaId: Int) {
         data.keys.filter { it.first == accountId && it.second == mediaId }.forEach { data.remove(it) }
-        flows[accountId to mediaId]?.value = emptyList()
+        flows[accountId to mediaId]?.value = persistentListOf()
     }
 }
 
 class FakeBookmarkRepository : BookmarkRepository {
     private val data = mutableMapOf<Pair<Int, Int>, BookmarkEntity>()
     private val flows = mutableMapOf<Pair<Int, Int>, MutableStateFlow<BookmarkEntity?>>()
-    private val allFlow = MutableStateFlow<List<BookmarkEntity>>(emptyList())
+    private val allFlow = MutableStateFlow<ImmutableList<BookmarkEntity>>(persistentListOf())
 
     override suspend fun getBookmark(accountId: Int, id: Int): BookmarkEntity? = data[accountId to id]
 
@@ -97,45 +100,45 @@ class FakeBookmarkRepository : BookmarkRepository {
         return flows.getOrPut(accountId to id) { MutableStateFlow(data[accountId to id]) }
     }
 
-    override suspend fun getAllBookmarks(accountId: Int): List<BookmarkEntity> {
-        return data.filterKeys { it.first == accountId }.values.toList()
+    override suspend fun getAllBookmarks(accountId: Int): ImmutableList<BookmarkEntity> {
+        return data.filterKeys { it.first == accountId }.values.toImmutableList()
     }
 
-    override fun getAllBookmarksFlow(accountId: Int): Flow<List<BookmarkEntity>> = allFlow
+    override fun getAllBookmarksFlow(accountId: Int): Flow<ImmutableList<BookmarkEntity>> = allFlow
 
-    override suspend fun getBookmarksByWatchType(accountId: Int, watchType: Int): List<BookmarkEntity> {
-        return data.filterKeys { it.first == accountId }.values.filter { it.watchType == watchType }
+    override suspend fun getBookmarksByWatchType(accountId: Int, watchType: Int): ImmutableList<BookmarkEntity> {
+        return data.filterKeys { it.first == accountId }.values.filter { it.watchType == watchType }.toImmutableList()
     }
 
-    override fun getBookmarksByWatchTypeFlow(accountId: Int, watchType: Int): Flow<List<BookmarkEntity>> {
-        return allFlow.map { list -> list.filter { it.accountId == accountId && it.watchType == watchType } }
+    override fun getBookmarksByWatchTypeFlow(accountId: Int, watchType: Int): Flow<ImmutableList<BookmarkEntity>> {
+        return allFlow.map { list -> list.filter { it.accountId == accountId && it.watchType == watchType }.toImmutableList() }
     }
 
     override suspend fun saveBookmark(bookmark: BookmarkEntity) {
         val key = bookmark.accountId to bookmark.id
         data[key] = bookmark
         flows.getOrPut(key) { MutableStateFlow(null) }.value = bookmark
-        allFlow.value = data.values.toList()
+        allFlow.value = data.values.toImmutableList()
     }
 
     override suspend fun deleteBookmark(accountId: Int, id: Int) {
         val key = accountId to id
         data.remove(key)
         flows.getOrPut(key) { MutableStateFlow(null) }.value = null
-        allFlow.value = data.values.toList()
+        allFlow.value = data.values.toImmutableList()
     }
 
     override suspend fun clearAll(accountId: Int) {
         data.clear()
         flows.values.forEach { it.value = null }
-        allFlow.value = emptyList()
+        allFlow.value = persistentListOf()
     }
 }
 
 class FakeFavoriteRepository : FavoriteRepository {
     private val data = mutableMapOf<Pair<Int, Int>, FavoriteEntity>()
     private val flows = mutableMapOf<Pair<Int, Int>, MutableStateFlow<FavoriteEntity?>>()
-    private val allFlow = MutableStateFlow<List<FavoriteEntity>>(emptyList())
+    private val allFlow = MutableStateFlow<ImmutableList<FavoriteEntity>>(persistentListOf())
 
     override suspend fun getFavorite(accountId: Int, id: Int): FavoriteEntity? = data[accountId to id]
 
@@ -143,37 +146,37 @@ class FakeFavoriteRepository : FavoriteRepository {
         return flows.getOrPut(accountId to id) { MutableStateFlow(data[accountId to id]) }
     }
 
-    override suspend fun getAllFavorites(accountId: Int): List<FavoriteEntity> {
-        return data.filterKeys { it.first == accountId }.values.toList()
+    override suspend fun getAllFavorites(accountId: Int): ImmutableList<FavoriteEntity> {
+        return data.filterKeys { it.first == accountId }.values.toImmutableList()
     }
 
-    override fun getAllFavoritesFlow(accountId: Int): Flow<List<FavoriteEntity>> = allFlow
+    override fun getAllFavoritesFlow(accountId: Int): Flow<ImmutableList<FavoriteEntity>> = allFlow
 
     override suspend fun saveFavorite(favorite: FavoriteEntity) {
         val key = favorite.accountId to favorite.id
         data[key] = favorite
         flows.getOrPut(key) { MutableStateFlow(null) }.value = favorite
-        allFlow.value = data.values.toList()
+        allFlow.value = data.values.toImmutableList()
     }
 
     override suspend fun deleteFavorite(accountId: Int, id: Int) {
         val key = accountId to id
         data.remove(key)
         flows.getOrPut(key) { MutableStateFlow(null) }.value = null
-        allFlow.value = data.values.toList()
+        allFlow.value = data.values.toImmutableList()
     }
 
     override suspend fun clearAll(accountId: Int) {
         data.clear()
         flows.values.forEach { it.value = null }
-        allFlow.value = emptyList()
+        allFlow.value = persistentListOf()
     }
 }
 
 class FakeSubscriptionRepository : SubscriptionRepository {
     private val data = mutableMapOf<Pair<Int, Int>, SubscriptionEntity>()
     private val flows = mutableMapOf<Pair<Int, Int>, MutableStateFlow<SubscriptionEntity?>>()
-    private val allFlow = MutableStateFlow<List<SubscriptionEntity>>(emptyList())
+    private val allFlow = MutableStateFlow<ImmutableList<SubscriptionEntity>>(persistentListOf())
 
     override suspend fun getSubscription(accountId: Int, id: Int): SubscriptionEntity? = data[accountId to id]
 
@@ -181,30 +184,30 @@ class FakeSubscriptionRepository : SubscriptionRepository {
         return flows.getOrPut(accountId to id) { MutableStateFlow(data[accountId to id]) }
     }
 
-    override suspend fun getAllSubscriptions(accountId: Int): List<SubscriptionEntity> {
-        return data.filterKeys { it.first == accountId }.values.toList()
+    override suspend fun getAllSubscriptions(accountId: Int): ImmutableList<SubscriptionEntity> {
+        return data.filterKeys { it.first == accountId }.values.toImmutableList()
     }
 
-    override fun getAllSubscriptionsFlow(accountId: Int): Flow<List<SubscriptionEntity>> = allFlow
+    override fun getAllSubscriptionsFlow(accountId: Int): Flow<ImmutableList<SubscriptionEntity>> = allFlow
 
     override suspend fun saveSubscription(subscription: SubscriptionEntity) {
         val key = subscription.accountId to subscription.id
         data[key] = subscription
         flows.getOrPut(key) { MutableStateFlow(null) }.value = subscription
-        allFlow.value = data.values.toList()
+        allFlow.value = data.values.toImmutableList()
     }
 
     override suspend fun deleteSubscription(accountId: Int, id: Int) {
         val key = accountId to id
         data.remove(key)
         flows.getOrPut(key) { MutableStateFlow(null) }.value = null
-        allFlow.value = data.values.toList()
+        allFlow.value = data.values.toImmutableList()
     }
 
     override suspend fun clearAll(accountId: Int) {
         data.clear()
         flows.values.forEach { it.value = null }
-        allFlow.value = emptyList()
+        allFlow.value = persistentListOf()
     }
 }
 
@@ -212,7 +215,7 @@ class FakeWatchProgressRepository : WatchProgressRepository {
     private val data = mutableMapOf<Pair<Int, Int>, WatchProgressEntity>()
     private val flows = mutableMapOf<Pair<Int, Int>, MutableStateFlow<WatchProgressEntity?>>()
 
-    private val allFlow = MutableStateFlow<List<WatchProgressEntity>>(emptyList())
+    private val allFlow = MutableStateFlow<ImmutableList<WatchProgressEntity>>(persistentListOf())
 
     override suspend fun getProgress(accountId: Int, mediaId: Int): WatchProgressEntity? = data[accountId to mediaId]
 
@@ -220,11 +223,11 @@ class FakeWatchProgressRepository : WatchProgressRepository {
         return flows.getOrPut(accountId to mediaId) { MutableStateFlow(data[accountId to mediaId]) }
     }
 
-    override suspend fun getAllProgress(accountId: Int): List<WatchProgressEntity> {
-        return data.filterKeys { it.first == accountId }.values.toList()
+    override suspend fun getAllProgress(accountId: Int): ImmutableList<WatchProgressEntity> {
+        return data.filterKeys { it.first == accountId }.values.toImmutableList()
     }
 
-    override fun getAllProgressFlow(accountId: Int): Flow<List<WatchProgressEntity>> = allFlow
+    override fun getAllProgressFlow(accountId: Int): Flow<ImmutableList<WatchProgressEntity>> = allFlow
 
     override suspend fun setProgress(
         accountId: Int,
@@ -261,7 +264,7 @@ class FakeWatchProgressRepository : WatchProgressRepository {
 class FakeResumeWatchingRepository : ResumeWatchingRepository {
     private val data = mutableMapOf<Pair<Int, Int>, ResumeWatchingEntity>()
     private val flows = mutableMapOf<Pair<Int, Int>, MutableStateFlow<ResumeWatchingEntity?>>()
-    private val allFlow = MutableStateFlow<List<ResumeWatchingEntity>>(emptyList())
+    private val allFlow = MutableStateFlow<ImmutableList<ResumeWatchingEntity>>(persistentListOf())
 
     override suspend fun getResumeWatching(accountId: Int, parentId: Int): ResumeWatchingEntity? = data[accountId to parentId]
 
@@ -269,11 +272,11 @@ class FakeResumeWatchingRepository : ResumeWatchingRepository {
         return flows.getOrPut(accountId to parentId) { MutableStateFlow(data[accountId to parentId]) }
     }
 
-    override suspend fun getAllResumeWatching(accountId: Int): List<ResumeWatchingEntity> {
-        return data.filterKeys { it.first == accountId }.values.toList()
+    override suspend fun getAllResumeWatching(accountId: Int): ImmutableList<ResumeWatchingEntity> {
+        return data.filterKeys { it.first == accountId }.values.toImmutableList()
     }
 
-    override fun getAllResumeWatchingFlow(accountId: Int): Flow<List<ResumeWatchingEntity>> = allFlow
+    override fun getAllResumeWatchingFlow(accountId: Int): Flow<ImmutableList<ResumeWatchingEntity>> = allFlow
 
     override suspend fun setResumeWatching(
         accountId: Int,
@@ -296,27 +299,27 @@ class FakeResumeWatchingRepository : ResumeWatchingRepository {
         val key = accountId to parentId
         data[key] = entity
         flows.getOrPut(key) { MutableStateFlow(null) }.value = entity
-        allFlow.value = data.values.toList()
+        allFlow.value = data.values.toImmutableList()
     }
 
     override suspend fun saveResumeWatching(resumeWatching: ResumeWatchingEntity) {
         val key = resumeWatching.accountId to resumeWatching.parentId
         data[key] = resumeWatching
         flows.getOrPut(key) { MutableStateFlow(null) }.value = resumeWatching
-        allFlow.value = data.values.toList()
+        allFlow.value = data.values.toImmutableList()
     }
 
     override suspend fun deleteResumeWatching(accountId: Int, parentId: Int) {
         val key = accountId to parentId
         data.remove(key)
         flows.getOrPut(key) { MutableStateFlow(null) }.value = null
-        allFlow.value = data.values.toList()
+        allFlow.value = data.values.toImmutableList()
     }
 
     override suspend fun clearAll(accountId: Int) {
         data.clear()
         flows.values.forEach { it.value = null }
-        allFlow.value = emptyList()
+        allFlow.value = persistentListOf()
     }
 }
 

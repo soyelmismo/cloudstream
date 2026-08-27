@@ -12,6 +12,9 @@ import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.TvSeriesSearchResponse
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.shared.mvi.MviViewModel
+import com.lagradost.cloudstream3.shared.persistence.entity.BookmarkEntity
+import com.lagradost.cloudstream3.shared.persistence.entity.ResumeWatchingEntity
+import com.lagradost.cloudstream3.shared.persistence.entity.WatchProgressEntity
 import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager
 import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceRepository
 import com.lagradost.cloudstream3.shared.persistence.repository.BookmarkRepository
@@ -25,6 +28,9 @@ import cloudstream.shared_ui.generated.resources.home_error_no_homepage
 import cloudstream.shared_ui.generated.resources.home_error_no_provider
 import com.lagradost.cloudstream3.utils.txt
 import kotlin.coroutines.CoroutineContext
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toImmutableMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
@@ -103,20 +109,6 @@ private fun createResumeSearchResponse(
     }
 }
 
-/**
- * Pure Kotlin Multiplatform ViewModel for the Home screen using MVI architecture.
- *
- * @param providerRepository Repository providing access to available providers and lookup helpers (defaults to [ProviderRepositoryImpl]).
- * @param providersProvider Optional lambda supplying the list of available providers (falls back to [providerRepository.getAllProviders]).
- * @param bookmarkRepository Repository for user bookmarks.
- * @param watchProgressRepository Repository for watch progress.
- * @param resumeWatchingRepository Repository for resume watching data.
- * @param preferenceRepository Repository for user and application preferences (defaults to [AppPreferenceManager.currentRepository]).
- * @param accountId Active account ID.
- * @param initialState Initial home state.
- * @param autoLoad When true, automatically initializes providers and triggers [HomeEvent.LoadHome].
- * @param coroutineContext Optional coroutine context for viewModelScope.
- */
 class HomeViewModel(
     private val providerRepository: ProviderRepository = ProviderRepositoryImpl(),
     private val providersProvider: (() -> List<MainAPI>)? = null,
@@ -144,6 +136,39 @@ class HomeViewModel(
         return providersProvider?.invoke() ?: providerRepository.getAllProviders()
     }
 
+    private fun buildActiveResumeItem(
+        mediaId: Int,
+        bookmarkMap: Map<Int, BookmarkEntity>,
+        progressMap: Map<Int, WatchProgressEntity>,
+        resumeMap: Map<Int, ResumeWatchingEntity>
+    ): Triple<SearchResponse, Pair<String, Float>, Long>? {
+        val bookmark = bookmarkMap[mediaId] ?: return null
+        val resume = resumeMap[mediaId]
+        val progress = (resume?.episodeId?.let { progressMap[it] }) ?: progressMap[mediaId] ?: return null
+
+        if (progress.duration <= 0 || progress.position <= 0 || progress.watchState == 2) return null
+        val ratio = (progress.position.toFloat() / progress.duration.toFloat()).coerceIn(0f, 1f)
+        if (ratio !in 0.005f..0.95f) return null
+
+        val lastUpdated = maxOf(
+            progress.lastUpdated,
+            resume?.updateTime ?: 0L,
+            bookmark.latestUpdatedTime,
+            bookmark.bookmarkedTime
+        )
+        val item = createResumeSearchResponse(
+            name = bookmark.name,
+            url = bookmark.url,
+            apiName = bookmark.apiName,
+            type = bookmark.type,
+            posterUrl = bookmark.posterUrl,
+            year = bookmark.year,
+            id = bookmark.id,
+            quality = bookmark.quality
+        )
+        return Triple(item, bookmark.url to ratio, lastUpdated)
+    }
+
     private fun observeResumeWatching() {
         if (bookmarkRepository == null || watchProgressRepository == null) return
         launchSafeJob(key = "resume_watching") {
@@ -157,38 +182,12 @@ class HomeViewModel(
                 val resumeMap = resumeWatchings.associateBy { it.parentId }
 
                 val candidateIds = (resumeWatchings.map { it.parentId } + bookmarks.map { it.id }).distinct()
-
                 val activeItems = candidateIds.mapNotNull { mediaId ->
-                    val bookmark = bookmarkMap[mediaId] ?: return@mapNotNull null
-                    val resume = resumeMap[mediaId]
-                    val progress = resume?.episodeId?.let { epId -> progressMap[epId] } ?: progressMap[mediaId]
-
-                    if (progress != null && progress.duration > 0 && progress.position > 0) {
-                        val ratio = (progress.position.toFloat() / progress.duration.toFloat()).coerceIn(0f, 1f)
-                        if (ratio in 0.005f..0.95f && progress.watchState != 2) {
-                            val lastUpdated = maxOf(
-                                progress.lastUpdated,
-                                resume?.updateTime ?: 0L,
-                                bookmark.latestUpdatedTime,
-                                bookmark.bookmarkedTime
-                            )
-                            val item = createResumeSearchResponse(
-                                name = bookmark.name,
-                                url = bookmark.url,
-                                apiName = bookmark.apiName,
-                                type = bookmark.type,
-                                posterUrl = bookmark.posterUrl,
-                                year = bookmark.year,
-                                id = bookmark.id,
-                                quality = bookmark.quality
-                            )
-                            Triple(item, bookmark.url to ratio, lastUpdated)
-                        } else null
-                    } else null
+                    buildActiveResumeItem(mediaId, bookmarkMap, progressMap, resumeMap)
                 }.sortedByDescending { it.third }
 
-                val resumeItems = activeItems.map { it.first }.distinctBy { it.url }
-                val progressValues = activeItems.map { it.second }.toMap()
+                val resumeItems = activeItems.map { it.first }.distinctBy { it.url }.toImmutableList()
+                val progressValues = activeItems.map { it.second }.toMap().toImmutableMap()
 
                 updateState {
                     copy(
@@ -200,9 +199,6 @@ class HomeViewModel(
         }
     }
 
-    /**
-     * Initializes available providers and begins loading home content for the default provider.
-     */
     fun initializeProviders(loadContent: Boolean = true) {
         val all = getAvailableProviders()
         val providers = all.filter { it.hasMainPage }.ifEmpty { all }
@@ -215,7 +211,7 @@ class HomeViewModel(
 
         updateState {
             copy(
-                availableProviders = providers,
+                availableProviders = providers.toImmutableList(),
                 selectedProvider = selected
             )
         }
@@ -237,80 +233,93 @@ class HomeViewModel(
 
     override fun handleEvent(event: HomeEvent) {
         when (event) {
-            is HomeEvent.LoadHome -> {
-                val targetProvider = if (event.providerName != null) {
-                    currentState.availableProviders.find { it.name == event.providerName }
-                        ?: providerRepository.getApiByName(event.providerName)
-                } else {
-                    currentState.selectedProvider
-                        ?: currentState.availableProviders.firstOrNull()
-                }
+            is HomeEvent.LoadHome,
+            is HomeEvent.SelectProvider,
+            is HomeEvent.SelectProviderByName,
+            is HomeEvent.RefreshHome -> handleProviderEvent(event)
 
-                if (targetProvider != null) {
-                    updateState { copy(selectedProvider = targetProvider) }
-                    loadHomePage(targetProvider, forceReload = event.forceReload)
-                } else {
-                    updateState {
-                        copy(
-                            isLoading = false,
-                            isRefreshing = false,
-                            error = txt(Res.string.home_error_no_provider)
-                        )
-                    }
-                }
-            }
+            is HomeEvent.SelectItem,
+            is HomeEvent.ResumeItem,
+            is HomeEvent.ExpandCarousel,
+            is HomeEvent.RemoveFromResumeWatching,
+            is HomeEvent.DismissError -> handleNavigationAndContentEvent(event)
+        }
+    }
 
+    private fun handleProviderEvent(event: HomeEvent) {
+        when (event) {
+            is HomeEvent.LoadHome -> handleLoadHome(event.providerName, event.forceReload)
             is HomeEvent.SelectProvider -> selectProvider(event.provider)
+            is HomeEvent.SelectProviderByName -> handleSelectProviderByName(event.providerName)
+            is HomeEvent.RefreshHome -> handleRefreshHome()
+            else -> Unit
+        }
+    }
 
-            is HomeEvent.SelectProviderByName -> {
-                val provider = currentState.availableProviders.find { it.name == event.providerName }
-                    ?: providerRepository.getApiByName(event.providerName)
-                if (provider != null) {
-                    selectProvider(provider)
-                }
-            }
-
-            is HomeEvent.RefreshHome -> {
-                val currentProvider = currentState.selectedProvider
-                if (currentProvider != null) {
-                    updateState { copy(isRefreshing = true, error = null) }
-                    loadHomePage(currentProvider, forceReload = true, isRefresh = true)
-                }
-            }
-
+    private fun handleNavigationAndContentEvent(event: HomeEvent) {
+        when (event) {
             is HomeEvent.SelectItem -> {
                 updateState { copy(selectedItem = event.item) }
-                if (event.item != null) {
-                    emitEffect(HomeEffect.NavigateToDetails(item = event.item, autoResume = false))
-                }
+                if (event.item != null) emitEffect(HomeEffect.NavigateToDetails(item = event.item, autoResume = false))
             }
-
             is HomeEvent.ResumeItem -> {
                 updateState { copy(selectedItem = event.item) }
                 emitEffect(HomeEffect.NavigateToDetails(item = event.item, autoResume = true))
             }
+            is HomeEvent.ExpandCarousel -> expandCarousel(event.carouselName)
+            is HomeEvent.RemoveFromResumeWatching -> handleRemoveResumeWatching(event.item)
+            is HomeEvent.DismissError -> updateState { copy(error = null) }
+            else -> Unit
+        }
+    }
 
-            is HomeEvent.ExpandCarousel -> {
-                expandCarousel(event.carouselName)
+    private fun handleLoadHome(providerName: String?, forceReload: Boolean) {
+        val targetProvider = if (providerName != null) {
+            currentState.availableProviders.find { it.name == providerName }
+                ?: providerRepository.getApiByName(providerName)
+        } else {
+            currentState.selectedProvider ?: currentState.availableProviders.firstOrNull()
+        }
+
+        if (targetProvider != null) {
+            updateState { copy(selectedProvider = targetProvider) }
+            loadHomePage(targetProvider, forceReload = forceReload)
+        } else {
+            updateState {
+                copy(
+                    isLoading = false,
+                    isRefreshing = false,
+                    error = txt(Res.string.home_error_no_provider)
+                )
             }
+        }
+    }
 
-            is HomeEvent.RemoveFromResumeWatching -> {
-                launch {
-                    val mediaId = event.item.id
-                        ?: bookmarkRepository?.getAllBookmarks(accountId)?.find { it.url == event.item.url }?.id
-                    if (mediaId != null) {
-                        val resume = resumeWatchingRepository?.getResumeWatching(accountId, mediaId)
-                        resume?.episodeId?.let { epId ->
-                            watchProgressRepository?.deleteProgress(accountId, epId)
-                        }
-                        watchProgressRepository?.deleteProgress(accountId, mediaId)
-                        resumeWatchingRepository?.deleteResumeWatching(accountId, mediaId)
-                    }
+    private fun handleSelectProviderByName(providerName: String) {
+        val provider = currentState.availableProviders.find { it.name == providerName }
+            ?: providerRepository.getApiByName(providerName)
+        if (provider != null) {
+            selectProvider(provider)
+        }
+    }
+
+    private fun handleRefreshHome() {
+        val currentProvider = currentState.selectedProvider ?: return
+        updateState { copy(isRefreshing = true, error = null) }
+        loadHomePage(currentProvider, forceReload = true, isRefresh = true)
+    }
+
+    private fun handleRemoveResumeWatching(item: SearchResponse) {
+        launch {
+            val mediaId = item.id
+                ?: bookmarkRepository?.getAllBookmarks(accountId)?.find { it.url == item.url }?.id
+            if (mediaId != null) {
+                val resume = resumeWatchingRepository?.getResumeWatching(accountId, mediaId)
+                resume?.episodeId?.let { epId ->
+                    watchProgressRepository?.deleteProgress(accountId, epId)
                 }
-            }
-
-            is HomeEvent.DismissError -> {
-                updateState { copy(error = null) }
+                watchProgressRepository?.deleteProgress(accountId, mediaId)
+                resumeWatchingRepository?.deleteResumeWatching(accountId, mediaId)
             }
         }
     }
@@ -323,6 +332,70 @@ class HomeViewModel(
         }
     }
 
+    private suspend fun fetchMainPageResponses(
+        provider: MainAPI,
+        mainPages: List<MainPageData>
+    ): List<HomePageResponse?> {
+        if (provider.sequentialMainPage) {
+            val list = mutableListOf<HomePageResponse?>()
+            for ((index, pageData) in mainPages.withIndex()) {
+                if (index > 0 && provider.sequentialMainPageDelay > 0) {
+                    delay(provider.sequentialMainPageDelay)
+                }
+                val res = provider.getMainPage(
+                    page = 1,
+                    request = MainPageRequest(
+                        name = pageData.name,
+                        data = pageData.data,
+                        horizontalImages = pageData.horizontalImages
+                    )
+                )
+                list.add(res)
+            }
+            return list
+        }
+        return coroutineScope {
+            mainPages.map { pageData ->
+                async {
+                    provider.getMainPage(
+                        page = 1,
+                        request = MainPageRequest(
+                            name = pageData.name,
+                            data = pageData.data,
+                            horizontalImages = pageData.horizontalImages
+                        )
+                    )
+                }
+            }.awaitAll()
+        }
+    }
+
+    private fun parseHomeCarousels(
+        mainPages: List<MainPageData>,
+        responses: List<HomePageResponse?>
+    ): List<HomeCarousel> {
+        val carousels = mutableListOf<HomeCarousel>()
+        for ((index, pageData) in mainPages.withIndex()) {
+            val response = responses.getOrNull(index) ?: continue
+            for (item in response.items) {
+                if (item.list.isNotEmpty()) {
+                    carousels.add(
+                        HomeCarousel(
+                            name = item.name.ifBlank { pageData.name.ifBlank { "Featured" } },
+                            items = item.list.toImmutableList(),
+                            isHorizontalImages = item.isHorizontalImages || pageData.horizontalImages,
+                            currentPage = 1,
+                            hasNext = response.hasNext,
+                            isLoadingMore = false,
+                            data = pageData.data
+                        )
+                    )
+                }
+            }
+        }
+        return carousels
+    }
+
     private fun loadHomePage(
         provider: MainAPI,
         forceReload: Boolean = false,
@@ -330,17 +403,17 @@ class HomeViewModel(
     ) {
         launchSafeJob(
             key = "load_home",
-        onError = { e ->
-            updateState {
-                copy(
-                    carousels = emptyList(),
-                    featuredItems = emptyList(),
-                    isLoading = false,
-                    isRefreshing = false,
-                    error = e.message?.let { txt(it) } ?: txt(Res.string.home_error_load_failed)
-                )
+            onError = { e ->
+                updateState {
+                    copy(
+                        carousels = persistentListOf(),
+                        featuredItems = persistentListOf(),
+                        isLoading = false,
+                        isRefreshing = false,
+                        error = e.message?.let { txt(it) } ?: txt(Res.string.home_error_load_failed)
+                    )
+                }
             }
-        }
         ) job@{
             updateState {
                 copy(
@@ -353,8 +426,8 @@ class HomeViewModel(
             if (!provider.hasMainPage) {
                 updateState {
                     copy(
-                        carousels = emptyList(),
-                        featuredItems = emptyList(),
+                        carousels = persistentListOf(),
+                        featuredItems = persistentListOf(),
                         isLoading = false,
                         isRefreshing = false,
                         error = txt(Res.string.home_error_no_homepage, provider.name)
@@ -366,71 +439,18 @@ class HomeViewModel(
             val mainPages = provider.mainPage.ifEmpty {
                 listOf(MainPageData(name = "", data = "", horizontalImages = false))
             }
-
-            val responses: List<HomePageResponse?> = if (provider.sequentialMainPage) {
-                val list = mutableListOf<HomePageResponse?>()
-                for ((index, pageData) in mainPages.withIndex()) {
-                    if (index > 0 && provider.sequentialMainPageDelay > 0) {
-                        delay(provider.sequentialMainPageDelay)
-                    }
-                    val res = provider.getMainPage(
-                        page = 1,
-                        request = MainPageRequest(
-                            name = pageData.name,
-                            data = pageData.data,
-                            horizontalImages = pageData.horizontalImages
-                        )
-                    )
-                    list.add(res)
-                }
-                list
-            } else {
-                coroutineScope {
-                    mainPages.map { pageData ->
-                        async {
-                            provider.getMainPage(
-                                page = 1,
-                                request = MainPageRequest(
-                                    name = pageData.name,
-                                    data = pageData.data,
-                                    horizontalImages = pageData.horizontalImages
-                                )
-                            )
-                        }
-                    }.awaitAll()
-                }
-            }
-
-            val carousels = mutableListOf<HomeCarousel>()
-            for ((index, pageData) in mainPages.withIndex()) {
-                val response = responses.getOrNull(index) ?: continue
-                for (item in response.items) {
-                    if (item.list.isNotEmpty()) {
-                        carousels.add(
-                            HomeCarousel(
-                                name = item.name.ifBlank { pageData.name.ifBlank { "Featured" } },
-                                items = item.list,
-                                isHorizontalImages = item.isHorizontalImages || pageData.horizontalImages,
-                                currentPage = 1,
-                                hasNext = response.hasNext,
-                                isLoadingMore = false,
-                                data = pageData.data
-                            )
-                        )
-                    }
-                }
-            }
-
+            val responses = fetchMainPageResponses(provider, mainPages)
+            val carousels = parseHomeCarousels(mainPages, responses)
             val allItems = carousels.flatMap { it.items }.distinctBy { it.url }
             val featured = if (allItems.isNotEmpty()) {
-                allItems.shuffled().take(6)
+                allItems.shuffled().take(6).toImmutableList()
             } else {
-                emptyList()
+                persistentListOf()
             }
 
             updateState {
                 copy(
-                    carousels = carousels,
+                    carousels = carousels.toImmutableList(),
                     featuredItems = featured,
                     isLoading = false,
                     isRefreshing = false,
@@ -445,7 +465,7 @@ class HomeViewModel(
             copy(
                 carousels = carousels.map {
                     if (it.name == carouselName) transform(it) else it
-                }
+                }.toImmutableList()
             )
         }
     }
@@ -487,7 +507,7 @@ class HomeViewModel(
 
             if (response != null && response.items.isNotEmpty()) {
                 val newItems = response.items.flatMap { it.list }
-                val mergedList = (targetCarousel.items + newItems).distinctBy { it.url }
+                val mergedList = (targetCarousel.items + newItems).distinctBy { it.url }.toImmutableList()
 
                 patchCarousel(carouselName) {
                     it.copy(

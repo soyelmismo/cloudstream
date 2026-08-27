@@ -1,8 +1,10 @@
 package com.lagradost.cloudstream3.shared.ui.components
 
+import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 expect fun setPlatformLocale(languageCode: String)
 
@@ -29,3 +31,12 @@ fun ProvideAppLocale(
 
     content()
 }
+
+@Preview
+@Composable
+private fun ProvideAppLocalePreview() {
+    ProvideAppLocale(languageCode = "en") {
+        Text("Locale Content")
+    }
+}
+

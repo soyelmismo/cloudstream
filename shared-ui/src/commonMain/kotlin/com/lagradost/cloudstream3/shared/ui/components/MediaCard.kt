@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION", "DEPRECATION_ERROR")
+
 package com.lagradost.cloudstream3.shared.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
@@ -37,6 +39,7 @@ import androidx.compose.material.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,12 +60,13 @@ import androidx.compose.ui.unit.sp
 import com.lagradost.cloudstream3.MovieSearchResponse
 import com.lagradost.cloudstream3.SearchResponse
 import com.lagradost.cloudstream3.TvSeriesSearchResponse
+import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.dsCombinedClickable
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
-/**
- * Standard poster card dimensions following cinematic aspect ratios.
- */
+@Immutable
 object MediaCardDefaults {
     val VerticalWidth = 112.dp
     val HorizontalWidth = 195.dp
@@ -130,7 +134,6 @@ fun MediaCard(
                 scale = scale
             )
     ) {
-        // Media Poster Card Surface
         Card(
             shape = cardShape,
             backgroundColor = CloudStreamColors.Surface,
@@ -141,7 +144,6 @@ fun MediaCard(
                 .aspectRatio(aspectRatio)
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
-                // Media Poster Image
                 AsyncImage(
                     url = item.posterUrl,
                     contentDescription = item.name,
@@ -150,7 +152,6 @@ fun MediaCard(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Top gradient for badge contrast and legibility
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -159,15 +160,14 @@ fun MediaCard(
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(
-                                    Color.Black.copy(alpha = 0.70f),
-                                    Color.Black.copy(alpha = 0.30f),
+                                    CloudStreamColors.Background.copy(alpha = 0.70f),
+                                    CloudStreamColors.Background.copy(alpha = 0.30f),
                                     Color.Transparent
                                 )
                             )
                         )
                 )
 
-                // Badges Row (Top)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -176,17 +176,14 @@ fun MediaCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Left Badges: Quality and Type
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         QualityBadge(quality = item.quality)
                         TypeBadge(type = item.type)
                     }
 
-                    // Right Badges: Dub/Sub
                     DubSubBadges(searchResponse = item)
                 }
 
-                // Watch Status Overlay Badge (Bottom Left)
                 if (watchStatus != null && watchStatus > 0) {
                     Box(
                         modifier = Modifier
@@ -197,7 +194,6 @@ fun MediaCard(
                     }
                 }
 
-                // Provider Tag Badge (Bottom Right overlay if available)
                 if (item.apiName.isNotBlank() && !isHorizontal) {
                     Box(
                         modifier = Modifier
@@ -208,7 +204,6 @@ fun MediaCard(
                     }
                 }
 
-                // Hover / TV D-Pad Focus Play Button Overlay
                 androidx.compose.animation.AnimatedVisibility(
                     visible = isHighlighted,
                     enter = fadeIn(tween(180)) + scaleIn(tween(180), initialScale = 0.85f),
@@ -218,7 +213,7 @@ fun MediaCard(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.45f)),
+                            .background(CloudStreamColors.Background.copy(alpha = 0.45f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Surface(
@@ -247,7 +242,6 @@ fun MediaCard(
                     }
                 }
 
-                // Bottom Gradient for Horizontal cards with title overlay
                 if (isHorizontal) {
                     Box(
                         modifier = Modifier
@@ -258,15 +252,14 @@ fun MediaCard(
                                 Brush.verticalGradient(
                                     colors = listOf(
                                         Color.Transparent,
-                                        Color.Black.copy(alpha = 0.6f),
-                                        Color.Black.copy(alpha = 0.92f)
+                                        CloudStreamColors.Background.copy(alpha = 0.6f),
+                                        CloudStreamColors.Background.copy(alpha = 0.92f)
                                     )
                                 )
                             )
                     )
                 }
 
-                // Playback progress bar for resume watching
                 if (progress != null && progress > 0f) {
                     val clampedProgress = progress.coerceIn(0f, 1f)
                     Box(
@@ -289,12 +282,7 @@ fun MediaCard(
 
         Spacer(modifier = Modifier.height(7.dp))
 
-        // Title Label
-        val year = when (item) {
-            is MovieSearchResponse -> item.year
-            is TvSeriesSearchResponse -> item.year
-            else -> null
-        }
+        val year = extractMediaYear(item)
 
         Text(
             text = item.name,
@@ -309,7 +297,6 @@ fun MediaCard(
             modifier = Modifier.fillMaxWidth()
         )
 
-        // Metadata Row: Year and Provider name
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -344,6 +331,86 @@ fun MediaCard(
                         .padding(start = 4.dp)
                 )
             }
+        }
+    }
+}
+
+private fun extractMediaYear(item: SearchResponse): Int? = when (item) {
+    is MovieSearchResponse -> item.year
+    is TvSeriesSearchResponse -> item.year
+    else -> null
+}
+
+@Suppress("DEPRECATION")
+@Preview
+@Composable
+private fun MediaCardPreview() {
+    CloudStreamTheme {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            MediaCard(
+                item = MovieSearchResponse(
+                    name = "Preview Movie Title",
+                    url = "https://example.com/movie",
+                    apiName = "StreamProvider",
+                    type = TvType.Movie,
+                    posterUrl = null,
+                    year = 2024
+                ),
+                onClick = {}
+            )
+            MediaCard(
+                item = TvSeriesSearchResponse(
+                    name = "Preview Series Title",
+                    url = "https://example.com/series",
+                    apiName = "StreamProvider",
+                    type = TvType.TvSeries,
+                    posterUrl = null,
+                    year = 2024
+                ),
+                isHorizontal = true,
+                onClick = {}
+            )
+        }
+    }
+}
+
+@Suppress("DEPRECATION")
+@Preview
+@Composable
+private fun MediaCardAmoledLightPreview() {
+    CloudStreamTheme(theme = com.lagradost.cloudstream3.shared.viewmodels.settings.AppTheme.AMOLED, isDarkMode = false) {
+        Row(
+            modifier = Modifier
+                .background(CloudStreamColors.Background)
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            MediaCard(
+                item = MovieSearchResponse(
+                    name = "Preview Movie Light",
+                    url = "https://example.com/movie",
+                    apiName = "StreamProvider",
+                    type = TvType.Movie,
+                    posterUrl = null,
+                    year = 2024
+                ),
+                onClick = {}
+            )
+            MediaCard(
+                item = TvSeriesSearchResponse(
+                    name = "Preview Series Light",
+                    url = "https://example.com/series",
+                    apiName = "StreamProvider",
+                    type = TvType.TvSeries,
+                    posterUrl = null,
+                    year = 2024
+                ),
+                isHorizontal = true,
+                onClick = {}
+            )
         }
     }
 }

@@ -4,12 +4,10 @@ import androidx.room.TypeConverter
 import com.lagradost.cloudstream3.DubStatus
 import com.lagradost.cloudstream3.SearchQuality
 import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.mvvm.logError
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-/**
- * Room type converters for complex data types and enums used across CloudStream KMP entities.
- */
 object RoomTypeConverters {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -43,11 +41,13 @@ object RoomTypeConverters {
     fun fromStringList(value: List<String>?): String? = value?.let { json.encodeToString(it) }
 
     @TypeConverter
-    fun toStringList(value: String?): List<String>? = value?.let {
-        try {
-            json.decodeFromString<List<String>>(it)
-        } catch (_: Throwable) {
-            emptyList()
+    fun toStringList(value: String?): List<String>? {
+        if (value.isNullOrBlank()) return null
+        return try {
+            json.decodeFromString<List<String>>(value)
+        } catch (e: Exception) {
+            logError(e)
+            null
         }
     }
 
@@ -55,11 +55,13 @@ object RoomTypeConverters {
     fun fromStringMap(value: Map<String, String>?): String? = value?.let { json.encodeToString(it) }
 
     @TypeConverter
-    fun toStringMap(value: String?): Map<String, String>? = value?.let {
-        try {
-            json.decodeFromString<Map<String, String>>(it)
-        } catch (_: Throwable) {
-            emptyMap()
+    fun toStringMap(value: String?): Map<String, String>? {
+        if (value.isNullOrBlank()) return null
+        return try {
+            json.decodeFromString<Map<String, String>>(value)
+        } catch (e: Exception) {
+            logError(e)
+            null
         }
     }
 
@@ -70,14 +72,16 @@ object RoomTypeConverters {
     }
 
     @TypeConverter
-    fun toDubStatusMap(value: String?): Map<DubStatus, Int?>? = value?.let { str ->
-        try {
-            val stringKeyMap = json.decodeFromString<Map<String, Int?>>(str)
+    fun toDubStatusMap(value: String?): Map<DubStatus, Int?>? {
+        if (value.isNullOrBlank()) return null
+        return try {
+            val stringKeyMap = json.decodeFromString<Map<String, Int?>>(value)
             stringKeyMap.mapNotNull { (key, count) ->
                 stringToEnum<DubStatus>(key)?.let { it to count }
             }.toMap()
-        } catch (_: Throwable) {
-            emptyMap()
+        } catch (e: Exception) {
+            logError(e)
+            null
         }
     }
 }

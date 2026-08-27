@@ -43,9 +43,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
-import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 /**
  * Shared Design System base button providing standardized shape, scale animations,
@@ -194,10 +196,6 @@ internal fun RowScope.ButtonContent(
     }
 }
 
-// =============================================================================
-// 1. PRIMARY BUTTON
-// =============================================================================
-
 /**
  * Standardized Primary action button using [CloudStreamColors.Primary],
  * 10dp rounded corners, with scale and glow feedback on TV and desktop.
@@ -290,10 +288,6 @@ fun PrimaryButton(
         content = content
     )
 }
-
-// =============================================================================
-// 2. SECONDARY BUTTON
-// =============================================================================
 
 /**
  * Surface-variant or tonal button using [CloudStreamColors.SurfaceVariant] and [CloudStreamColors.TextPrimary].
@@ -388,10 +382,6 @@ fun SecondaryButton(
     )
 }
 
-// =============================================================================
-// 3. DANGER BUTTON
-// =============================================================================
-
 /**
  * Red/destructive action button using [CloudStreamColors.Error] and MaterialTheme.colors.onError.
  */
@@ -477,10 +467,6 @@ fun DangerButton(
         content = content
     )
 }
-
-// =============================================================================
-// 4. GHOST BUTTON
-// =============================================================================
 
 /**
  * Text-only subtle button with ripple and subtle hover background.
@@ -574,10 +560,6 @@ fun GhostButton(
         content = content
     )
 }
-
-// =============================================================================
-// 5. OUTLINED ACTION BUTTON
-// =============================================================================
 
 /**
  * Outlined bordered button with theme stroke and smooth focus feedback.
@@ -674,4 +656,21 @@ fun OutlinedActionButton(
         contentPadding = contentPadding,
         content = content
     )
+}
+
+@Preview
+@Composable
+private fun CloudStreamButtonsPreview() {
+    CloudStreamTheme {
+        androidx.compose.foundation.layout.Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            PrimaryButton(text = "Primary Button", onClick = {})
+            SecondaryButton(text = "Secondary Button", onClick = {})
+            DangerButton(text = "Danger Button", onClick = {})
+            GhostButton(text = "Ghost Button", onClick = {})
+            OutlinedActionButton(text = "Outlined Action Button", onClick = {})
+        }
+    }
 }

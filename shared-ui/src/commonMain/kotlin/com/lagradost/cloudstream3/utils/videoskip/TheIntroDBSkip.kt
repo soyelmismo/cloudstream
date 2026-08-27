@@ -5,12 +5,13 @@ import com.lagradost.cloudstream3.LoadResponse.Companion.getImdbId
 import com.lagradost.cloudstream3.LoadResponse.Companion.getTMDbId
 import com.lagradost.cloudstream3.LoadResponse.Companion.isMovie
 import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.models.ResultEpisode
 import com.lagradost.cloudstream3.app
+import com.lagradost.cloudstream3.models.ResultEpisode
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
-/** https://theintrodb.org/docs */
 class TheIntroDBSkip : SkipAPI() {
     override val name = "TheIntroDB"
     override val supportedTypes = setOf(
@@ -18,39 +19,46 @@ class TheIntroDBSkip : SkipAPI() {
         TvType.AsianDrama
     )
 
-    val mainUrl = "https://api.theintrodb.org"
+    companion object {
+        private const val MAIN_URL = "https://api.theintrodb.org"
+
+        private fun buildUrl(data: LoadResponse, episode: ResultEpisode): String? {
+            val idSuffix = data.getTMDbId()?.let { "tmdb_id=$it" }
+                ?: data.getImdbId()?.let { "imdb_id=$it" }
+                ?: return null
+
+            if (data.isMovie()) {
+                return "$MAIN_URL/v2/media?$idSuffix"
+            }
+
+            val season = episode.season ?: return null
+            return "$MAIN_URL/v2/media?$idSuffix&season=$season&episode=${episode.episode}"
+        }
+
+        private fun List<Stamp>.toSkipStamps(type: SkipType, defaultEndMs: Long): List<SkipStamp> =
+            map { stamp ->
+                SkipStamp(
+                    type = type,
+                    startMs = stamp.startMs ?: 0L,
+                    endMs = stamp.endMs ?: defaultEndMs
+                )
+            }
+    }
 
     override suspend fun stamps(
         data: LoadResponse,
         episode: ResultEpisode,
         episodeDurationMs: Long
-    ): List<SkipStamp>? {
-        val idSuffix =
-            data.getTMDbId()?.let { tmdbId -> "tmdb_id=$tmdbId" }
-                ?: data.getImdbId()?.let { imdbId -> "imdb_id=$imdbId" }
-                ?: return null
+    ): ImmutableList<SkipStamp>? {
+        val url = buildUrl(data, episode) ?: return null
+        val root = runCatching { app.get(url).parsed<Root>() }.getOrNull() ?: return null
 
-        val url = if (data.isMovie()) {
-            "$mainUrl/v2/media?$idSuffix"
-        } else {
-            val season = episode.season ?: return null
-            "$mainUrl/v2/media?$idSuffix&season=$season&episode=${episode.episode}"
-        }
-        val root = app.get(url).parsed<Root>()
-        return arrayOf(
-            root.intro to SkipType.Intro,
-            root.credits to SkipType.Credits,
-            root.recap to SkipType.Recap,
-            root.preview to SkipType.Preview
-        ).map { (list, type) ->
-            list.map { stamp ->
-                SkipStamp(
-                    type,
-                    stamp.startMs ?: 0L,
-                    stamp.endMs ?: episodeDurationMs
-                )
-            }
-        }.flatten()
+        return (
+            root.intro.toSkipStamps(SkipType.Intro, episodeDurationMs) +
+            root.credits.toSkipStamps(SkipType.Credits, episodeDurationMs) +
+            root.recap.toSkipStamps(SkipType.Recap, episodeDurationMs) +
+            root.preview.toSkipStamps(SkipType.Preview, episodeDurationMs)
+        ).toImmutableList()
     }
 
     @Serializable

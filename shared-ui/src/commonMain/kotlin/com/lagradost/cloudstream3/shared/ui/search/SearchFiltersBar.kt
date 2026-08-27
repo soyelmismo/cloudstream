@@ -26,8 +26,9 @@ import com.lagradost.cloudstream3.shared.ui.components.designsystem.CloudStreamD
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.CloudStreamFilterChip
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
 import com.lagradost.cloudstream3.shared.viewmodels.SearchFilters
-import org.jetbrains.compose.resources.stringResource
 import cloudstream.shared_ui.generated.resources.*
+import org.jetbrains.compose.resources.stringResource
+import kotlinx.collections.immutable.ImmutableList
 
 /**
  * Scrollable bar of filter chips for selecting providers, media types, qualities,
@@ -36,7 +37,7 @@ import cloudstream.shared_ui.generated.resources.*
 @Composable
 fun SearchFiltersBar(
     filters: SearchFilters,
-    availableProviders: List<MainAPI>,
+    availableProviders: ImmutableList<MainAPI>,
     availableTypes: Set<TvType>,
     availableQualities: Set<SearchQuality>,
     onToggleProvider: (String) -> Unit,
@@ -140,7 +141,7 @@ fun SearchFiltersBar(
  */
 @Composable
 private fun ProvidersDropdownChip(
-    availableProviders: List<MainAPI>,
+    availableProviders: ImmutableList<MainAPI>,
     selectedProviders: Set<String>,
     onToggleProvider: (String) -> Unit
 ) {

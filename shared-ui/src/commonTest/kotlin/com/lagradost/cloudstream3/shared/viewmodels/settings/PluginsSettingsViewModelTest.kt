@@ -124,20 +124,16 @@ class PluginsSettingsViewModelTest {
 
         val initialCount = viewModel.state.value.repositories.size
 
-        viewModel.onEvent(
-            PluginsSettingsEvent.AddRepository(
-                url = "https://example.com/custom-repo/repo.json",
-                name = "My Custom Repo"
-            )
+        viewModel.addRepository(
+            url = "https://example.com/custom-repo/repo.json",
+            name = "My Custom Repo"
         )
         testScope.advanceUntilIdle()
         assertEquals(initialCount + 1, viewModel.state.value.repositories.size)
         assertTrue(viewModel.state.value.repositories.any { it.url == "https://example.com/custom-repo/repo.json" })
 
-        viewModel.onEvent(
-            PluginsSettingsEvent.RemoveRepository(
-                url = "https://example.com/custom-repo/repo.json"
-            )
+        viewModel.removeRepository(
+            url = "https://example.com/custom-repo/repo.json"
         )
         testScope.advanceUntilIdle()
 
@@ -158,7 +154,7 @@ class PluginsSettingsViewModelTest {
         testScope.advanceUntilIdle()
 
         val pluginToInstall = viewModel.state.value.availablePlugins.first()
-        viewModel.onEvent(PluginsSettingsEvent.InstallPlugin(pluginToInstall))
+        viewModel.installPlugin(pluginToInstall)
         testScope.advanceUntilIdle()
 
         assertTrue(viewModel.state.value.installedPlugins.any { it.internalName == pluginToInstall.internalName })
@@ -169,7 +165,7 @@ class PluginsSettingsViewModelTest {
         assertEquals(Res.string.plugin_installed_success, installSuccess.messageRes)
         assertEquals(listOf(pluginToInstall.name), installSuccess.formatArgs)
 
-        viewModel.onEvent(PluginsSettingsEvent.UninstallPlugin(pluginToInstall.internalName))
+        viewModel.uninstallPlugin(pluginToInstall.internalName)
         testScope.advanceUntilIdle()
 
         assertFalse(viewModel.state.value.installedPlugins.any { it.internalName == pluginToInstall.internalName })
@@ -194,18 +190,18 @@ class PluginsSettingsViewModelTest {
         testScope.advanceUntilIdle()
 
         // Filter by TV Type
-        viewModel.onEvent(PluginsSettingsEvent.FilterByTvType("Anime"))
+        viewModel.filterByTvType("Anime")
         testScope.advanceUntilIdle()
         assertEquals(1, viewModel.state.value.filteredAvailablePlugins.size)
 
         // Filter by non-existent TV Type
-        viewModel.onEvent(PluginsSettingsEvent.FilterByTvType("NonExistentType"))
+        viewModel.filterByTvType("NonExistentType")
         testScope.advanceUntilIdle()
         assertEquals(0, viewModel.state.value.filteredAvailablePlugins.size)
 
         // Reset TV Type filter & test search
-        viewModel.onEvent(PluginsSettingsEvent.FilterByTvType(null))
-        viewModel.onEvent(PluginsSettingsEvent.Search("Community"))
+        viewModel.filterByTvType(null)
+        viewModel.search("Community")
         testScope.advanceUntilIdle()
 
         assertEquals(1, viewModel.state.value.filteredAvailablePlugins.size)
@@ -231,8 +227,8 @@ class PluginsSettingsViewModelTest {
             assertTrue(repo.lastSyncTime != null && repo.lastSyncTime > 0L)
         }
 
-        // Test SyncRepositories event
-        viewModel.onEvent(PluginsSettingsEvent.SyncRepositories)
+        // Test SyncRepositories
+        viewModel.syncRepositories()
         testScope.advanceUntilIdle()
 
         val syncedState = viewModel.state.value
@@ -331,7 +327,7 @@ class PluginsSettingsViewModelTest {
         val initialCount = viewModel.state.value.repositories.size
 
         // Add invalid URL
-        viewModel.onEvent(PluginsSettingsEvent.AddRepository(url = "not a valid url", name = "Invalid Repo"))
+        viewModel.addRepository(url = "not a valid url", name = "Invalid Repo")
         testScope.advanceUntilIdle()
 
         assertEquals(initialCount, viewModel.state.value.repositories.size)
@@ -366,7 +362,7 @@ class PluginsSettingsViewModelTest {
         assertTrue(detailedPlugin.changelog!!.contains("multiplatform"))
 
         // Install and verify state
-        viewModel.onEvent(PluginsSettingsEvent.InstallPlugin(detailedPlugin))
+        viewModel.installPlugin(detailedPlugin)
         testScope.advanceUntilIdle()
 
         val installedPlugin = viewModel.state.value.installedPlugins.first { it.internalName == detailedPlugin.internalName }
@@ -374,7 +370,7 @@ class PluginsSettingsViewModelTest {
 
         // Toggle disabled / enabled
         val disabledPlugin = installedPlugin.copy(isEnabled = false)
-        viewModel.onEvent(PluginsSettingsEvent.InstallPlugin(disabledPlugin))
+        viewModel.installPlugin(disabledPlugin)
         testScope.advanceUntilIdle()
 
         val updatedPlugin = viewModel.state.value.installedPlugins.first { it.internalName == detailedPlugin.internalName }
@@ -428,7 +424,7 @@ class PluginsSettingsViewModelTest {
         assertEquals(3, initialState.currentRepoPlugins.size)
 
         // Select Community Repository (Level 2)
-        viewModel.onEvent(PluginsSettingsEvent.FilterByRepository("https://example.com/community.json"))
+        viewModel.filterByRepository("https://example.com/community.json")
         testScope.advanceUntilIdle()
 
         val communityState = viewModel.state.value
@@ -438,7 +434,7 @@ class PluginsSettingsViewModelTest {
         assertTrue(communityState.currentRepoPlugins.all { it.repositoryUrl == "https://example.com/community.json" })
 
         // Select Hexated Repository (Level 2)
-        viewModel.onEvent(PluginsSettingsEvent.FilterByRepository("https://example.com/hexated.json"))
+        viewModel.filterByRepository("https://example.com/hexated.json")
         testScope.advanceUntilIdle()
 
         val hexatedState = viewModel.state.value
@@ -448,7 +444,7 @@ class PluginsSettingsViewModelTest {
         assertEquals("HexatedPlugin", hexatedState.currentRepoPlugins.first().internalName)
 
         // Clear repo selection (back to Level 1)
-        viewModel.onEvent(PluginsSettingsEvent.FilterByRepository(null))
+        viewModel.filterByRepository(null)
         testScope.advanceUntilIdle()
 
         val clearedState = viewModel.state.value
@@ -473,12 +469,12 @@ class PluginsSettingsViewModelTest {
         assertEquals(null, viewModel.state.value.selectedPluginForDetails)
 
         // Select plugin
-        viewModel.onEvent(PluginsSettingsEvent.SelectPluginForDetails(targetPlugin))
+        viewModel.selectPluginForDetails(targetPlugin)
         testScope.advanceUntilIdle()
         assertEquals(targetPlugin.internalName, viewModel.state.value.selectedPluginForDetails?.internalName)
 
         // Clear selected plugin
-        viewModel.onEvent(PluginsSettingsEvent.SelectPluginForDetails(null))
+        viewModel.selectPluginForDetails(null)
         testScope.advanceUntilIdle()
         assertEquals(null, viewModel.state.value.selectedPluginForDetails)
     }
@@ -501,7 +497,7 @@ class PluginsSettingsViewModelTest {
         assertEquals(0, viewModel.state.value.installedPlugins.size)
 
         // Batch install all plugins for Community repository
-        viewModel.onEvent(PluginsSettingsEvent.InstallAllPlugins(repoUrl))
+        viewModel.installAllPlugins(repoUrl)
         testScope.advanceUntilIdle()
 
         val installedState = viewModel.state.value
@@ -517,7 +513,7 @@ class PluginsSettingsViewModelTest {
         assertFalse(hexatedPlugin.isInstalled)
 
         // Batch uninstall all plugins for Community repository
-        viewModel.onEvent(PluginsSettingsEvent.UninstallAllPlugins(repoUrl))
+        viewModel.uninstallAllPlugins(repoUrl)
         testScope.advanceUntilIdle()
 
         val uninstalledState = viewModel.state.value
@@ -544,7 +540,7 @@ class PluginsSettingsViewModelTest {
         val repoUrl = "https://example.com/community.json"
 
         // Batch install with 1 failure out of 2
-        viewModel.onEvent(PluginsSettingsEvent.InstallAllPlugins(repoUrl))
+        viewModel.installAllPlugins(repoUrl)
         testScope.advanceUntilIdle()
 
         val state = viewModel.state.value
@@ -571,7 +567,7 @@ class PluginsSettingsViewModelTest {
         val repoUrl = "https://example.com/community.json"
 
         // First install StreamPlugin cleanly (not failing)
-        viewModel.onEvent(PluginsSettingsEvent.InstallPlugin(viewModel.state.value.availablePlugins.first { it.internalName == "StreamPlugin" }))
+        viewModel.installPlugin(viewModel.state.value.availablePlugins.first { it.internalName == "StreamPlugin" })
         testScope.advanceUntilIdle()
         assertEquals(1, viewModel.state.value.installedPlugins.size)
 
@@ -581,7 +577,7 @@ class PluginsSettingsViewModelTest {
         testScope.advanceUntilIdle()
 
         // Batch uninstall
-        viewModel.onEvent(PluginsSettingsEvent.UninstallAllPlugins(repoUrl))
+        viewModel.uninstallAllPlugins(repoUrl)
         testScope.advanceUntilIdle()
 
         val state = viewModel.state.value
@@ -602,7 +598,7 @@ class PluginsSettingsViewModelTest {
         testScope.advanceUntilIdle()
 
         // Uninstall when nothing is installed -> should set Idle
-        viewModel.onEvent(PluginsSettingsEvent.UninstallAllPlugins("https://example.com/community.json"))
+        viewModel.uninstallAllPlugins("https://example.com/community.json")
         testScope.advanceUntilIdle()
 
         assertEquals(PluginOperationState.Idle, viewModel.state.value.operationState)

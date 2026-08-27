@@ -1,6 +1,11 @@
 package com.lagradost.cloudstream3.shared.ui.downloads
 
 import androidx.compose.material.MaterialTheme
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
+import org.jetbrains.compose.ui.tooling.preview.Preview
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
@@ -129,14 +134,12 @@ fun DownloadsScreenContent(
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            // Header & Storage bar
             DownloadsTopHeader(
                 storageUsage = state.storageUsage,
                 activeSpeed = state.formattedTotalSpeed,
                 hasActiveDownloads = state.totalActiveDownloadsCount > 0
             )
 
-            // Tabs
             DownloadsTabs(
                 selectedTab = state.selectedTab,
                 activeCount = state.totalActiveDownloadsCount,
@@ -144,7 +147,6 @@ fun DownloadsScreenContent(
                 onTabSelected = { onEvent(DownloadsEvent.SwitchTab(it)) }
             )
 
-            // Content
             Crossfade(
                 targetState = state.selectedTab,
                 modifier = Modifier.weight(1f)
@@ -233,7 +235,6 @@ private fun DownloadsTopHeader(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Storage visual bar
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -253,7 +254,6 @@ private fun DownloadsTopHeader(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Storage bar
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -365,7 +365,7 @@ private fun DownloadsTabs(
 
 @Composable
 private fun ActiveDownloadsList(
-    activeDownloads: List<ActiveDownloadItem>,
+    activeDownloads: ImmutableList<ActiveDownloadItem>,
     onEvent: (DownloadsEvent) -> Unit,
     onNavigateToExplore: (() -> Unit)?
 ) {
@@ -386,7 +386,6 @@ private fun ActiveDownloadsList(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Queue Control Actions Header
         item {
             Surface(
                 shape = RoundedCornerShape(12.dp),
@@ -424,7 +423,6 @@ private fun ActiveDownloadsList(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Pause All
                         OutlinedButton(
                             onClick = { onEvent(DownloadsEvent.PauseAll) },
                             shape = RoundedCornerShape(8.dp),
@@ -447,7 +445,6 @@ private fun ActiveDownloadsList(
                             )
                         }
 
-                        // Resume All
                         OutlinedButton(
                             onClick = { onEvent(DownloadsEvent.ResumeAll) },
                             shape = RoundedCornerShape(8.dp),
@@ -470,7 +467,6 @@ private fun ActiveDownloadsList(
                             )
                         }
 
-                        // Cancel All
                         IconButton(
                             onClick = { isCancelAllDialogOpen = true },
                             modifier = Modifier.size(32.dp)
@@ -531,204 +527,263 @@ private fun ActiveDownloadCard(
         border = BorderStroke(1.dp, CloudStreamColors.SurfaceVariant),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier.padding(14.dp)
-        ) {
+        Column(modifier = Modifier.padding(14.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Poster
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = CloudStreamColors.SurfaceVariant,
-                    modifier = Modifier.size(width = 48.dp, height = 72.dp)
-                ) {
-                    if (item.posterUrl != null) {
-                        AsyncImage(
-                            url = item.posterUrl,
-                            contentDescription = item.title,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Download,
-                                contentDescription = null,
-                                tint = CloudStreamColors.TextMuted,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                }
+                ActiveDownloadPoster(
+                    posterUrl = item.posterUrl,
+                    title = item.title
+                )
 
                 Spacer(modifier = Modifier.width(14.dp))
 
-                // Info
-                Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = item.headerName,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = CloudStreamColors.TextPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-
-                        if (item.videoQuality != null) {
-                            Surface(
-                                shape = RoundedCornerShape(4.dp),
-                                color = CloudStreamColors.Primary.copy(alpha = 0.15f),
-                                modifier = Modifier.padding(start = 6.dp)
-                            ) {
-                                Text(
-                                    text = item.videoQuality,
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = CloudStreamColors.Primary,
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    if (item.episodeName != null || item.episodeIndex != null) {
-                        val epLabel = buildString {
-                            if (item.seasonIndex != null && item.seasonIndex > 0) {
-                                append("${stringResource(Res.string.season)} ${item.seasonIndex} • ")
-                            }
-                            if (item.episodeName != null) {
-                                append(item.episodeName)
-                            } else {
-                                append("${stringResource(Res.string.episode)} ${item.episodeIndex}")
-                            }
-                        }
-                        Text(
-                            text = epLabel,
-                            fontSize = 12.sp,
-                            color = CloudStreamColors.TextSecondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    // Progress text
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = item.formattedProgressText,
-                            fontSize = 11.sp,
-                            color = CloudStreamColors.TextMuted
-                        )
-
-                        Text(
-                            text = when (item.status) {
-                                DownloadItemStatus.DOWNLOADING -> {
-                                    if (item.etaSeconds != null && item.etaSeconds > 0) {
-                                        val m = item.etaSeconds / 60
-                                        val s = item.etaSeconds % 60
-                                        "${item.formattedSpeed} (${m}m ${s}s)"
-                                    } else {
-                                        item.formattedSpeed
-                                    }
-                                }
-                                DownloadItemStatus.PAUSED -> stringResource(Res.string.downloadPaused)
-                                DownloadItemStatus.ERROR -> stringResource(Res.string.downloadError)
-                                DownloadItemStatus.QUEUED -> stringResource(Res.string.downloadQueued)
-                                DownloadItemStatus.COMPLETED -> stringResource(Res.string.downloadCompleted)
-                            },
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = when (item.status) {
-                                DownloadItemStatus.DOWNLOADING -> CloudStreamColors.Primary
-                                DownloadItemStatus.PAUSED -> CloudStreamColors.Warning
-                                DownloadItemStatus.ERROR -> CloudStreamColors.Error
-                                else -> CloudStreamColors.TextMuted
-                            }
-                        )
-                    }
-                }
+                ActiveDownloadInfo(
+                    item = item,
+                    modifier = Modifier.weight(1f)
+                )
 
                 Spacer(modifier = Modifier.width(10.dp))
 
-                // Action button
-                when (item.status) {
-                    DownloadItemStatus.DOWNLOADING -> {
-                        IconButton(onClick = onPause) {
-                            Icon(
-                                imageVector = Icons.Default.Pause,
-                                contentDescription = stringResource(Res.string.pause),
-                                tint = CloudStreamColors.TextPrimary
-                            )
-                        }
-                    }
-                    DownloadItemStatus.PAUSED -> {
-                        IconButton(onClick = onResume) {
-                            Icon(
-                                imageVector = Icons.Default.PlayArrow,
-                                contentDescription = stringResource(Res.string.resume),
-                                tint = CloudStreamColors.Primary
-                            )
-                        }
-                    }
-                    DownloadItemStatus.ERROR -> {
-                        IconButton(onClick = onRetry) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = stringResource(Res.string.reload_error),
-                                tint = CloudStreamColors.Error
-                            )
-                        }
-                    }
-                    else -> {
-                        IconButton(onClick = onCancel) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = stringResource(Res.string.cancel),
-                                tint = CloudStreamColors.TextMuted
-                            )
-                        }
-                    }
-                }
+                ActiveDownloadActionButton(
+                    status = item.status,
+                    onPause = onPause,
+                    onResume = onResume,
+                    onCancel = onCancel,
+                    onRetry = onRetry
+                )
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Progress bar
-            LinearProgressIndicator(
-                progress = item.progress.coerceIn(0f, 1f),
-                color = when (item.status) {
-                    DownloadItemStatus.PAUSED -> MaterialTheme.colors.secondary
-                    DownloadItemStatus.ERROR -> CloudStreamColors.Error
-                    else -> CloudStreamColors.Primary
-                },
-                backgroundColor = CloudStreamColors.SurfaceVariant,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp))
+            ActiveDownloadProgressBar(
+                progress = item.progress,
+                status = item.status
             )
         }
     }
 }
 
 @Composable
+private fun ActiveDownloadPoster(
+    posterUrl: String?,
+    title: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = CloudStreamColors.SurfaceVariant,
+        modifier = modifier.size(width = 48.dp, height = 72.dp)
+    ) {
+        if (posterUrl != null) {
+            AsyncImage(
+                url = posterUrl,
+                contentDescription = title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Download,
+                    contentDescription = null,
+                    tint = CloudStreamColors.TextMuted,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActiveDownloadInfo(
+    item: ActiveDownloadItem,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = item.headerName,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                color = CloudStreamColors.TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+
+            if (item.videoQuality != null) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = CloudStreamColors.Primary.copy(alpha = 0.15f),
+                    modifier = Modifier.padding(start = 6.dp)
+                ) {
+                    Text(
+                        text = item.videoQuality,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = CloudStreamColors.Primary,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        }
+
+        ActiveDownloadEpisodeLabel(item = item)
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = item.formattedProgressText,
+                fontSize = 11.sp,
+                color = CloudStreamColors.TextMuted
+            )
+
+            ActiveDownloadStatusText(item = item)
+        }
+    }
+}
+
+@Composable
+private fun ActiveDownloadEpisodeLabel(item: ActiveDownloadItem) {
+    if (item.episodeName == null && item.episodeIndex == null) return
+
+    val epLabel = buildString {
+        if (item.seasonIndex != null && item.seasonIndex > 0) {
+            append("${stringResource(Res.string.season)} ${item.seasonIndex} • ")
+        }
+        if (item.episodeName != null) {
+            append(item.episodeName)
+        } else {
+            append("${stringResource(Res.string.episode)} ${item.episodeIndex}")
+        }
+    }
+    Text(
+        text = epLabel,
+        fontSize = 12.sp,
+        color = CloudStreamColors.TextSecondary,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+    )
+}
+
+@Composable
+private fun ActiveDownloadStatusText(item: ActiveDownloadItem) {
+    val text = when (item.status) {
+        DownloadItemStatus.DOWNLOADING -> {
+            if (item.etaSeconds != null && item.etaSeconds > 0) {
+                val m = item.etaSeconds / 60
+                val s = item.etaSeconds % 60
+                "${item.formattedSpeed} (${m}m ${s}s)"
+            } else {
+                item.formattedSpeed
+            }
+        }
+        DownloadItemStatus.PAUSED -> stringResource(Res.string.downloadPaused)
+        DownloadItemStatus.ERROR -> stringResource(Res.string.downloadError)
+        DownloadItemStatus.QUEUED -> stringResource(Res.string.downloadQueued)
+        DownloadItemStatus.COMPLETED -> stringResource(Res.string.downloadCompleted)
+    }
+
+    val color = when (item.status) {
+        DownloadItemStatus.DOWNLOADING -> CloudStreamColors.Primary
+        DownloadItemStatus.PAUSED -> CloudStreamColors.Warning
+        DownloadItemStatus.ERROR -> CloudStreamColors.Error
+        else -> CloudStreamColors.TextMuted
+    }
+
+    Text(
+        text = text,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = color
+    )
+}
+
+@Composable
+private fun ActiveDownloadActionButton(
+    status: DownloadItemStatus,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onCancel: () -> Unit,
+    onRetry: () -> Unit
+) {
+    when (status) {
+        DownloadItemStatus.DOWNLOADING -> {
+            IconButton(onClick = onPause) {
+                Icon(
+                    imageVector = Icons.Default.Pause,
+                    contentDescription = stringResource(Res.string.pause),
+                    tint = CloudStreamColors.TextPrimary
+                )
+            }
+        }
+        DownloadItemStatus.PAUSED -> {
+            IconButton(onClick = onResume) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = stringResource(Res.string.resume),
+                    tint = CloudStreamColors.Primary
+                )
+            }
+        }
+        DownloadItemStatus.ERROR -> {
+            IconButton(onClick = onRetry) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = stringResource(Res.string.reload_error),
+                    tint = CloudStreamColors.Error
+                )
+            }
+        }
+        else -> {
+            IconButton(onClick = onCancel) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = stringResource(Res.string.cancel),
+                    tint = CloudStreamColors.TextMuted
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActiveDownloadProgressBar(
+    progress: Float,
+    status: DownloadItemStatus,
+    modifier: Modifier = Modifier
+) {
+    LinearProgressIndicator(
+        progress = progress.coerceIn(0f, 1f),
+        color = when (status) {
+            DownloadItemStatus.PAUSED -> MaterialTheme.colors.secondary
+            DownloadItemStatus.ERROR -> CloudStreamColors.Error
+            else -> CloudStreamColors.Primary
+        },
+        backgroundColor = CloudStreamColors.SurfaceVariant,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(4.dp)
+            .clip(RoundedCornerShape(2.dp))
+    )
+}
+
+@Composable
 private fun CompletedDownloadsList(
-    groups: List<CompletedHeaderGroup>,
+    groups: ImmutableList<CompletedHeaderGroup>,
     searchQuery: String,
     expandedHeaderIds: Set<Int>,
     onEvent: (DownloadsEvent) -> Unit,
@@ -753,7 +808,6 @@ private fun CompletedDownloadsList(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Search bar
         item {
             CloudStreamTextField(
                 value = searchQuery,
@@ -782,7 +836,11 @@ private fun CompletedDownloadsList(
             )
         }
 
-        items(groups, key = { it.header.id }) { group ->
+        items(
+            count = groups.size,
+            key = { index -> groups[index].header.id }
+        ) { index ->
+            val group: CompletedHeaderGroup = groups[index]
             val isExpanded = expandedHeaderIds.contains(group.header.id)
             CompletedHeaderGroupCard(
                 group = group,
@@ -790,9 +848,9 @@ private fun CompletedDownloadsList(
                 onToggleExpand = { onEvent(DownloadsEvent.ToggleHeaderExpanded(group.header.id)) },
                 onDeleteHeader = { headerToDelete = group },
                 onDeleteEpisode = { epId ->
-                    val ep = group.episodes.firstOrNull { it.id == epId }
+                    val ep = group.episodes.find { it.id == epId }
                     if (ep != null) {
-                        episodeToDelete = ep to group.header.id
+                        episodeToDelete = Pair(ep, group.header.id)
                     } else {
                         onEvent(DownloadsEvent.DeleteCompletedEpisode(epId, group.header.id))
                     }
@@ -805,7 +863,6 @@ private fun CompletedDownloadsList(
         }
     }
 
-    // Confirmation Dialog for deleting entire series/movie header
     headerToDelete?.let { group ->
         ConfirmDeleteDialog(
             onConfirm = {
@@ -819,7 +876,6 @@ private fun CompletedDownloadsList(
         )
     }
 
-    // Confirmation Dialog for deleting an episode
     episodeToDelete?.let { (ep, headerId) ->
         val epName = if (!ep.name.isNullOrBlank()) ep.name else "${stringResource(Res.string.episode)} ${ep.episode}"
         ConfirmDeleteDialog(
@@ -851,7 +907,6 @@ private fun CompletedHeaderGroupCard(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column {
-            // Header Row
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -859,7 +914,6 @@ private fun CompletedHeaderGroupCard(
                     .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Poster
                 Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = CloudStreamColors.Background,
@@ -885,7 +939,6 @@ private fun CompletedHeaderGroupCard(
 
                 Spacer(modifier = Modifier.width(14.dp))
 
-                // Metadata
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = group.header.name,
@@ -910,7 +963,6 @@ private fun CompletedHeaderGroupCard(
                     )
                 }
 
-                // Delete button
                 IconButton(onClick = onDeleteHeader) {
                     Icon(
                         imageVector = Icons.Default.Delete,
@@ -920,7 +972,6 @@ private fun CompletedHeaderGroupCard(
                     )
                 }
 
-                // Expand icon
                 Icon(
                     imageVector = if (isExpanded) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
                     contentDescription = null,
@@ -928,7 +979,6 @@ private fun CompletedHeaderGroupCard(
                 )
             }
 
-            // Episodes list if expanded
             AnimatedVisibility(
                 visible = isExpanded,
                 enter = fadeIn(tween(150)),
@@ -968,7 +1018,6 @@ private fun CompletedEpisodeRow(
             .padding(vertical = 10.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Thumbnail or play icon
         Surface(
             shape = RoundedCornerShape(6.dp),
             color = CloudStreamColors.SurfaceVariant,
@@ -1009,7 +1058,6 @@ private fun CompletedEpisodeRow(
             }
         }
 
-        // Delete episode
         IconButton(
             onClick = onDelete,
             modifier = Modifier.size(32.dp)
@@ -1024,9 +1072,6 @@ private fun CompletedEpisodeRow(
     }
 }
 
-/**
- * Fullscreen empty state for downloads tabs using centralized [CloudStreamEmptyState].
- */
 @Composable
 private fun EmptyDownloadsView(
     title: String,
@@ -1047,3 +1092,73 @@ private fun EmptyDownloadsView(
         onActionClick = onAction
     )
 }
+
+@Preview
+@Composable
+private fun DownloadsScreenPreview() {
+    CloudStreamTheme {
+        DownloadsScreenContent(
+            state = DownloadsState(
+                activeDownloads = persistentListOf(
+                    ActiveDownloadItem(
+                        id = 1,
+                        title = "Sample Episode 1",
+                        headerName = "Cyberpunk: Edgerunners",
+                        episodeName = "Let You Down",
+                        episodeIndex = 1,
+                        seasonIndex = 1,
+                        progress = 0.65f,
+                        bytesDownloaded = 450_000_000L,
+                        totalBytes = 700_000_000L,
+                        speedBytesPerSec = 5_200_000L,
+                        status = DownloadItemStatus.DOWNLOADING,
+                        videoQuality = "1080p",
+                        etaSeconds = 48
+                    )
+                ),
+                completedGroups = persistentListOf(
+                    CompletedHeaderGroup(
+                        header = DownloadHeaderEntity(
+                            id = 10,
+                            name = "Frieren: Beyond Journey's End",
+                            url = "https://example.com/frieren",
+                            apiName = "AnimeProvider",
+                            type = TvType.Anime
+                        ),
+                        episodes = persistentListOf(
+                            DownloadEpisodeEntity(
+                                id = 101,
+                                parentId = 10,
+                                name = "The Journey's End",
+                                episode = 1,
+                                season = 1
+                            )
+                        ),
+                        totalEstimatedSizeBytes = 650_000_000L
+                    )
+                ),
+                storageUsage = StorageUsageInfo(
+                    appBytes = 1_100_000_000L,
+                    freeBytes = 32_000_000_000L,
+                    totalBytes = 128_000_000_000L
+                )
+            ),
+            onEvent = {}
+        )
+    }
+}
+
+@Preview
+@Composable
+private fun DownloadsScreenAmoledLightPreview() {
+    CloudStreamTheme(theme = com.lagradost.cloudstream3.shared.viewmodels.settings.AppTheme.AMOLED, isDarkMode = false) {
+        DownloadsScreenContent(
+            state = DownloadsState(
+                activeDownloads = persistentListOf(),
+                completedGroups = persistentListOf()
+            ),
+            onEvent = {}
+        )
+    }
+}
+

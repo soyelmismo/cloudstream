@@ -58,6 +58,74 @@ object GogoHelper {
         }
     }
 
+    private val ID_REGEX = Regex("id=([^&]+)")
+
+    private data class EncryptionKeys(
+        val iv: String,
+        val key: String,
+        val decryptKey: String
+    )
+
+    private suspend fun resolveKeys(
+        iframeUrl: String,
+        iv: String?,
+        secretKey: String?,
+        secretDecryptKey: String?,
+        id: String,
+        document: Document?
+    ): EncryptionKeys? {
+        val resolvedDoc = document ?: app.get(iframeUrl).document
+        val foundIv = iv ?: resolvedDoc
+            .select("""div.wrapper[class*=container]""")
+            .attr("class").split("-").lastOrNull() ?: return null
+        val foundKey = secretKey ?: getEncryptionKey(base64Decode(id) + foundIv) ?: return null
+        val foundDecryptKey = secretDecryptKey ?: foundKey
+        return EncryptionKeys(foundIv, foundKey, foundDecryptKey)
+    }
+
+    private suspend fun buildEncryptQuery(
+        iframeUrl: String,
+        id: String,
+        encryptedId: String,
+        foundIv: String,
+        foundKey: String,
+        isUsingAdaptiveData: Boolean,
+        document: Document?
+    ): String {
+        if (!isUsingAdaptiveData) return "id=$encryptedId&alias=$id"
+        val realDocument = document ?: app.get(iframeUrl).document
+        val dataEncrypted = realDocument.select("script[data-name='episode']").attr("data-value")
+        val headers = cryptoHandler(dataEncrypted, foundIv, foundKey, false)
+        return "id=$encryptedId&alias=$id&" + headers.substringAfter("&")
+    }
+
+    private suspend fun invokeGogoSource(
+        source: GogoSource,
+        mainApiName: String,
+        mainUrl: String,
+        sourceCallback: (ExtractorLink) -> Unit,
+    ) {
+        if (source.file.contains(".m3u8")) {
+            M3u8Helper.generateM3u8(
+                mainApiName,
+                source.file,
+                mainUrl,
+                headers = mapOf("Origin" to "https://plyr.link"),
+            ).forEach(sourceCallback)
+            return
+        }
+        sourceCallback.invoke(
+            newExtractorLink(
+                mainApiName,
+                mainApiName,
+                source.file,
+            ) {
+                this.referer = mainUrl
+                this.quality = getQualityFromName(source.label)
+            }
+        )
+    }
+
     /**
      * @param iframeUrl something like https://gogoplay4.com/streaming.php?id=XXXXXX
      * @param mainApiName used for ExtractorLink names and source
@@ -74,73 +142,34 @@ object GogoHelper {
         iv: String?,
         secretKey: String?,
         secretDecryptKey: String?,
-        // This could be removed, but i prefer it verbose
         isUsingAdaptiveKeys: Boolean,
         isUsingAdaptiveData: Boolean,
-        // If you don't want to re-fetch the document
         iframeDocument: Document? = null,
     ) = safeApiCall {
-        if ((iv == null || secretKey == null || secretDecryptKey == null) && !isUsingAdaptiveKeys)
+        if (!isUsingAdaptiveKeys && (iv == null || secretKey == null || secretDecryptKey == null)) {
             return@safeApiCall
-
-        val id = Regex("id=([^&]+)").find(iframeUrl)!!.value.removePrefix("id=")
-
-        var document: Document? = iframeDocument
-        val foundIv = iv ?: (document ?: app.get(iframeUrl).document.also { document = it })
-            .select("""div.wrapper[class*=container]""")
-            .attr("class").split("-").lastOrNull() ?: return@safeApiCall
-        val foundKey = secretKey ?: getEncryptionKey(base64Decode(id) + foundIv) ?: return@safeApiCall
-        val foundDecryptKey = secretDecryptKey ?: foundKey
-
-        val url = Url(iframeUrl)
-        val mainUrl = "https://${url.host}"
-
-        val encryptedId = cryptoHandler(id, foundIv, foundKey)
-        val encryptRequestData = if (isUsingAdaptiveData) {
-            // Only fetch the document if necessary
-            val realDocument = document ?: app.get(iframeUrl).document
-            val dataEncrypted = realDocument.select("script[data-name='episode']").attr("data-value")
-            val headers = cryptoHandler(dataEncrypted, foundIv, foundKey, false)
-            "id=$encryptedId&alias=$id&" + headers.substringAfter("&")
-        } else {
-            "id=$encryptedId&alias=$id"
         }
+
+        val id = ID_REGEX.find(iframeUrl)?.groupValues?.get(1) ?: return@safeApiCall
+        val keys = resolveKeys(iframeUrl, iv, secretKey, secretDecryptKey, id, iframeDocument) ?: return@safeApiCall
+
+        val host = Url(iframeUrl).host
+        val mainUrl = "https://$host"
+        val encryptedId = cryptoHandler(id, keys.iv, keys.key)
+        val encryptRequestData = buildEncryptQuery(
+            iframeUrl, id, encryptedId, keys.iv, keys.key, isUsingAdaptiveData, iframeDocument
+        )
 
         val jsonResponse = app.get(
             "$mainUrl/encrypt-ajax.php?$encryptRequestData",
             headers = mapOf("X-Requested-With" to "XMLHttpRequest")
         )
-        val dataencrypted = jsonResponse.parsedSafe<GogoJsonData>()?.data ?: return@safeApiCall
-        val datadecrypted = cryptoHandler(dataencrypted, foundIv, foundDecryptKey, false)
-        val sources = AppUtils.parseJson<GogoSources>(datadecrypted)
+        val dataEncrypted = jsonResponse.parsedSafe<GogoJsonData>()?.data ?: return@safeApiCall
+        val dataDecrypted = cryptoHandler(dataEncrypted, keys.iv, keys.decryptKey, false)
+        val sources = AppUtils.parseJson<GogoSources>(dataDecrypted)
 
-        suspend fun invokeGogoSource(
-            source: GogoSource,
-            sourceCallback: (ExtractorLink) -> Unit,
-        ) {
-            if (source.file.contains(".m3u8")) {
-                M3u8Helper.generateM3u8(
-                    mainApiName,
-                    source.file,
-                    mainUrl,
-                    headers = mapOf("Origin" to "https://plyr.link"),
-                ).forEach(sourceCallback)
-            } else {
-                sourceCallback.invoke(
-                    newExtractorLink(
-                        mainApiName,
-                        mainApiName,
-                        source.file,
-                    ) {
-                        this.referer = mainUrl
-                        this.quality = getQualityFromName(source.label)
-                    }
-                )
-            }
-        }
-
-        sources.source?.forEach { invokeGogoSource(it, callback) }
-        sources.sourceBk?.forEach { invokeGogoSource(it, callback) }
+        sources.source?.forEach { invokeGogoSource(it, mainApiName, mainUrl, callback) }
+        sources.sourceBk?.forEach { invokeGogoSource(it, mainApiName, mainUrl, callback) }
     }
 
     @Serializable

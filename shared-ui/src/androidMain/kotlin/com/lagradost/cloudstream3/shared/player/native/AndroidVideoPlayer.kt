@@ -12,6 +12,8 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.Qualities
 import com.lagradost.cloudstream3.utils.SubtitleUtils
+import kotlinx.collections.immutable.persistentMapOf
+import kotlinx.collections.immutable.toImmutableMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -182,7 +184,7 @@ class AndroidVideoPlayer(
     }
 
     override fun play(url: String, headers: Map<String, String>?) {
-        play(PlayerQuality(url = url, headers = headers ?: emptyMap()))
+        play(PlayerQuality(url = url, headers = headers?.toImmutableMap() ?: persistentMapOf()))
     }
 
     override fun play(url: String) {

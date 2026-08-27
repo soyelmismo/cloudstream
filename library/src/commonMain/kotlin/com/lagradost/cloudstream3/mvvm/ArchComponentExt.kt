@@ -171,43 +171,34 @@ fun CoroutineScope.launchSafe(
 
 expect fun <T> platformThrowAbleToResource(throwable: Throwable): Resource<T>
 
-fun <T> throwAbleToResource(
-    throwable: Throwable
-): Resource<T> {
-    return when (throwable) {
-        is NullPointerException -> {
-            val traceLine = throwable.stackTraceToString()
-                .lines()
-                .firstOrNull { it.contains("provider.kt", ignoreCase = true) }
-                ?.let { Regex("""\(([^)]+)\)$""").find(it)?.groupValues?.get(1) }
-            if (traceLine != null) {
-                return Resource.Failure(
-                    false,
-                    "NullPointerException at $traceLine\nSite might have updated or added Cloudflare/DDOS protection"
-                )
-            }
-            safeFail(throwable)
-        }
+private val PROVIDER_TRACE_REGEX = Regex("""\(([^)]+)\)$""")
 
-        is ErrorLoadingException -> {
-            Resource.Failure(
-                true,
-                throwable.message ?: "Error loading, try again later."
-            )
-        }
+private fun extractProviderErrorLocation(throwable: Throwable): String? {
+    val line = throwable.stackTraceToString()
+        .lines()
+        .firstOrNull { it.contains("provider.kt", ignoreCase = true) } ?: return null
+    return PROVIDER_TRACE_REGEX.find(line)?.groupValues?.get(1)
+}
 
-        is NotImplementedError -> {
-            Resource.Failure(false, "This operation is not implemented.")
-        }
+private fun <T> handleNullPointerException(throwable: NullPointerException): Resource<T> {
+    val traceLine = extractProviderErrorLocation(throwable) ?: return safeFail(throwable)
+    return Resource.Failure(
+        false,
+        "NullPointerException at $traceLine\nSite might have updated or added Cloudflare/DDOS protection"
+    )
+}
 
-        is CancellationException -> {
-            throwable.cause?.let {
-                throwAbleToResource(it)
-            } ?: safeFail(throwable)
-        }
+private fun <T> handleCancellationException(throwable: CancellationException): Resource<T> {
+    val cause = throwable.cause ?: return safeFail(throwable)
+    return throwAbleToResource(cause)
+}
 
-        else -> platformThrowAbleToResource(throwable)
-    }
+fun <T> throwAbleToResource(throwable: Throwable): Resource<T> = when (throwable) {
+    is NullPointerException -> handleNullPointerException(throwable)
+    is ErrorLoadingException -> Resource.Failure(true, throwable.message ?: "Error loading, try again later.")
+    is NotImplementedError -> Resource.Failure(false, "This operation is not implemented.")
+    is CancellationException -> handleCancellationException(throwable)
+    else -> platformThrowAbleToResource(throwable)
 }
 
 @AnyThread

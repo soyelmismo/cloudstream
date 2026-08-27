@@ -1,14 +1,33 @@
 package com.lagradost.cloudstream3.utils.videoskip
 
+import androidx.compose.runtime.Immutable
 import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.LoadResponse
 import com.lagradost.cloudstream3.TvType
-import com.lagradost.cloudstream3.mvvm.safeAsync
 import com.lagradost.cloudstream3.models.ResultEpisode
+import com.lagradost.cloudstream3.mvvm.safeAsync
 import com.lagradost.cloudstream3.utils.txt
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import org.jetbrains.compose.resources.StringResource
 import java.util.concurrent.ConcurrentHashMap
 
+internal class BoundedCache<K : Any, V : Any>(private val maxSize: Int = 128) {
+    private val map = ConcurrentHashMap<K, V>()
+
+    operator fun get(key: K): V? = map[key]
+
+    operator fun set(key: K, value: V) {
+        if (map.size >= maxSize) {
+            val keysToRemove = map.keys().toList().take(maxSize / 4)
+            keysToRemove.forEach { map.remove(it) }
+        }
+        map[key] = value
+    }
+
+    fun clear() = map.clear()
+}
 
 enum class SkipType(val res: StringResource) {
     Opening(Res.string.skip_type_op),
@@ -21,16 +40,15 @@ enum class SkipType(val res: StringResource) {
     Preview(Res.string.skip_type_preview),
 }
 
+@Immutable
 data class SkipStamp(
     val type: SkipType,
-    /** Start position in milliseconds of the skip, where it should start showing up */
     val startMs: Long,
-    /** End position in milliseconds of the skip, where it will skip to */
     val endMs: Long,
-    /** Custom visual label instead of using the type. Only use this for content not covered by SkipType */
     val label: String? = null,
 )
 
+@Immutable
 data class VideoSkipStamp(
     val timestamp: SkipStamp,
     val skipToNextEpisode: Boolean,
@@ -47,59 +65,51 @@ data class VideoSkipStamp(
 abstract class SkipAPI {
     open val name: String = "NONE"
 
-    /** On what types SkipAPI should trigger on */
     abstract val supportedTypes: Set<TvType>
 
-    /** Get all video skip stamps of the associated episode */
     @Throws
     open suspend fun stamps(
         data: LoadResponse,
         episode: ResultEpisode,
         episodeDurationMs: Long,
-    ): List<SkipStamp>? {
+    ): ImmutableList<SkipStamp>? {
         throw NotImplementedError()
     }
 
     companion object {
+        private const val NEAR_END_THRESHOLD_MS = 20_000L
         private val skipApis: List<SkipAPI> = listOf(AniSkip(), TheIntroDBSkip(), IntroDbSkip(), AnimeSkip())
-        private val cachedStamps = ConcurrentHashMap<Int, List<VideoSkipStamp>>()
+        private val cachedStamps = BoundedCache<Int, ImmutableList<VideoSkipStamp>>()
 
-        /** Get all video timestamps from an episode */
+        private fun isNearEpisodeEnd(stampEndMs: Long, durationMs: Long): Boolean =
+            durationMs - stampEndMs < NEAR_END_THRESHOLD_MS
+
         suspend fun videoStamps(
             data: LoadResponse,
             episode: ResultEpisode,
             episodeDurationMs: Long,
             hasNextEpisode: Boolean,
-        ): List<VideoSkipStamp> {
-            cachedStamps[episode.id]?.let { list ->
-                return list
-            }
+        ): ImmutableList<VideoSkipStamp> {
+            cachedStamps[episode.id]?.let { return it }
 
-            for (api in skipApis) {
-                /** Unsupported type, so we do not waste a get call */
-                if (!api.supportedTypes.contains(data.type)) {
-                    continue
-                }
+            val (sourceName, matchingStamps) = skipApis
+                .asSequence()
+                .filter { data.type in it.supportedTypes }
+                .firstNotNullOfOrNull { api ->
+                    val stamps = safeAsync { api.stamps(data, episode, episodeDurationMs) }
+                    if (stamps.isNullOrEmpty()) null else (api.name to stamps)
+                } ?: return persistentListOf()
 
-                /** Find first non-empty stamps */
-                val stamps = safeAsync { api.stamps(data, episode, episodeDurationMs) }
-                if (stamps.isNullOrEmpty()) {
-                    continue
-                }
+            val videoStamps = matchingStamps.map { stamp ->
+                VideoSkipStamp(
+                    timestamp = stamp,
+                    skipToNextEpisode = hasNextEpisode && isNearEpisodeEnd(stamp.endMs, episodeDurationMs),
+                    source = sourceName
+                )
+            }.toImmutableList()
 
-                return stamps.map { stamp ->
-                    VideoSkipStamp(
-                        timestamp = stamp,
-                        skipToNextEpisode = hasNextEpisode && episodeDurationMs - stamp.endMs < 20_000L,
-                        source = api.name
-                    )
-                }.also { stamps ->
-                    /** Put in cache, this is such small data, it should be fine to never clear it */
-                    cachedStamps[episode.id] = stamps
-                }
-            }
-            return emptyList()
+            cachedStamps[episode.id] = videoStamps
+            return videoStamps
         }
     }
 }
-

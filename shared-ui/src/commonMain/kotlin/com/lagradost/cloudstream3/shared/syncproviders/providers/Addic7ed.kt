@@ -26,99 +26,146 @@ class Addic7ed : SubtitleAPI() {
         else url
     }
 
+    private fun buildSearchTargetQuery(title: String, seasonNum: Int, epNum: Int): String {
+        return if (seasonNum > 0) "$title $seasonNum $epNum" else title
+    }
+
+    private fun resolveDownloadPageSelector(seasonNum: Int, yearNum: Int, epNum: Int): String = when {
+        seasonNum > 0 -> "a[href~=serie\\/.+\\/$seasonNum\\/$epNum\\/\\w]"
+        yearNum > 0 -> "a[href~=movie\\/]:contains($yearNum)"
+        else -> "a[href~=movie\\/]"
+    }
+
+    private fun createSubtitleEntity(
+        displayName: String?,
+        link: String?,
+        isHearingImpaired: Boolean,
+        langTagIETF: String,
+        seasonNum: Int,
+        epNum: Int,
+        yearNum: Int
+    ): SubtitleEntity? {
+        if (displayName.isNullOrBlank() || link.isNullOrBlank()) return null
+        return SubtitleEntity(
+            idPrefix = this.idPrefix,
+            name = displayName,
+            lang = langTagIETF,
+            data = link,
+            source = this.name,
+            type = if (seasonNum > 0) TvType.TvSeries else TvType.Movie,
+            epNumber = epNum,
+            seasonNumber = seasonNum,
+            year = yearNum,
+            headers = mapOf("referer" to "$HOST/"),
+            isHearingImpaired = isHearingImpaired
+        )
+    }
+
+    private suspend fun fetchShowEpisodeSubtitles(
+        showUrl: String,
+        seasonNum: Int,
+        epNum: Int,
+        langNum: String,
+        langTagIETF: String,
+        yearNum: Int
+    ): List<SubtitleEntity> {
+        val showId = showUrl.substringAfterLast("/")
+        val doc = app.get(
+            "$HOST/ajax_loadShow.php?show=$showId&season=$seasonNum&langs=|$langNum|&hd=0&hi=0",
+            referer = "$HOST/"
+        ).document
+
+        return doc.select("#season tbody tr").mapNotNull { node ->
+            if (node.select("td:eq(1)").text().toIntOrNull() != epNum) return@mapNotNull null
+            createSubtitleEntity(
+                displayName = node.select("td:eq(2)").text() + "\n" + node.select("td:eq(4)").text(),
+                link = node.selectFirst("a[href~=updated\\/|original\\/]")?.attr("href")?.fixUrl(),
+                isHearingImpaired = node.select("td:eq(6)").text().isNotEmpty(),
+                langTagIETF = langTagIETF,
+                seasonNum = seasonNum,
+                epNum = epNum,
+                yearNum = yearNum
+            )
+        }
+    }
+
+    private suspend fun fetchDownloadPageSubtitles(
+        downloadPage: String,
+        langName: String,
+        langTagIETF: String,
+        seasonNum: Int,
+        epNum: Int,
+        yearNum: Int
+    ): List<SubtitleEntity> {
+        val doc = app.get(url = downloadPage).document
+        return doc.select(".tabel95 .tabel95 tr:has(.language):contains($langName)").mapNotNull { node ->
+            val parent = node.parent() ?: return@mapNotNull null
+            val titlePrefix = doc.selectFirst("span.titulo")?.text()?.substringBefore(" Subtitle").orEmpty()
+            val versionInfo = parent.select(".NewsTitle").text().substringAfter("Version ").substringBefore(", Duration")
+            val displayName = "$titlePrefix\n$versionInfo"
+            val link = node.selectFirst("a[href~=updated\\/|original\\/]")?.attr("href")?.fixUrl()
+            val isHearingImpaired = parent.select("tr:last-child [title=\"Hearing Impaired\"]").isNotEmpty()
+
+            createSubtitleEntity(
+                displayName = displayName,
+                link = link,
+                isHearingImpaired = isHearingImpaired,
+                langTagIETF = langTagIETF,
+                seasonNum = seasonNum,
+                epNum = epNum,
+                yearNum = yearNum
+            )
+        }
+    }
+
     override suspend fun search(
         auth: AuthData?,
         query: SubtitleSearch
     ): List<SubtitleEntity>? {
         val langTagIETF = query.lang ?: AllLanguagesName
-        val langNumAddic7ed =
-            langTagIETF2Addic7ed[langTagIETF]?.first ?: 0 // all languages = 0
-        val langName =
-            langTagIETF2Addic7ed[langTagIETF]?.second ?:
-            fromTagToEnglishLanguageName(langTagIETF) ?:
-            "Completed" // this bypasses language filtering
+        val langNumAddic7ed = langTagIETF2Addic7ed[langTagIETF]?.first ?: "0"
+        val langName = langTagIETF2Addic7ed[langTagIETF]?.second
+            ?: fromTagToEnglishLanguageName(langTagIETF)
+            ?: "Completed"
         val title = query.query.trim()
         val epNum = query.epNumber ?: 0
         val seasonNum = query.seasonNumber ?: 0
         val yearNum = query.year ?: 0
-        val searchQuery = if (seasonNum > 0) "$title $seasonNum $epNum" else title
-        var downloadPage = ""
+        val searchQuery = buildSearchTargetQuery(title, seasonNum, epNum)
 
-        fun newSubtitleEntity(
-            displayName: String?,
-            link: String?,
-            isHearingImpaired: Boolean
-        ): SubtitleEntity? {
-            if (displayName.isNullOrBlank() || link.isNullOrBlank()) return null
-            return SubtitleEntity(
-                idPrefix = this.idPrefix,
-                name = displayName,
-                lang = langTagIETF,
-                data = link,
-                source = this.name,
-                type = if (seasonNum > 0) TvType.TvSeries else TvType.Movie,
-                epNumber = epNum,
-                seasonNumber = seasonNum,
-                year = yearNum,
-                headers = mapOf("referer" to "$HOST/"),
-                isHearingImpaired = isHearingImpaired
+        val response = app.get(url = "$HOST/search.php?search=$searchQuery&Submit=Search")
+        if (response.url.contains("/show/")) {
+            return fetchShowEpisodeSubtitles(
+                showUrl = response.url,
+                seasonNum = seasonNum,
+                epNum = epNum,
+                langNum = langNumAddic7ed,
+                langTagIETF = langTagIETF,
+                yearNum = yearNum
             )
         }
 
-        val response = app.get(url = "$HOST/search.php?search=$searchQuery&Submit=Search")
-        val hostDocument = response.document
-
-        // 1st case: found one movie or episode. Redirected to $HOST/movie/1234 or $HOST/serie/show-name/$seasonNum/$epNum/ep-name
-        if (response.url.contains("/movie/") || response.url.contains("/serie/"))
-            downloadPage = response.url
-
-        // 2nd case: found tv series ep list. Redirected to $HOST/show/1234
-        else if (response.url.contains("/show/")) {
-            val showId = response.url.substringAfterLast("/")
-            val doc = app.get(
-                "$HOST/ajax_loadShow.php?show=$showId&season=$seasonNum&langs=|$langNumAddic7ed|&hd=0&hi=0",
-                referer = "$HOST/"
-            ).document
-
-            // get direct subtitles links from list
-            return doc.select("#season tbody tr").mapNotNull { node ->
-                if (node.select("td:eq(1)").text().toIntOrNull() == epNum)
-                    newSubtitleEntity(
-                        displayName = node.select("td:eq(2)").text() + "\n" + node.select("td:eq(4)").text(),
-                        link = node.selectFirst("a[href~=updated\\/|original\\/]")?.attr("href")?.fixUrl(),
-                        isHearingImpaired = node.select("td:eq(6)").text().isNotEmpty()
-                    )
-                else null
-            }
-        // 3rd case: found several or no results. Still in $HOST/search.php?search=title
+        val initialUrl = if (response.url.contains("/movie/") || response.url.contains("/serie/")) {
+            response.url
         } else {
-            downloadPage = hostDocument.select("table.tabel a").selectFirst({
-                // tv series
-                if (seasonNum > 0) "a[href~=serie\\/.+\\/$seasonNum\\/$epNum\\/\\w]"
-                // movie + year
-                else if (yearNum > 0) "a[href~=movie\\/]:contains($yearNum)"
-                // movie
-                else "a[href~=movie\\/]"
-            }())?.attr("href")?.fixUrl() ?: return null
+            val selector = resolveDownloadPageSelector(seasonNum, yearNum, epNum)
+            response.document.select("table.tabel a").selectFirst(selector)?.attr("href")?.fixUrl() ?: return null
         }
 
-        // filter download page by language. Do not work for movies :/
-        if (downloadPage.contains("/serie/"))
-            downloadPage = downloadPage.substringBeforeLast("/") + "/$langNumAddic7ed"
-        val doc = app.get(url = downloadPage).document
-
-        // get subtitles links from download page
-        return doc.select(".tabel95 .tabel95 tr:has(.language):contains($langName)").mapNotNull { node ->
-            val displayName =
-                doc.selectFirst("span.titulo")?.text()?.substringBefore(" Subtitle") + "\n" +
-                node.parent()!!.select(".NewsTitle").text().substringAfter("Version ").substringBefore(", Duration")
-            val link =
-                node.selectFirst("a[href~=updated\\/|original\\/]")?.attr("href")?.fixUrl()
-            val isHearingImpaired =
-                node.parent()!!.select("tr:last-child [title=\"Hearing Impaired\"]").isNotEmpty()
-
-            newSubtitleEntity(displayName, link, isHearingImpaired)
+        val downloadPage = if (initialUrl.contains("/serie/")) {
+            initialUrl.substringBeforeLast("/") + "/$langNumAddic7ed"
+        } else {
+            initialUrl
         }
+
+        return fetchDownloadPageSubtitles(
+            downloadPage = downloadPage,
+            langName = langName,
+            langTagIETF = langTagIETF,
+            seasonNum = seasonNum,
+            epNum = epNum,
+            yearNum = yearNum
+        )
     }
 
     override suspend fun load(

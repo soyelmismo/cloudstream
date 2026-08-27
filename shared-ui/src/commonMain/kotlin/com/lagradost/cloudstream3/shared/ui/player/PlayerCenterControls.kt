@@ -24,19 +24,15 @@ import androidx.compose.ui.unit.dp
 import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.shared.ui.focus.dpadFocusable
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerUiEvent
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerUiState
+import org.jetbrains.compose.resources.DrawableResource
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.painterResource
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
-/**
- * Center hero interactive controls for the video player:
- * - Rewind 10s button
- * - Central hero 64dp Play / Pause button with tactile scale feedback
- * - Forward 10s button
- * - Buffering progress indicator
- * Equipped with full Android TV / D-Pad remote focus support.
- */
 @Composable
 fun PlayerCenterControls(
     state: PlayerUiState,
@@ -47,106 +43,139 @@ fun PlayerCenterControls(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        // Buffering Indicator
         if (state.isBuffering) {
-            CircularProgressIndicator(
-                color = CloudStreamColors.Primary,
-                strokeWidth = 4.dp,
-                modifier = Modifier.size(64.dp)
-            )
+            PlayerHeroBufferingIndicator()
         } else {
-            // Interactive Hero Play / Seek Controls
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(36.dp)
-            ) {
-                // Seek Rewind (-10s) Button
-                val rewindInteraction = remember { MutableInteractionSource() }
-                val isRewindPressed by rewindInteraction.collectIsPressedAsState()
-                val rewindScale by animateFloatAsState(
-                    targetValue = if (isRewindPressed) 0.88f else 1.0f,
-                    animationSpec = tween(durationMillis = 120)
-                )
-
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .scale(rewindScale)
-                        .background(Color.Black.copy(alpha = 0.50f), CircleShape)
-                        .dpadFocusable(
-                            interactionSource = rewindInteraction,
-                            onClick = { onEvent(PlayerUiEvent.SeekBy(-10_000L)) },
-                            shape = CircleShape,
-                            scaleOnFocus = 1.12f
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        painter = painterResource(Res.drawable.netflix_skip_back),
-                        contentDescription = stringResource(Res.string.action_rewind_10),
-                        tint = CloudStreamColors.OnMediaScrim,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-
-                // Primary Large Hero 64dp Play / Pause Button
-                val playInteraction = remember { MutableInteractionSource() }
-                val isPlayPressed by playInteraction.collectIsPressedAsState()
-                val playScale by animateFloatAsState(
-                    targetValue = if (isPlayPressed) 0.90f else 1.0f,
-                    animationSpec = tween(durationMillis = 120)
-                )
-
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .scale(playScale)
-                        .background(CloudStreamColors.Primary.copy(alpha = 0.90f), CircleShape)
-                        .dpadFocusable(
-                            interactionSource = playInteraction,
-                            onClick = { onEvent(PlayerUiEvent.TogglePlayPause) },
-                            shape = CircleShape,
-                            scaleOnFocus = 1.12f
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        painter = painterResource(if (state.isPlaying) Res.drawable.netflix_pause else Res.drawable.netflix_play),
-                        contentDescription = if (state.isPlaying) stringResource(Res.string.pause) else stringResource(Res.string.action_play),
-                        tint = MaterialTheme.colors.onPrimary,
-                        modifier = Modifier.size(34.dp)
-                    )
-                }
-
-                // Seek Forward (+10s) Button
-                val forwardInteraction = remember { MutableInteractionSource() }
-                val isForwardPressed by forwardInteraction.collectIsPressedAsState()
-                val forwardScale by animateFloatAsState(
-                    targetValue = if (isForwardPressed) 0.88f else 1.0f,
-                    animationSpec = tween(durationMillis = 120)
-                )
-
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .scale(forwardScale)
-                        .background(Color.Black.copy(alpha = 0.50f), CircleShape)
-                        .dpadFocusable(
-                            interactionSource = forwardInteraction,
-                            onClick = { onEvent(PlayerUiEvent.SeekBy(10_000L)) },
-                            shape = CircleShape,
-                            scaleOnFocus = 1.12f
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        painter = painterResource(Res.drawable.netflix_skip_forward),
-                        contentDescription = stringResource(Res.string.action_forward_10),
-                        tint = CloudStreamColors.OnMediaScrim,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-            }
+            PlayerCenterActionControls(
+                isPlaying = state.isPlaying,
+                onEvent = onEvent
+            )
         }
+    }
+}
+
+@Composable
+private fun PlayerHeroBufferingIndicator(
+    modifier: Modifier = Modifier
+) {
+    CircularProgressIndicator(
+        color = CloudStreamColors.Primary,
+        strokeWidth = 4.dp,
+        modifier = modifier.size(64.dp)
+    )
+}
+
+@Composable
+private fun PlayerCenterActionControls(
+    isPlaying: Boolean,
+    onEvent: (PlayerUiEvent) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(36.dp)
+    ) {
+        PlayerSeekButton(
+            iconRes = Res.drawable.netflix_skip_back,
+            contentDescriptionRes = Res.string.action_rewind_10,
+            onClick = { onEvent(PlayerUiEvent.SeekBy(-10_000L)) }
+        )
+
+        PlayerHeroPlayPauseButton(
+            isPlaying = isPlaying,
+            onClick = { onEvent(PlayerUiEvent.TogglePlayPause) }
+        )
+
+        PlayerSeekButton(
+            iconRes = Res.drawable.netflix_skip_forward,
+            contentDescriptionRes = Res.string.action_forward_10,
+            onClick = { onEvent(PlayerUiEvent.SeekBy(10_000L)) }
+        )
+    }
+}
+
+@Composable
+private fun PlayerSeekButton(
+    iconRes: DrawableResource,
+    contentDescriptionRes: StringResource,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.88f else 1.0f,
+        animationSpec = tween(durationMillis = 120)
+    )
+
+    Box(
+        modifier = modifier
+            .size(52.dp)
+            .scale(scale)
+            .background(Color.Black.copy(alpha = 0.50f), CircleShape)
+            .dpadFocusable(
+                interactionSource = interactionSource,
+                onClick = onClick,
+                shape = CircleShape,
+                scaleOnFocus = 1.12f
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            painter = painterResource(iconRes),
+            contentDescription = stringResource(contentDescriptionRes),
+            tint = CloudStreamColors.OnMediaScrim,
+            modifier = Modifier.size(28.dp)
+        )
+    }
+}
+
+@Composable
+private fun PlayerHeroPlayPauseButton(
+    isPlaying: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.90f else 1.0f,
+        animationSpec = tween(durationMillis = 120)
+    )
+
+    val iconRes = if (isPlaying) Res.drawable.netflix_pause else Res.drawable.netflix_play
+    val contentDescriptionRes = if (isPlaying) Res.string.pause else Res.string.action_play
+
+    Box(
+        modifier = modifier
+            .size(64.dp)
+            .scale(scale)
+            .background(CloudStreamColors.Primary.copy(alpha = 0.90f), CircleShape)
+            .dpadFocusable(
+                interactionSource = interactionSource,
+                onClick = onClick,
+                shape = CircleShape,
+                scaleOnFocus = 1.12f
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            painter = painterResource(iconRes),
+            contentDescription = stringResource(contentDescriptionRes),
+            tint = MaterialTheme.colors.onPrimary,
+            modifier = Modifier.size(34.dp)
+        )
+    }
+}
+
+@Preview
+@Composable
+private fun PlayerCenterControlsPreview() {
+    CloudStreamTheme {
+        PlayerCenterControls(
+            state = PlayerUiState(isPlaying = true),
+            onEvent = {}
+        )
     }
 }

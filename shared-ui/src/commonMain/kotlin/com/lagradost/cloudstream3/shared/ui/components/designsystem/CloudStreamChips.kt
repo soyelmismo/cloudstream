@@ -52,12 +52,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
-
-// =============================================================================
-// 1. SELECTABLE FILTER CHIP
-// =============================================================================
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 /**
  * Standardized Selectable Filter Chip adhering to the CloudStream Design System.
@@ -214,10 +215,6 @@ fun CloudStreamFilterChip(
     interactionSource = interactionSource
 )
 
-// =============================================================================
-// 2. ACTION CHIP (CLEAR / RESET / QUICK ACTIONS)
-// =============================================================================
-
 /**
  * Standardized Action Chip (such as Clear Filters, Reset, or Action pills).
  */
@@ -311,10 +308,6 @@ fun CloudStreamActionChip(
     enabled = enabled,
     interactionSource = interactionSource
 )
-
-// =============================================================================
-// 3. DROPDOWN FILTER CHIP (MULTI-SELECT & SINGLE-SELECT)
-// =============================================================================
 
 /**
  * Shared internal container managing the filter chip surface, animations, focus/hover states,
@@ -467,7 +460,7 @@ private fun DropdownFilterContainer(
 @Composable
 fun <T> CloudStreamDropdownFilter(
     label: String,
-    items: List<T>,
+    items: ImmutableList<T>,
     selectedItems: Set<T>,
     onToggleItem: (T) -> Unit,
     modifier: Modifier = Modifier,
@@ -546,6 +539,55 @@ fun <T> CloudStreamDropdownFilter(
     }
 }
 
+@Composable
+fun <T> CloudStreamDropdownFilter(
+    label: String,
+    items: List<T>,
+    selectedItems: Set<T>,
+    onToggleItem: (T) -> Unit,
+    modifier: Modifier = Modifier,
+    itemLabel: @Composable (T) -> String = { it.toString() },
+    itemLeadingContent: (@Composable (T) -> Unit)? = null,
+    menuTitle: String? = null,
+    menuTitleRes: StringResource? = null,
+    leadingIcon: ImageVector? = null,
+    leadingPainter: Painter? = null,
+    trailingIcon: ImageVector = Icons.Default.ArrowDropDown,
+    isFiltered: Boolean = selectedItems.isNotEmpty(),
+    activeContainerColor: Color = CloudStreamColors.Primary.copy(alpha = 0.18f),
+    activeContentColor: Color = CloudStreamColors.Primary,
+    inactiveContainerColor: Color = CloudStreamColors.Surface,
+    inactiveContentColor: Color = CloudStreamColors.TextPrimary,
+    shape: Shape = RoundedCornerShape(16.dp),
+    minMenuWidth: Dp = 180.dp,
+    maxMenuWidth: Dp = 280.dp,
+    enabled: Boolean = true,
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() }
+) = CloudStreamDropdownFilter(
+    label = label,
+    items = items.toImmutableList(),
+    selectedItems = selectedItems,
+    onToggleItem = onToggleItem,
+    modifier = modifier,
+    itemLabel = itemLabel,
+    itemLeadingContent = itemLeadingContent,
+    menuTitle = menuTitle,
+    menuTitleRes = menuTitleRes,
+    leadingIcon = leadingIcon,
+    leadingPainter = leadingPainter,
+    trailingIcon = trailingIcon,
+    isFiltered = isFiltered,
+    activeContainerColor = activeContainerColor,
+    activeContentColor = activeContentColor,
+    inactiveContainerColor = inactiveContainerColor,
+    inactiveContentColor = inactiveContentColor,
+    shape = shape,
+    minMenuWidth = minMenuWidth,
+    maxMenuWidth = maxMenuWidth,
+    enabled = enabled,
+    interactionSource = interactionSource
+)
+
 /**
  * Standardized Single-Select Dropdown Filter Chip for the CloudStream Design System.
  *
@@ -554,7 +596,7 @@ fun <T> CloudStreamDropdownFilter(
 @Composable
 fun <T> CloudStreamDropdownFilter(
     label: String,
-    items: List<T>,
+    items: ImmutableList<T>,
     selectedItem: T?,
     onSelectItem: (T) -> Unit,
     modifier: Modifier = Modifier,
@@ -629,6 +671,89 @@ fun <T> CloudStreamDropdownFilter(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun <T> CloudStreamDropdownFilter(
+    label: String,
+    items: List<T>,
+    selectedItem: T?,
+    onSelectItem: (T) -> Unit,
+    modifier: Modifier = Modifier,
+    itemLabel: @Composable (T) -> String = { it.toString() },
+    itemLeadingContent: (@Composable (T) -> Unit)? = null,
+    menuTitle: String? = null,
+    menuTitleRes: StringResource? = null,
+    leadingIcon: ImageVector? = null,
+    leadingPainter: Painter? = null,
+    trailingIcon: ImageVector = Icons.Default.ArrowDropDown,
+    isFiltered: Boolean = selectedItem != null,
+    activeContainerColor: Color = CloudStreamColors.Primary.copy(alpha = 0.18f),
+    activeContentColor: Color = CloudStreamColors.Primary,
+    inactiveContainerColor: Color = CloudStreamColors.Surface,
+    inactiveContentColor: Color = CloudStreamColors.TextPrimary,
+    shape: Shape = RoundedCornerShape(16.dp),
+    minMenuWidth: Dp = 180.dp,
+    maxMenuWidth: Dp = 280.dp,
+    enabled: Boolean = true,
+    interactionSource: MutableInteractionSource = remember { MutableInteractionSource() }
+) = CloudStreamDropdownFilter(
+    label = label,
+    items = items.toImmutableList(),
+    selectedItem = selectedItem,
+    onSelectItem = onSelectItem,
+    modifier = modifier,
+    itemLabel = itemLabel,
+    itemLeadingContent = itemLeadingContent,
+    menuTitle = menuTitle,
+    menuTitleRes = menuTitleRes,
+    leadingIcon = leadingIcon,
+    leadingPainter = leadingPainter,
+    trailingIcon = trailingIcon,
+    isFiltered = isFiltered,
+    activeContainerColor = activeContainerColor,
+    activeContentColor = activeContentColor,
+    inactiveContainerColor = inactiveContainerColor,
+    inactiveContentColor = inactiveContentColor,
+    shape = shape,
+    minMenuWidth = minMenuWidth,
+    maxMenuWidth = maxMenuWidth,
+    enabled = enabled,
+    interactionSource = interactionSource
+)
+
+@Preview
+@Composable
+private fun CloudStreamChipsPreview() {
+    CloudStreamTheme {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CloudStreamFilterChip(
+                label = "Active Filter",
+                isSelected = true,
+                onClick = {}
+            )
+            CloudStreamFilterChip(
+                label = "Inactive Filter",
+                isSelected = false,
+                onClick = {}
+            )
+            CloudStreamActionChip(
+                label = "Clear",
+                icon = Icons.Default.Close,
+                onClick = {}
+            )
+            CloudStreamDropdownFilter(
+                label = "Categories",
+                items = persistentListOf("Action", "Comedy", "Drama"),
+                selectedItem = "Action",
+                onSelectItem = {}
+            )
         }
     }
 }

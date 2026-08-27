@@ -80,7 +80,6 @@ import com.lagradost.cloudstream3.shared.ui.components.designsystem.PrimaryButto
 import com.lagradost.cloudstream3.shared.ui.components.designsystem.SecondaryButton
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
 import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginRepositoryItem
-import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginsSettingsEvent
 import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginsSettingsViewModel
 
 /**
@@ -196,7 +195,7 @@ fun RepositoriesDialog(
                 ) {
                     // Sync All Button
                     PrimaryButton(
-                        onClick = { viewModel.handleEvent(PluginsSettingsEvent.Reload) },
+                        onClick = { viewModel.refreshData() },
                         enabled = !state.isLoading,
                         modifier = Modifier.height(38.dp)
                     ) {
@@ -297,7 +296,7 @@ fun RepositoriesDialog(
     repoToDelete?.let { repo ->
         ConfirmDeleteDialog(
             onConfirm = {
-                viewModel.handleEvent(PluginsSettingsEvent.RemoveRepository(repo.url))
+                viewModel.removeRepository(repo)
                 repoToDelete = null
             },
             onDismiss = { repoToDelete = null },
@@ -459,20 +458,15 @@ private fun RepositoryItemCard(
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    // Last Sync Time
+                    // Plugin Count
                     Spacer(modifier = Modifier.height(2.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            text = "${stringResource(Res.string.lastSynced)}: ${PluginsSettingsViewModel.formatSyncTime(repository.lastSyncTime)}",
-                            style = MaterialTheme.typography.caption.copy(
-                                fontSize = 10.sp,
-                                color = CloudStreamColors.TextSecondary
-                            )
+                    Text(
+                        text = "${repository.pluginCount} ${stringResource(Res.string.plugin)}",
+                        style = MaterialTheme.typography.caption.copy(
+                            fontSize = 10.sp,
+                            color = CloudStreamColors.TextSecondary
                         )
-                    }
+                    )
                 }
             }
 

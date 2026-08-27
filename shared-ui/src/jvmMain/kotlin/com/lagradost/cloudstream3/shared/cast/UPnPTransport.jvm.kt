@@ -9,46 +9,56 @@ import java.net.InetAddress
 import java.net.SocketTimeoutException
 import java.net.URL
 
+private const val SSDP_MULTICAST_HOST = "239.255.255.250"
+private const val SSDP_MULTICAST_PORT = 1900
+private const val SSDP_SOCKET_TIMEOUT_MS = 3000
+private const val SSDP_BUFFER_SIZE = 4096
+private const val SSDP_SEARCH_MESSAGE = "M-SEARCH * HTTP/1.1\r\n" +
+        "HOST: 239.255.255.250:1900\r\n" +
+        "MAN: \"ssdp:discover\"\r\n" +
+        "MX: 3\r\n" +
+        "ST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n"
+
 /**
  * JVM Desktop network implementation of [UPnPTransport].
  */
 actual object UPnPTransport {
     actual suspend fun discoverSsdp(timeoutMs: Long): List<SsdpResponse> = withContext(Dispatchers.IO) {
-        val results = mutableListOf<SsdpResponse>()
-        var socket: DatagramSocket? = null
         try {
-            val ssdpMessage = "M-SEARCH * HTTP/1.1\r\n" +
-                    "HOST: 239.255.255.250:1900\r\n" +
-                    "MAN: \"ssdp:discover\"\r\n" +
-                    "MX: 3\r\n" +
-                    "ST: urn:schemas-upnp-org:device:MediaRenderer:1\r\n\r\n"
-
-            socket = DatagramSocket()
-            socket.soTimeout = 3000
-            val data = ssdpMessage.toByteArray()
-            val group = InetAddress.getByName("239.255.255.250")
-            val packet = DatagramPacket(data, data.size, group, 1900)
-            socket.send(packet)
-
-            val receiveBuffer = ByteArray(4096)
-            val startTime = System.currentTimeMillis()
-
-            while (System.currentTimeMillis() - startTime < timeoutMs) {
-                try {
-                    val responsePacket = DatagramPacket(receiveBuffer, receiveBuffer.size)
-                    socket.receive(responsePacket)
-                    val responseText = String(responsePacket.data, 0, responsePacket.length)
-                    val host = responsePacket.address.hostAddress ?: continue
-                    results.add(SsdpResponse(responseText, host))
-                } catch (_: SocketTimeoutException) {
-                    break
-                } catch (_: Throwable) {}
+            DatagramSocket().use { socket ->
+                socket.soTimeout = SSDP_SOCKET_TIMEOUT_MS
+                sendMulticastSearch(socket)
+                collectSsdpResponses(socket, timeoutMs)
             }
         } catch (_: Throwable) {
-        } finally {
-            try { socket?.close() } catch (_: Throwable) {}
+            emptyList()
         }
-        results
+    }
+
+    private fun sendMulticastSearch(socket: DatagramSocket) {
+        val data = SSDP_SEARCH_MESSAGE.toByteArray(Charsets.UTF_8)
+        val group = InetAddress.getByName(SSDP_MULTICAST_HOST)
+        val packet = DatagramPacket(data, data.size, group, SSDP_MULTICAST_PORT)
+        socket.send(packet)
+    }
+
+    private fun collectSsdpResponses(socket: DatagramSocket, timeoutMs: Long): List<SsdpResponse> {
+        val results = mutableListOf<SsdpResponse>()
+        val receiveBuffer = ByteArray(SSDP_BUFFER_SIZE)
+        val deadline = System.currentTimeMillis() + timeoutMs
+
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                val responsePacket = DatagramPacket(receiveBuffer, receiveBuffer.size)
+                socket.receive(responsePacket)
+                val responseText = String(responsePacket.data, 0, responsePacket.length, Charsets.UTF_8)
+                val host = responsePacket.address.hostAddress ?: continue
+                results.add(SsdpResponse(responseText, host))
+            } catch (_: SocketTimeoutException) {
+                break
+            } catch (_: Throwable) {}
+        }
+        return results
     }
 
     actual suspend fun fetchXml(locationUrl: String): String? = withContext(Dispatchers.IO) {

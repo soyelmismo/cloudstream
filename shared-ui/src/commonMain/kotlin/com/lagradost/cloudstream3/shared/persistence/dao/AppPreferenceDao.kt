@@ -8,9 +8,6 @@ import androidx.room.Upsert
 import com.lagradost.cloudstream3.shared.persistence.entity.AppPreferenceEntity
 import kotlinx.coroutines.flow.Flow
 
-/**
- * Data Access Object for cross-platform app preferences and key-value configuration.
- */
 @Dao
 interface AppPreferenceDao {
     @Query("SELECT * FROM app_preferences WHERE `key` = :key LIMIT 1")

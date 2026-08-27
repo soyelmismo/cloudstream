@@ -1,5 +1,6 @@
 package com.lagradost.cloudstream3.services
 
+import android.app.Notification
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
@@ -18,18 +19,24 @@ import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.utils.ApkInstaller
 import com.lagradost.cloudstream3.utils.AppContextUtils.createNotificationChannel
-import com.lagradost.cloudstream3.utils.Coroutines.ioSafe
 import com.lagradost.cloudstream3.utils.UIHelper.colorFromAttribute
-import com.lagradost.cloudstream3.utils.txt
 import com.lagradost.cloudstream3.utils.asString
-import com.lagradost.cloudstream3.utils.asStringNull
+import com.lagradost.cloudstream3.utils.txt
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.jetbrains.compose.resources.StringResource
 import kotlin.math.roundToInt
 
 class PackageInstallerService : Service() {
     private var installer: ApkInstaller? = null
+    private val serviceJob = SupervisorJob()
+    private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
+    private val updateLock = Mutex()
 
     private val baseNotification by lazy {
         val intent = Intent(this, MainActivity::class.java)
@@ -41,7 +48,6 @@ class PackageInstallerService : Service() {
             .setColorized(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
-            // If low priority then the notification might not show :(
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setColor(this.colorFromAttribute(R.attr.colorPrimary))
             .setContentTitle(txt(Res.string.update_notification_downloading).asString(this))
@@ -50,120 +56,129 @@ class PackageInstallerService : Service() {
     }
 
     override fun onCreate() {
+        super.onCreate()
         this.createNotificationChannel(
             UPDATE_CHANNEL_ID,
             UPDATE_CHANNEL_NAME,
             UPDATE_CHANNEL_DESCRIPTION
         )
-        if (SDK_INT >= 29)
-        startForeground(UPDATE_NOTIFICATION_ID, baseNotification.build(), FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        else startForeground(UPDATE_NOTIFICATION_ID, baseNotification.build())
+        if (SDK_INT >= 29) {
+            startForeground(UPDATE_NOTIFICATION_ID, baseNotification.build(), FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            startForeground(UPDATE_NOTIFICATION_ID, baseNotification.build())
+        }
     }
 
-    private val updateLock = Mutex()
+    private fun cleanOldUpdates() {
+        val appUpdateName = "CloudStream"
+        val appUpdateSuffix = "apk"
 
-    private suspend fun downloadUpdate(url: String): Boolean {
-        try {
-            Log.d("PackageInstallerService", "Downloading update: $url")
+        cacheDir.listFiles()?.filter {
+            it.name.startsWith(appUpdateName) && it.extension == appUpdateSuffix
+        }?.forEach {
+            deleteFileOnExit(it)
+        }
+    }
 
-            // Delete all old updates
-            ioSafe {
-                val appUpdateName = "CloudStream"
-                val appUpdateSuffix = "apk"
+    private suspend fun streamDownload(url: String) {
+        val body = app.get(url).body
+        val inputStream = body.byteStream()
+        installer = ApkInstaller(this)
+        val totalSize = body.contentLength()
+        var currentSize = 0
 
-                this@PackageInstallerService.cacheDir.listFiles()?.filter {
-                    it.name.startsWith(appUpdateName) && it.extension == appUpdateSuffix
-                }?.forEach {
-                    deleteFileOnExit(it)
-                }
-            }
-
-            updateLock.withLock {
+        installer?.installApk(this, inputStream, totalSize, { bytesRead ->
+            currentSize += bytesRead
+            if (totalSize > 0L) {
+                val percentage = currentSize / totalSize.toFloat()
                 updateNotificationProgress(
-                    0f,
+                    percentage,
                     ApkInstaller.InstallProgressStatus.Downloading
                 )
-
-                val body = app.get(url).body
-                val inputStream = body.byteStream()
-                installer = ApkInstaller(this)
-                val totalSize = body.contentLength()
-                var currentSize = 0
-
-                installer?.installApk(this, inputStream, totalSize, {
-                    currentSize += it
-                    // Prevent div 0
-                    if (totalSize == 0L) return@installApk
-
-                    val percentage = currentSize / totalSize.toFloat()
-                    updateNotificationProgress(
-                        percentage,
-                        ApkInstaller.InstallProgressStatus.Downloading
-                    )
-                }) { status ->
-                    updateNotificationProgress(0f, status)
-                }
             }
-            return true
+        }) { status ->
+            updateNotificationProgress(0f, status)
+        }
+    }
+
+    private suspend fun downloadUpdate(url: String): Boolean {
+        return try {
+            Log.d("PackageInstallerService", "Downloading update: $url")
+            cleanOldUpdates()
+            updateLock.withLock {
+                updateNotificationProgress(0f, ApkInstaller.InstallProgressStatus.Downloading)
+                streamDownload(url)
+            }
+            true
         } catch (e: Exception) {
             logError(e)
             updateNotificationProgress(0f, ApkInstaller.InstallProgressStatus.Failed)
-            return false
+            false
         }
+    }
+
+    private fun resolveStatusTitle(state: ApkInstaller.InstallProgressStatus): StringResource {
+        return when (state) {
+            ApkInstaller.InstallProgressStatus.Installing -> Res.string.update_notification_installing
+            ApkInstaller.InstallProgressStatus.Preparing,
+            ApkInstaller.InstallProgressStatus.Downloading -> Res.string.update_notification_downloading
+            ApkInstaller.InstallProgressStatus.Failed -> Res.string.update_notification_failed
+        }
+    }
+
+    private fun buildUpdateNotification(
+        percentage: Float,
+        state: ApkInstaller.InstallProgressStatus
+    ): Notification {
+        val titleRes = resolveStatusTitle(state)
+        val isFailed = state == ApkInstaller.InstallProgressStatus.Failed
+
+        return baseNotification
+            .setContentTitle(txt(titleRes).asString(this))
+            .apply {
+                if (isFailed) {
+                    setSmallIcon(R.drawable.rderror)
+                    setAutoCancel(true)
+                } else {
+                    val progressValue = (10000 * percentage).roundToInt()
+                    val isIndeterminate = state != ApkInstaller.InstallProgressStatus.Downloading
+                    setProgress(10000, progressValue, isIndeterminate)
+                }
+            }
+            .build()
     }
 
     private fun updateNotificationProgress(
         percentage: Float,
         state: ApkInstaller.InstallProgressStatus
     ) {
-//        Log.d(LOG_TAG, "Downloading app update progress $percentage | $state")
-        val text = when (state) {
-            ApkInstaller.InstallProgressStatus.Installing -> Res.string.update_notification_installing
-            ApkInstaller.InstallProgressStatus.Preparing, ApkInstaller.InstallProgressStatus.Downloading -> Res.string.update_notification_downloading
-            ApkInstaller.InstallProgressStatus.Failed -> Res.string.update_notification_failed
+        val newNotification = buildUpdateNotification(percentage, state)
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        val id = if (state == ApkInstaller.InstallProgressStatus.Failed) {
+            UPDATE_NOTIFICATION_ID + 1
+        } else {
+            UPDATE_NOTIFICATION_ID
         }
-
-        val newNotification = baseNotification
-            .setContentTitle(txt(text).asString(this))
-            .apply {
-                if (state == ApkInstaller.InstallProgressStatus.Failed) {
-                    setSmallIcon(R.drawable.rderror)
-                    setAutoCancel(true)
-                } else {
-                    setProgress(
-                        10000, (10000 * percentage).roundToInt(),
-                        state != ApkInstaller.InstallProgressStatus.Downloading
-                    )
-                }
-            }
-            .build()
-
-        val notificationManager =
-            getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-
-        // Persistent notification on failure
-        val id =
-            if (state == ApkInstaller.InstallProgressStatus.Failed) UPDATE_NOTIFICATION_ID + 1 else UPDATE_NOTIFICATION_ID
         notificationManager.notify(id, newNotification)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val url = intent?.getStringExtra(EXTRA_URL) ?: return START_NOT_STICKY
-        ioSafe {
-            downloadUpdate(url)
-            // Close the service after the update is done
-            // If no sleep then the install prompt may not appear and the notification
-            // will disappear instantly
-            delay(10_000)
-            this@PackageInstallerService.stopSelf()
+        serviceScope.launch {
+            try {
+                downloadUpdate(url)
+                delay(10_000)
+            } finally {
+                stopSelf()
+            }
         }
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
+        serviceJob.cancel()
         installer?.unregisterInstallActionReceiver()
         installer = null
-        this.stopSelf()
         super.onDestroy()
     }
 
@@ -180,7 +195,7 @@ class PackageInstallerService : Service() {
         const val UPDATE_CHANNEL_ID = "cloudstream3.updates"
         const val UPDATE_CHANNEL_NAME = "App Updates"
         const val UPDATE_CHANNEL_DESCRIPTION = "App updates notification channel"
-        const val UPDATE_NOTIFICATION_ID = -68454136 // Random unique
+        const val UPDATE_NOTIFICATION_ID = -68454136
 
         fun getIntent(
             context: Context,

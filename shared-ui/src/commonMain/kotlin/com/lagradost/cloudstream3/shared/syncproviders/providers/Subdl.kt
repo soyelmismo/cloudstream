@@ -56,33 +56,57 @@ class SubDlApi : SubtitleAPI() {
         return AuthUser(id = name.hashCode(), name = name)
     }
 
+    private val subdl2LangTagIETF: Map<String, String> by lazy {
+        langTagIETF2subdl.entries.associate { (k, v) -> v to k }
+    }
+
+    private fun buildQueryParams(query: AbstractSubtitleEntities.SubtitleSearch): String {
+        val builder = StringBuilder()
+        query.epNumber?.takeIf { it > 0 }?.let { builder.append("&episode_number=$it") }
+        query.seasonNumber?.takeIf { it > 0 }?.let { builder.append("&season_number=$it") }
+        query.year?.takeIf { it > 0 }?.let { builder.append("&year=$it") }
+        return builder.toString()
+    }
+
+    private fun buildSearchUrl(apiKey: String, query: AbstractSubtitleEntities.SubtitleSearch): String {
+        val langSubdlCode = langTagIETF2subdl[query.lang.toString()] ?: query.lang.orEmpty()
+        val queryParams = buildQueryParams(query)
+        val targetQuery = when {
+            query.imdbId != null -> "&imdb_id=${query.imdbId}"
+            query.tmdbId != null -> "&tmdb_id=${query.tmdbId}"
+            else -> "&film_name=${query.query.orEmpty()}"
+        }
+        return "$APIENDPOINT?api_key=$apiKey$targetQuery&languages=$langSubdlCode$queryParams"
+    }
+
+    private fun mapSubtitleEntity(
+        subtitle: Subtitle,
+        query: AbstractSubtitleEntities.SubtitleSearch
+    ): AbstractSubtitleEntities.SubtitleEntity {
+        val langTagIETF = subdl2LangTagIETF[subtitle.lang] ?: subtitle.lang
+        val resEpNum = subtitle.episode ?: query.epNumber
+        val resSeasonNum = subtitle.season ?: query.seasonNumber
+        val type = if ((resSeasonNum ?: 0) > 0) TvType.TvSeries else TvType.Movie
+
+        return AbstractSubtitleEntities.SubtitleEntity(
+            idPrefix = this.idPrefix,
+            name = subtitle.releaseName,
+            lang = langTagIETF,
+            data = "$DOWNLOADENDPOINT${subtitle.url.orEmpty()}",
+            type = type,
+            source = this.name,
+            epNumber = resEpNum,
+            seasonNumber = resSeasonNum,
+            isHearingImpaired = subtitle.hearingImpaired ?: false,
+        )
+    }
+
     override suspend fun search(
         auth: AuthData?,
         query: AbstractSubtitleEntities.SubtitleSearch
     ): List<AbstractSubtitleEntities.SubtitleEntity>? {
-        if (auth == null) return null
-        val apiKey = auth.token.accessToken ?: return null
-        val queryText = query.query
-        val epNum = query.epNumber ?: 0
-        val seasonNum = query.seasonNumber ?: 0
-        val yearNum = query.year ?: 0
-        val langSubdlCode = langTagIETF2subdl[query.lang.toString()] ?: query.lang
-
-        val idQuery = when {
-            query.imdbId != null -> "&imdb_id=${query.imdbId}"
-            query.tmdbId != null -> "&tmdb_id=${query.tmdbId}"
-            else -> null
-        }
-
-        val epQuery = if (epNum > 0) "&episode_number=$epNum" else ""
-        val seasonQuery = if (seasonNum > 0) "&season_number=$seasonNum" else ""
-        val yearQuery = if (yearNum > 0) "&year=$yearNum" else ""
-
-        val searchQueryUrl = when (idQuery) {
-            // Use imdb/tmdb id to search if its valid
-            null -> "$APIENDPOINT?api_key=${apiKey}&film_name=$queryText&languages=$langSubdlCode$epQuery$seasonQuery$yearQuery"
-            else -> "$APIENDPOINT?api_key=${apiKey}$idQuery&languages=$langSubdlCode$epQuery$seasonQuery$yearQuery"
-        }
+        val apiKey = auth?.token?.accessToken ?: return null
+        val searchQueryUrl = buildSearchUrl(apiKey, query)
 
         val req = app.get(
             url = searchQueryUrl,
@@ -92,24 +116,7 @@ class SubDlApi : SubtitleAPI() {
         )
 
         return req.parsedSafe<ApiResponse>()?.subtitles?.map { subtitle ->
-            val langTagIETF =
-                langTagIETF2subdl.entries.find { it.value == subtitle.lang }?.key
-                    ?: subtitle.lang
-            val resEpNum = subtitle.episode ?: query.epNumber
-            val resSeasonNum = subtitle.season ?: query.seasonNumber
-            val type = if ((resSeasonNum ?: 0) > 0) TvType.TvSeries else TvType.Movie
-
-            AbstractSubtitleEntities.SubtitleEntity(
-                idPrefix = this.idPrefix,
-                name = subtitle.releaseName,
-                lang = langTagIETF,
-                data = "${DOWNLOADENDPOINT}${subtitle.url}",
-                type = type,
-                source = this.name,
-                epNumber = resEpNum,
-                seasonNumber = resSeasonNum,
-                isHearingImpaired = subtitle.hearingImpaired ?: false,
-            )
+            mapSubtitleEntity(subtitle, query)
         }
     }
 
@@ -185,13 +192,13 @@ class SubDlApi : SubtitleAPI() {
     data class Subtitle(
         @SerialName("release_name") val releaseName: String,
         @SerialName("name") val name: String,
-        @SerialName("lang") val lang: String, // subdl language code
+        @SerialName("lang") val lang: String,
         @SerialName("author") val author: String? = null,
         @SerialName("url") val url: String? = null,
         @SerialName("subtitlePage") val subtitlePage: String? = null,
         @SerialName("season") val season: Int? = null,
         @SerialName("episode") val episode: Int? = null,
-        @SerialName("language") val language: String? = null, // full language name
+        @SerialName("language") val language: String? = null,
         @SerialName("hi") val hearingImpaired: Boolean? = null,
     )
 

@@ -42,10 +42,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 import cloudstream.shared_ui.generated.resources.*
-import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
 
 /**
  * Standard default colors for CloudStream text fields.
@@ -309,3 +311,19 @@ fun CloudStreamTextField(
         }
     }
 }
+
+@Preview
+@Composable
+private fun CloudStreamInputPreview() {
+    CloudStreamTheme {
+        Column(modifier = Modifier.padding(16.dp)) {
+            CloudStreamTextField(
+                value = "Test Input",
+                onValueChange = {},
+                label = "Label",
+                placeholder = "Placeholder"
+            )
+        }
+    }
+}
+

@@ -43,10 +43,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lagradost.cloudstream3.shared.ui.theme.AppColors
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import com.lagradost.cloudstream3.shared.ui.theme.CloudstreamTheme
 import com.lagradost.cloudstream3.shared.ui.theme.rememberNativeSystemTheme
 import com.lagradost.cloudstream3.shared.viewmodels.settings.AppTheme
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 import cloudstream.shared_ui.generated.resources.*
 
 /**
@@ -132,7 +134,6 @@ fun ThemeCard(
             modifier = Modifier.padding(10.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Theme Visual Swatches Box
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -140,7 +141,6 @@ fun ThemeCard(
                     .clip(RoundedCornerShape(8.dp))
                     .background(palette.getOrElse(1) { CloudStreamColors.Background })
             ) {
-                // Surface Mock
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -148,7 +148,6 @@ fun ThemeCard(
                         .clip(RoundedCornerShape(topStart = 6.dp))
                         .background(palette.getOrElse(2) { CloudStreamColors.SurfaceVariant })
                 ) {
-                    // Mock Elements
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -156,14 +155,12 @@ fun ThemeCard(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Accent Pill
                         Box(
                             modifier = Modifier
                                 .size(width = 24.dp, height = 10.dp)
                                 .clip(RoundedCornerShape(3.dp))
                                 .background(palette.getOrElse(0) { MaterialTheme.colors.primary })
                         )
-                        // Secondary Pill
                         Box(
                             modifier = Modifier
                                 .size(width = 16.dp, height = 10.dp)
@@ -173,7 +170,6 @@ fun ThemeCard(
                     }
                 }
 
-                // Selected Checkmark Badge
                 if (isSelected) {
                     Box(
                         modifier = Modifier
@@ -196,7 +192,6 @@ fun ThemeCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Theme Display Name
             Text(
                 text = stringResource(theme.displayNameRes),
                 style = MaterialTheme.typography.body2.copy(
@@ -205,6 +200,33 @@ fun ThemeCard(
                 ),
                 color = if (isSelected) MaterialTheme.colors.primary else CloudstreamTheme.extendedColors.textPrimary,
                 maxLines = 1
+            )
+        }
+    }
+}
+
+@Preview
+@Composable
+private fun ThemeSelectorPreview() {
+    CloudStreamTheme {
+        Box(modifier = Modifier.padding(16.dp)) {
+            ThemeSelector(
+                selectedTheme = AppTheme.AMOLED,
+                onThemeSelected = {}
+            )
+        }
+    }
+}
+
+@Preview
+@Composable
+private fun ThemeSelectorAmoledLightPreview() {
+    CloudStreamTheme(theme = AppTheme.AMOLED, isDarkMode = false) {
+        Box(modifier = Modifier.background(CloudStreamColors.Background).padding(16.dp)) {
+            ThemeSelector(
+                selectedTheme = AppTheme.AMOLED,
+                onThemeSelected = {},
+                isDarkMode = false
             )
         }
     }

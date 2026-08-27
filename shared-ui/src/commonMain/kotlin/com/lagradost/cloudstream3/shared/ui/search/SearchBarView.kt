@@ -54,8 +54,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import org.jetbrains.compose.resources.stringResource
+import org.jetbrains.compose.ui.tooling.preview.Preview
 import cloudstream.shared_ui.generated.resources.*
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
+import com.lagradost.cloudstream3.shared.viewmodels.settings.AppTheme
 
 /**
  * Top Search Bar with quick clearing, debounced auto-search, search button,
@@ -78,7 +81,6 @@ fun SearchBarView(
     var localText by remember(query) { mutableStateOf(query) }
     val effectivePlaceholder = placeholderText ?: stringResource(Res.string.search_placeholder)
 
-    // Debounce typing logic for responsive auto-search
     LaunchedEffect(localText) {
         if (localText == query) return@LaunchedEffect
 
@@ -110,7 +112,6 @@ fun SearchBarView(
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Search Leading Icon / Button
             IconButton(
                 onClick = {
                     if (localText.isNotBlank()) {
@@ -130,7 +131,6 @@ fun SearchBarView(
 
             Spacer(modifier = Modifier.width(6.dp))
 
-            // Main Text Input with Desktop Keyboard Handling
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -195,7 +195,6 @@ fun SearchBarView(
                 )
             }
 
-            // Quick Clear Button
             if (localText.isNotEmpty()) {
                 IconButton(
                     onClick = {
@@ -215,7 +214,6 @@ fun SearchBarView(
                 }
             }
 
-            // Loading indicator inside search bar
             if (isLoading) {
                 CircularProgressIndicator(
                     modifier = Modifier
@@ -229,7 +227,6 @@ fun SearchBarView(
 
             Spacer(modifier = Modifier.width(4.dp))
 
-            // Divider before mode switch
             Box(
                 modifier = Modifier
                     .width(1.dp)
@@ -239,7 +236,6 @@ fun SearchBarView(
 
             Spacer(modifier = Modifier.width(6.dp))
 
-            // Display Mode Switcher (Unified Grid vs Grouped by Provider)
             DisplayModeToggle(
                 currentMode = displayMode,
                 onModeSelected = onDisplayModeChange
@@ -249,7 +245,7 @@ fun SearchBarView(
 }
 
 /**
- * Toggle selector for switching between Unified (Interleaved) grid and Grouped by provider list.
+ * Toggle selector for switching between Unified grid and Grouped by provider list.
  */
 @Composable
 private fun DisplayModeToggle(
@@ -265,19 +261,16 @@ private fun DisplayModeToggle(
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Unified Mode Button
         ModeIconButton(
             isSelected = currentMode == SearchDisplayMode.Unified,
             onClick = { onModeSelected(SearchDisplayMode.Unified) },
             description = stringResource(Res.string.search_view_mode_unified)
         ) {
-            // Grid icon represented as 4 small squares
             GridModeIcon(
                 tint = if (currentMode == SearchDisplayMode.Unified) CloudStreamColors.Primary else CloudStreamColors.TextMuted
             )
         }
 
-        // Grouped Mode Button
         ModeIconButton(
             isSelected = currentMode == SearchDisplayMode.Grouped,
             onClick = { onModeSelected(SearchDisplayMode.Grouped) },
@@ -332,6 +325,39 @@ private fun GridModeIcon(tint: Color, modifier: Modifier = Modifier) {
             Box(modifier = Modifier.size(5.dp).background(tint, RoundedCornerShape(1.dp)))
             Box(modifier = Modifier.size(5.dp).background(tint, RoundedCornerShape(1.dp)))
         }
+    }
+}
+
+@Preview
+@Composable
+private fun SearchBarViewPreview() {
+    CloudStreamTheme {
+        SearchBarView(
+            query = "Attack on Titan",
+            onQueryChange = {},
+            onSearch = { _, _ -> },
+            onClear = {},
+            displayMode = SearchDisplayMode.Unified,
+            onDisplayModeChange = {},
+            modifier = Modifier.padding(16.dp)
+        )
+    }
+}
+
+@Preview
+@Composable
+private fun SearchBarViewAmoledLightPreview() {
+    CloudStreamTheme(theme = AppTheme.AMOLED, isDarkMode = false) {
+        SearchBarView(
+            query = "",
+            onQueryChange = {},
+            onSearch = { _, _ -> },
+            onClear = {},
+            displayMode = SearchDisplayMode.Grouped,
+            onDisplayModeChange = {},
+            isLoading = true,
+            modifier = Modifier.padding(16.dp)
+        )
     }
 }
 

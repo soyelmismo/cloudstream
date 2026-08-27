@@ -54,6 +54,7 @@ kotlin {
             implementation(project(":library"))
             implementation(libs.nicehttp)
             implementation(libs.kotlinx.atomicfu)
+            api(libs.kotlinx.collections.immutable)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.datetime)

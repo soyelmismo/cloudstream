@@ -9,9 +9,6 @@ import androidx.room.Upsert
 import com.lagradost.cloudstream3.shared.persistence.entity.FavoriteEntity
 import kotlinx.coroutines.flow.Flow
 
-/**
- * Data Access Object for user favorites.
- */
 @Dao
 interface FavoriteDao {
     @Query("SELECT * FROM favorites WHERE accountId = :accountId AND id = :id LIMIT 1")

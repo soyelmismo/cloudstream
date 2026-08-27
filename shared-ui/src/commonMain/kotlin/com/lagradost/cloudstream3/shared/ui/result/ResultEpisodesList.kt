@@ -1,5 +1,6 @@
 package com.lagradost.cloudstream3.shared.ui.result
 
+import kotlinx.collections.immutable.ImmutableList
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -103,13 +104,11 @@ fun ResultEpisodesList(
     val readMoreString = stringResource(Res.string.read_more)
 
     Column(modifier = modifier.fillMaxWidth()) {
-        // Modern Dub & Season Selector Header
         ResultEpisodesSelectorHeader(
             state = state,
             onEvent = onEvent
         )
 
-        // Episodes Rows
         state.episodes.forEach { episode ->
             ResultEpisodeItem(
                 episode = episode,
@@ -152,7 +151,6 @@ fun ResultEpisodesSelectorHeader(
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp)
     ) {
-        // Dub/Sub Tabs (for Anime / Multi-audio)
         if (state.availableDubStatuses.size > 1) {
             ModernDubStatusChips(
                 availableDubStatuses = state.availableDubStatuses,
@@ -162,13 +160,11 @@ fun ResultEpisodesSelectorHeader(
             Spacer(modifier = Modifier.height(10.dp))
         }
 
-        // Season Selector and Episode Count Header Row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Season Selector Chips / Dropdown
             if (state.availableSeasons.size > 1) {
                 if (state.availableSeasons.size <= 4) {
                     ModernSeasonChipsRow(
@@ -202,7 +198,6 @@ fun ResultEpisodesSelectorHeader(
                 )
             }
 
-            // Episode Count Translucent Badge
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = CloudStreamColors.SurfaceElevated,
@@ -227,7 +222,7 @@ fun ResultEpisodesSelectorHeader(
  */
 @Composable
 fun ModernDubStatusChips(
-    availableDubStatuses: List<DubStatus>,
+    availableDubStatuses: ImmutableList<DubStatus>,
     selectedDubStatus: DubStatus,
     onSelectDubStatus: (DubStatus) -> Unit,
     modifier: Modifier = Modifier
@@ -267,7 +262,7 @@ fun ModernDubStatusChips(
  */
 @Composable
 fun ModernSeasonChipsRow(
-    seasons: List<ResultSeason>,
+    seasons: ImmutableList<ResultSeason>,
     selectedSeason: Int,
     onSelectSeason: (Int) -> Unit,
     modifier: Modifier = Modifier
@@ -293,7 +288,7 @@ fun ModernSeasonChipsRow(
  */
 @Composable
 fun ModernSeasonSelectorDropdown(
-    seasons: List<ResultSeason>,
+    seasons: ImmutableList<ResultSeason>,
     selectedSeason: Int,
     onSelectSeason: (Int) -> Unit,
     modifier: Modifier = Modifier
@@ -445,9 +440,6 @@ fun ResultEpisodeItem(
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.Top
             ) {
-                // =============================================================
-                // Episode Thumbnail (16:9) with Embedded Bottom Progress Bar
-                // =============================================================
                 Box(
                     modifier = Modifier
                         .width(140.dp)
@@ -478,7 +470,6 @@ fun ResultEpisodeItem(
                         }
                     }
 
-                    // Hover/Focus Play Icon Overlay
                     if (isHovered || isFocused) {
                         Box(
                             modifier = Modifier
@@ -495,7 +486,6 @@ fun ResultEpisodeItem(
                         }
                     }
 
-                    // Watched Checkmark Badge (Top-Right)
                     if (episode.isWatched) {
                         Box(
                             modifier = Modifier
@@ -514,7 +504,6 @@ fun ResultEpisodeItem(
                         }
                     }
 
-                    // Episode Number Pill (Bottom-Left)
                     if (episode.episode > 0) {
                         Box(
                             modifier = Modifier
@@ -534,7 +523,6 @@ fun ResultEpisodeItem(
                         }
                     }
 
-                    // Bottom Embedded Progress Bar
                     val watchProgress = episode.getWatchProgress()
                     if (watchProgress > 0f) {
                         LinearProgressIndicator(
@@ -549,9 +537,6 @@ fun ResultEpisodeItem(
                     }
                 }
 
-                // =============================================================
-                // Episode Metadata (Title, Date, Runtime, Score, Actions)
-                // =============================================================
                 Column(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -580,7 +565,6 @@ fun ResultEpisodeItem(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            // Inline Download Button
                             IconButton(
                                 onClick = { onDownloadClick?.invoke() ?: onEpisodeMenuClick?.invoke() },
                                 modifier = Modifier.size(28.dp).focusable()
@@ -600,7 +584,6 @@ fun ResultEpisodeItem(
                                 }
                             }
 
-                            // Direct Play Button
                             IconButton(
                                 onClick = onClick,
                                 modifier = Modifier.size(28.dp).focusable()
@@ -620,7 +603,6 @@ fun ResultEpisodeItem(
                                 }
                             }
 
-                            // 3-Dots Quick Actions Menu
                             Box {
                                 IconButton(
                                     onClick = {
@@ -665,7 +647,6 @@ fun ResultEpisodeItem(
                         }
                     }
 
-                    // Metadata Row: Runtime & Air Date
                     val runtimeText = episode.runTime?.let { rt ->
                         val mins = rt / 60
                         if (mins > 0) stringResource(Res.string.duration_format, mins) else "${rt}s"
@@ -680,7 +661,6 @@ fun ResultEpisodeItem(
                         Spacer(modifier = Modifier.height(4.dp))
                     }
 
-                    // Expandable Episode Synopsis
                     if (!episode.description.isNullOrBlank()) {
                         Column(
                             modifier = Modifier
@@ -728,7 +708,7 @@ fun ResultEpisodeItem(
  * LazyList helper to render items seamlessly in LazyColumn (Plural naming).
  */
 fun LazyListScope.resultEpisodesListItems(
-    episodes: List<ResultEpisode>,
+    episodes: ImmutableList<ResultEpisode>,
     selectedEpisode: ResultEpisode?,
     onEpisodeClick: (ResultEpisode) -> Unit,
     onSetWatchState: (Int, Int) -> Unit,
@@ -755,7 +735,7 @@ fun LazyListScope.resultEpisodesListItems(
  * Backward compatibility alias (Singular naming).
  */
 fun LazyListScope.resultEpisodeListItems(
-    episodes: List<ResultEpisode>,
+    episodes: ImmutableList<ResultEpisode>,
     selectedEpisode: ResultEpisode?,
     onEpisodeClick: (ResultEpisode) -> Unit,
     onSetWatchState: (Int, Int) -> Unit,

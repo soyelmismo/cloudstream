@@ -52,6 +52,46 @@ object SubtitleHelper {
         }
     }
 
+    private val GARBAGE_REGEX = Regex(
+        "\\([^)]*(?:dub|sub|original|audio|code)[^)]*\\)|" +
+                "[\\u064B-\\u065B]|" +
+                "\\d|" +
+                "[^\\p{L}\\p{Mn}\\p{Mc}\\p{Me} ()-]"
+    )
+
+    private fun cleanLanguageName(name: String): String =
+        name.lowercase().replace(GARBAGE_REGEX, "").trim()
+
+    private fun findExactLanguageMatch(cleanName: String): LanguageMetadata? {
+        val index = indexMapLanguageName[cleanName]
+            ?: indexMapNativeName[cleanName]
+            ?: indexMapIETF_tag[cleanName]
+            ?: return null
+        return languages.getOrNull(index)
+    }
+
+    private fun computeLanguageSimilarity(cleanName: String, lang: LanguageMetadata): Int =
+        maxOf(
+            Levenshtein.ratio(cleanName, lang.languageName.lowercase()),
+            Levenshtein.ratio(cleanName, lang.nativeName.lowercase())
+        )
+
+    private fun isCandidateMatch(cleanName: String, lang: LanguageMetadata, score: Int): Boolean =
+        cleanName.contains(lang.languageName, ignoreCase = true) ||
+            cleanName.contains(lang.nativeName, ignoreCase = true) ||
+            score > 80
+
+    private fun findFuzzyLanguageMatch(cleanName: String): LanguageMetadata? {
+        var closestMatch: Pair<LanguageMetadata?, Int> = null to 0
+        for (lang in languages) {
+            val score = computeLanguageSimilarity(cleanName, lang)
+            if (isCandidateMatch(cleanName, lang, score) && score > closestMatch.second) {
+                closestMatch = lang to score
+            }
+        }
+        return closestMatch.first
+    }
+
     /**
      * Language name (english or native) -> [LanguageMetadata]
      * @param languageName language name or language tag
@@ -62,56 +102,10 @@ object SubtitleHelper {
         halfMatch: Boolean? = false
     ): LanguageMetadata? {
         if (languageName.isNullOrBlank() || languageName.length < 2) return null
-        // Workaround to avoid junk like "English (original audio)" or "Spanish 123"
-        // or "اَلْعَرَبِيَّةُ (Original Audio) 1" or "English (hindi sub)"…
-        // Will still keep "-" to be compatible with language tags such as pr-bt
-        val garbage = Regex(
-            "\\([^)]*(?:dub|sub|original|audio|code)[^)]*\\)|" + // junk words in parenthesis
-                    "[\\u064B-\\u065B]|" + // arabic diacritics
-                    "\\d|" +  // numbers
-                    "[^\\p{L}\\p{Mn}\\p{Mc}\\p{Me} ()-]" // non-letter (from any language)
-        )
-
-
-        val lowLangName = languageName.lowercase().replace(garbage, "").trim()
-
-        val index = indexMapLanguageName[lowLangName]
-            ?: indexMapNativeName[lowLangName]
-            ?: indexMapIETF_tag[lowLangName]
-            ?: -1
-
-        val langMetadata = languages.getOrNull(index)
-
-        if (langMetadata != null) {
-            return langMetadata
-        } else if (halfMatch == true) {
-            // Go for partial matches but only use the best match
-            var closestMatch: Pair<LanguageMetadata?, Int> = null to 0
-
-            for (lang in languages) {
-                val score = maxOf(
-                    Levenshtein.ratio(lowLangName, lang.languageName.lowercase()),
-                    Levenshtein.ratio(
-                        lowLangName, lang.nativeName.lowercase()
-                    )
-                )
-
-                // Usually the languageName or nativeName is a substring of the entered name, for example in "English Subtitle"
-                if (lowLangName.contains(lang.languageName, ignoreCase = true) ||
-                    lowLangName.contains(lang.nativeName, ignoreCase = true) ||
-                    // Arbitrary cutoff at 80.
-                    score > 80
-                ) {
-                    // First detected language gets priority in equal scores.
-                    if (score > closestMatch.second) {
-                        closestMatch = lang to score
-                    }
-                }
-            }
-
-            return closestMatch.first
-        }
-
+        val lowLangName = cleanLanguageName(languageName)
+        val exactMatch = findExactLanguageMatch(lowLangName)
+        if (exactMatch != null) return exactMatch
+        if (halfMatch == true) return findFuzzyLanguageMatch(lowLangName)
         return null
     }
 

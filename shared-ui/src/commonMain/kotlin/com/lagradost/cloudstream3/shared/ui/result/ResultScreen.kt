@@ -1,5 +1,9 @@
 package com.lagradost.cloudstream3.shared.ui.result
 
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+
+import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.utils.asString
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -60,6 +64,10 @@ import com.lagradost.cloudstream3.shared.viewmodels.result.ResultState
 import com.lagradost.cloudstream3.shared.viewmodels.result.ResultViewModel
 import com.lagradost.cloudstream3.utils.ExtractorLink
 
+import com.lagradost.cloudstream3.shared.ui.layout.Layout
+import com.lagradost.cloudstream3.shared.ui.layout.isLayout
+import org.jetbrains.compose.ui.tooling.preview.Preview
+
 /**
  * Full Media Details Screen for Compose Multiplatform.
  * Connects directly to [ResultViewModel] in MVI architecture.
@@ -70,7 +78,7 @@ fun ResultScreen(
     showSourcesOnPlay: Boolean = false,
     onBack: (() -> Unit)? = null,
     onPlayEpisode: ((ResultEpisode) -> Unit)? = null,
-    onPlayLink: ((ExtractorLink, List<ExtractorLink>, List<SubtitleFile>, SubtitleFile?) -> Unit)? = null,
+    onPlayLink: ((ExtractorLink, ImmutableList<ExtractorLink>, ImmutableList<SubtitleFile>, SubtitleFile?) -> Unit)? = null,
     onNavigateToRecommendation: ((url: String, apiName: String) -> Unit)? = null,
     onDownloadEpisode: ((ResultEpisode) -> Unit)? = null,
     player: VideoPlayer? = null,
@@ -105,7 +113,7 @@ fun ResultScreen(
     showSourcesOnPlay: Boolean = false,
     onBack: (() -> Unit)? = null,
     onPlayEpisode: ((ResultEpisode) -> Unit)? = null,
-    onPlayLink: ((ExtractorLink, List<ExtractorLink>, List<SubtitleFile>, SubtitleFile?) -> Unit)? = null,
+    onPlayLink: ((ExtractorLink, ImmutableList<ExtractorLink>, ImmutableList<SubtitleFile>, SubtitleFile?) -> Unit)? = null,
     onNavigateToRecommendation: ((url: String, apiName: String) -> Unit)? = null,
     onDownloadEpisode: ((ResultEpisode) -> Unit)? = null,
     player: VideoPlayer? = null,
@@ -125,224 +133,262 @@ fun ResultScreen(
                 .padding(paddingValues)
                 .background(CloudStreamColors.Background)
         ) {
-                when {
-                    // Fullscreen Initial Loading
-                    state.isLoading && state.loadResponse == null -> {
-                        ResultLoadingView(onBack = onBack)
-                    }
-
-                    // Fullscreen Initial Error
-                    state.error != null && state.loadResponse == null -> {
-                        ResultErrorView(
-                            error = state.error.asString(),
-                            onRetry = { onEvent(ResultEvent.Refresh) },
-                            onBack = onBack
-                        )
-                    }
-
-                    // Loaded Details Content with Smooth Unified Scroll
-                    else -> {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(bottom = 48.dp)
-                        ) {
-                            // 1. Premium Media Header (Backdrop, Poster, Metadata Badges, Action Buttons, Synopsis)
-                            item {
-                                ResultHeader(
-                                    state = state,
-                                    onBack = onBack,
-                                    onEvent = onEvent,
-                                    onPlayEpisode = { ep ->
-                                        if (showSourcesOnPlay) {
-                                            activeEpisodeForLinks = ep
-                                            onEvent(ResultEvent.SelectEpisode(ep))
-                                            onEvent(ResultEvent.ReloadLinks(ep))
-                                            showLinksDialog = true
-                                        } else {
-                                            onPlayEpisode?.invoke(ep)
-                                        }
-                                    }
-                                )
-                            }
-
-                            // 2. Modern Seasons & Dub/Sub Chips Selector (for Series / Anime)
-                            if (state.isEpisodeBased || state.availableSeasons.isNotEmpty() || state.availableDubStatuses.size > 1) {
-                                item {
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    ResultEpisodesSelectorHeader(
-                                        state = state,
-                                        onEvent = onEvent
-                                    )
-                                }
-                            }
-
-                            // 3. Episodes List Items (16:9 Thumbnail, Progress bar, Expandable plot, Quick play)
-                            if (state.isEpisodeBased || state.episodes.isNotEmpty()) {
-                                resultEpisodesListItems(
-                                    episodes = state.episodes,
-                                    selectedEpisode = state.selectedEpisode,
-                                    onEpisodeClick = { ep ->
-                                        if (showSourcesOnPlay) {
-                                            activeEpisodeForLinks = ep
-                                            onEvent(ResultEvent.SelectEpisode(ep))
-                                            onEvent(ResultEvent.ReloadLinks(ep))
-                                            showLinksDialog = true
-                                        } else {
-                                            onPlayEpisode?.invoke(ep)
-                                        }
-                                    },
-                                    onSetWatchState = { epId, watchState ->
-                                        onEvent(ResultEvent.SetWatchState(epId, watchState))
-                                    },
-                                    onDownloadEpisode = onDownloadEpisode,
-                                    onEpisodeMenuClick = { ep ->
-                                        onEvent(ResultEvent.OpenEpisodeMenu(ep))
-                                    }
-                                )
-                            }
-
-                            // 4. Recommendations & Similar Titles Section
-                            if (state.recommendations.isNotEmpty()) {
-                                item {
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    RecommendationsSection(
-                                        recommendations = state.recommendations,
-                                        onSelectRecommendation = { item ->
-                                            onNavigateToRecommendation?.invoke(item.url, item.apiName)
-                                                ?: onEvent(ResultEvent.LoadResult(item.url, item.apiName))
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        // STICKY BACK BUTTON
-                        if (onBack != null) {
-                            IconButton(
-                                onClick = onBack,
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(16.dp)
-                                    .size(42.dp)
-                                    .background(CloudStreamColors.Background.copy(alpha = 0.6f), CircleShape)
-                                    .clip(CircleShape)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = stringResource(Res.string.action_back),
-                                    tint = MaterialTheme.colors.onSurface
-                                )
-                            }
-                        }
-                    }
+            when {
+                state.isLoading && state.loadResponse == null -> {
+                    ResultLoadingView(onBack = onBack)
                 }
 
-                // Streaming Links and Subtitles Extraction Modal Dialog
-                if (showLinksDialog) {
-                    ResultLinksDialog(
-                        state = state,
-                        targetEpisode = activeEpisodeForLinks ?: state.selectedEpisode,
-                        onPlayLink = { link, links, subs, initialSub ->
-                            onPlayLink?.invoke(link, links, subs, initialSub)
-                            showLinksDialog = false
-                        },
-                        onEvent = onEvent,
-                        onDismiss = {
-                            showLinksDialog = false
-                            onEvent(ResultEvent.ClearLinks)
-                        }
+                state.error != null && state.loadResponse == null -> {
+                    ResultErrorView(
+                        error = state.error.asString(),
+                        onRetry = { onEvent(ResultEvent.Refresh) },
+                        onBack = onBack
                     )
                 }
 
-                // Cinematic Trailer Viewer Modal Dialog
-                if (state.isTrailerDialogOpen) {
-                    TrailerDialog(
+                else -> {
+                    ResultSuccessView(
                         state = state,
+                        onBack = onBack,
                         onEvent = onEvent,
-                        onDismiss = {
-                            onEvent(ResultEvent.CloseTrailer)
-                        },
-                        player = player,
-                        videoPlayerContent = videoPlayerContent
+                        showSourcesOnPlay = showSourcesOnPlay,
+                        onPlayEpisode = onPlayEpisode,
+                        onNavigateToRecommendation = onNavigateToRecommendation,
+                        onDownloadEpisode = onDownloadEpisode,
+                        onOpenLinksDialog = { ep ->
+                            activeEpisodeForLinks = ep
+                            onEvent(ResultEvent.SelectEpisode(ep))
+                            onEvent(ResultEvent.ReloadLinks(ep))
+                            showLinksDialog = true
+                        }
                     )
                 }
+            }
 
-                // Episode Context / Action Modal Dialog
-                if (state.isEpisodeMenuOpen && state.selectedMenuEpisode != null) {
-                    val menuEpisode = state.selectedMenuEpisode
-                    EpisodeActionDialog(
-                        episode = menuEpisode,
-                        isMovie = state.isMovie,
-                        onDismiss = {
-                            onEvent(ResultEvent.CloseEpisodeMenu)
-                        },
-                        onPlayInApp = {
-                            onEvent(ResultEvent.CloseEpisodeMenu)
-                            onEvent(ResultEvent.SelectEpisode(menuEpisode))
-                            if (onPlayEpisode != null) {
-                                onPlayEpisode(menuEpisode)
-                            } else {
-                                activeEpisodeForLinks = menuEpisode
-                                onEvent(ResultEvent.ReloadLinks(menuEpisode))
-                                showLinksDialog = true
-                            }
-                        },
-                        onPlayMirror = {
-                            onEvent(ResultEvent.CloseEpisodeMenu)
-                            onEvent(ResultEvent.SelectEpisode(menuEpisode))
-                            activeEpisodeForLinks = menuEpisode
-                            onEvent(ResultEvent.ReloadLinks(menuEpisode))
-                            showLinksDialog = true
-                        },
-                        onReloadLinks = {
-                            onEvent(ResultEvent.CloseEpisodeMenu)
-                            onEvent(ResultEvent.SelectEpisode(menuEpisode))
-                            activeEpisodeForLinks = menuEpisode
-                            onEvent(ResultEvent.ReloadLinks(menuEpisode, clearCache = true))
-                            showLinksDialog = true
-                        },
-                        onCopyLink = {
-                            onEvent(ResultEvent.CloseEpisodeMenu)
-                            onEvent(ResultEvent.CopyEpisodeLink(menuEpisode))
-                        },
-                        onDownload = {
-                            onEvent(ResultEvent.CloseEpisodeMenu)
-                            onDownloadEpisode?.invoke(menuEpisode) ?: run {
-                                activeEpisodeForLinks = menuEpisode
-                                onEvent(ResultEvent.ReloadLinks(menuEpisode))
-                                showLinksDialog = true
-                            }
-                        },
-                        onDownloadMirror = {
-                            onEvent(ResultEvent.CloseEpisodeMenu)
-                            onEvent(ResultEvent.SelectEpisode(menuEpisode))
-                            activeEpisodeForLinks = menuEpisode
-                            onEvent(ResultEvent.ReloadLinks(menuEpisode))
-                            showLinksDialog = true
-                        },
-                        onToggleWatchState = {
-                            onEvent(ResultEvent.CloseEpisodeMenu)
-                            val newState = if (menuEpisode.isWatched) 0 else 2
-                            onEvent(ResultEvent.SetWatchState(menuEpisode.id, newState))
-                        },
-                        onMarkUpToThisEpisode = if (!state.isMovie) {
-                            {
-                                onEvent(ResultEvent.CloseEpisodeMenu)
-                                onEvent(ResultEvent.MarkEpisodesUpTo(menuEpisode.id, menuEpisode.season ?: 0))
-                            }
-                        } else null
+            ResultModalsHost(
+                state = state,
+                showLinksDialog = showLinksDialog,
+                activeEpisodeForLinks = activeEpisodeForLinks,
+                onPlayLink = onPlayLink,
+                onPlayEpisode = onPlayEpisode,
+                onDownloadEpisode = onDownloadEpisode,
+                onOpenLinksForEpisode = { ep ->
+                    activeEpisodeForLinks = ep
+                    showLinksDialog = true
+                },
+                onCloseLinksDialog = {
+                    showLinksDialog = false
+                    onEvent(ResultEvent.ClearLinks)
+                },
+                onEvent = onEvent,
+                player = player,
+                videoPlayerContent = videoPlayerContent
+            )
+        }
+    }
+}
+
+@Composable
+private fun ResultSuccessView(
+    state: ResultState,
+    onBack: (() -> Unit)?,
+    onEvent: (ResultEvent) -> Unit,
+    showSourcesOnPlay: Boolean,
+    onPlayEpisode: ((ResultEpisode) -> Unit)?,
+    onNavigateToRecommendation: ((url: String, apiName: String) -> Unit)?,
+    onDownloadEpisode: ((ResultEpisode) -> Unit)?,
+    onOpenLinksDialog: (ResultEpisode) -> Unit
+) {
+    val isTV = isLayout(Layout.TV)
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = if (isTV) 64.dp else 48.dp)
+        ) {
+            item {
+                ResultHeader(
+                    state = state,
+                    onBack = onBack,
+                    onEvent = onEvent,
+                    onPlayEpisode = { ep ->
+                        if (showSourcesOnPlay) {
+                            onOpenLinksDialog(ep)
+                        } else {
+                            onPlayEpisode?.invoke(ep)
+                        }
+                    }
+                )
+            }
+
+            if (state.isEpisodeBased || state.availableSeasons.isNotEmpty() || state.availableDubStatuses.size > 1) {
+                item {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    ResultEpisodesSelectorHeader(
+                        state = state,
+                        onEvent = onEvent
+                    )
+                }
+            }
+
+            if (state.isEpisodeBased || state.episodes.isNotEmpty()) {
+                resultEpisodesListItems(
+                    episodes = state.episodes,
+                    selectedEpisode = state.selectedEpisode,
+                    onEpisodeClick = { ep ->
+                        if (showSourcesOnPlay) {
+                            onOpenLinksDialog(ep)
+                        } else {
+                            onPlayEpisode?.invoke(ep)
+                        }
+                    },
+                    onSetWatchState = { epId, watchState ->
+                        onEvent(ResultEvent.SetWatchState(epId, watchState))
+                    },
+                    onDownloadEpisode = onDownloadEpisode,
+                    onEpisodeMenuClick = { ep ->
+                        onEvent(ResultEvent.OpenEpisodeMenu(ep))
+                    }
+                )
+            }
+
+            if (state.recommendations.isNotEmpty()) {
+                item {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    RecommendationsSection(
+                        recommendations = state.recommendations,
+                        onSelectRecommendation = { item ->
+                            onNavigateToRecommendation?.invoke(item.url, item.apiName)
+                                ?: onEvent(ResultEvent.LoadResult(item.url, item.apiName))
+                        }
                     )
                 }
             }
         }
+
+        if (onBack != null) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(if (isTV) 24.dp else 16.dp)
+                    .size(42.dp)
+                    .background(CloudStreamColors.Background.copy(alpha = 0.6f), CircleShape)
+                    .clip(CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(Res.string.action_back),
+                    tint = MaterialTheme.colors.onSurface
+                )
+            }
+        }
     }
+}
+
+@Composable
+private fun ResultModalsHost(
+    state: ResultState,
+    showLinksDialog: Boolean,
+    activeEpisodeForLinks: ResultEpisode?,
+    onPlayLink: ((ExtractorLink, ImmutableList<ExtractorLink>, ImmutableList<SubtitleFile>, SubtitleFile?) -> Unit)?,
+    onPlayEpisode: ((ResultEpisode) -> Unit)?,
+    onDownloadEpisode: ((ResultEpisode) -> Unit)?,
+    onOpenLinksForEpisode: (ResultEpisode) -> Unit,
+    onCloseLinksDialog: () -> Unit,
+    onEvent: (ResultEvent) -> Unit,
+    player: VideoPlayer?,
+    videoPlayerContent: (@Composable (VideoPlayer, Modifier) -> Unit)?
+) {
+    if (showLinksDialog) {
+        ResultLinksDialog(
+            state = state,
+            targetEpisode = activeEpisodeForLinks ?: state.selectedEpisode,
+            onPlayLink = { link, links, subs, initialSub ->
+                onPlayLink?.invoke(link, links, subs, initialSub)
+                onCloseLinksDialog()
+            },
+            onEvent = onEvent,
+            onDismiss = onCloseLinksDialog
+        )
+    }
+
+    if (state.isTrailerDialogOpen) {
+        TrailerDialog(
+            state = state,
+            onEvent = onEvent,
+            onDismiss = { onEvent(ResultEvent.CloseTrailer) },
+            player = player,
+            videoPlayerContent = videoPlayerContent
+        )
+    }
+
+    if (state.isEpisodeMenuOpen && state.selectedMenuEpisode != null) {
+        val menuEpisode = state.selectedMenuEpisode
+        EpisodeActionDialog(
+            episode = menuEpisode,
+            isMovie = state.isMovie,
+            onDismiss = { onEvent(ResultEvent.CloseEpisodeMenu) },
+            onPlayInApp = {
+                onEvent(ResultEvent.CloseEpisodeMenu)
+                onEvent(ResultEvent.SelectEpisode(menuEpisode))
+                if (onPlayEpisode != null) {
+                    onPlayEpisode(menuEpisode)
+                } else {
+                    onEvent(ResultEvent.ReloadLinks(menuEpisode))
+                    onOpenLinksForEpisode(menuEpisode)
+                }
+            },
+            onPlayMirror = {
+                onEvent(ResultEvent.CloseEpisodeMenu)
+                onEvent(ResultEvent.SelectEpisode(menuEpisode))
+                onEvent(ResultEvent.ReloadLinks(menuEpisode))
+                onOpenLinksForEpisode(menuEpisode)
+            },
+            onReloadLinks = {
+                onEvent(ResultEvent.CloseEpisodeMenu)
+                onEvent(ResultEvent.SelectEpisode(menuEpisode))
+                onEvent(ResultEvent.ReloadLinks(menuEpisode, clearCache = true))
+                onOpenLinksForEpisode(menuEpisode)
+            },
+            onCopyLink = {
+                onEvent(ResultEvent.CloseEpisodeMenu)
+                onEvent(ResultEvent.CopyEpisodeLink(menuEpisode))
+            },
+            onDownload = {
+                onEvent(ResultEvent.CloseEpisodeMenu)
+                onDownloadEpisode?.invoke(menuEpisode) ?: run {
+                    onEvent(ResultEvent.ReloadLinks(menuEpisode))
+                    onOpenLinksForEpisode(menuEpisode)
+                }
+            },
+            onDownloadMirror = {
+                onEvent(ResultEvent.CloseEpisodeMenu)
+                onEvent(ResultEvent.SelectEpisode(menuEpisode))
+                onEvent(ResultEvent.ReloadLinks(menuEpisode))
+                onOpenLinksForEpisode(menuEpisode)
+            },
+            onToggleWatchState = {
+                onEvent(ResultEvent.CloseEpisodeMenu)
+                val newState = if (menuEpisode.isWatched) 0 else 2
+                onEvent(ResultEvent.SetWatchState(menuEpisode.id, newState))
+            },
+            onMarkUpToThisEpisode = if (!state.isMovie) {
+                {
+                    onEvent(ResultEvent.CloseEpisodeMenu)
+                    onEvent(ResultEvent.MarkEpisodesUpTo(menuEpisode.id, menuEpisode.season ?: 0))
+                }
+            } else null
+        )
+    }
+}
 
 /**
  * Recommendations / Related Media horizontal row.
  */
 @Composable
 fun RecommendationsSection(
-    recommendations: List<SearchResponse>,
+    recommendations: ImmutableList<SearchResponse>,
     onSelectRecommendation: (SearchResponse) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -520,3 +566,33 @@ fun ResultErrorView(
         }
     }
 }
+
+@Preview
+@Composable
+private fun ResultScreenPreview() {
+    com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme {
+        ResultScreen(
+            state = ResultState(
+                title = "Example Movie",
+                synopsis = "This is an example movie synopsis description.",
+                isMovie = true,
+                episodes = persistentListOf(
+                    ResultEpisode(
+                        headerName = "Season 1",
+                        id = 1,
+                        name = "Movie Feature",
+                        episode = 1,
+                        season = null,
+                        data = "data_url",
+                        apiName = "TestProvider",
+                        index = 0,
+                        tvType = TvType.Movie,
+                        parentId = 100
+                    )
+                )
+            ),
+            onEvent = {}
+        )
+    }
+}
+

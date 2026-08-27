@@ -107,64 +107,75 @@ class AniListApi : SyncAPI() {
         }
     }
 
+    private fun extractInternalId(id: String): Int {
+        val matched = Regex("anilist\\.co/anime/(\\d*)").find(id)?.groupValues?.getOrNull(1)
+        return (matched ?: id).toIntOrNull() ?: throw ErrorLoadingException("Invalid internalId")
+    }
+
+    private fun parseNextAiring(nextAiring: SeasonNextAiringEpisode?): NextAiring? {
+        val episode = nextAiring?.episode ?: return null
+        val timeUntil = nextAiring.timeUntilAiring ?: return null
+        return NextAiring(episode, timeUntil + APIHolder.unixTime)
+    }
+
+    private fun mapActorRole(role: String?): ActorRole? = when (role) {
+        "MAIN" -> ActorRole.Main
+        "SUPPORTING" -> ActorRole.Supporting
+        "BACKGROUND" -> ActorRole.Background
+        else -> null
+    }
+
+    private fun mapCharacterEdge(edge: CharacterEdge): ActorData? {
+        val node = edge.node ?: return null
+        val nodeName = node.name?.userPreferred ?: node.name?.full ?: node.name?.native ?: return null
+        val actor = Actor(name = nodeName, image = node.image?.large ?: node.image?.medium)
+        val voiceActor = edge.voiceActors?.firstNotNullOfOrNull { staff ->
+            val staffName = staff.name?.userPreferred ?: staff.name?.full ?: staff.name?.native ?: return@firstNotNullOfOrNull null
+            Actor(name = staffName, image = staff.image?.large ?: staff.image?.medium)
+        }
+        return ActorData(
+            actor = actor,
+            role = mapActorRole(edge.role),
+            voiceActor = voiceActor
+        )
+    }
+
+    private fun mapRecommendationEdge(rec: RecommendationEdge): SyncAPI.SyncSearchResult? {
+        val recMedia = rec.node.mediaRecommendation ?: return null
+        val title = recMedia.title?.userPreferred ?: return null
+        val recId = recMedia.id?.toString() ?: return null
+        val cover = recMedia.coverImage?.extraLarge ?: recMedia.coverImage?.large ?: recMedia.coverImage?.medium
+        return SyncAPI.SyncSearchResult(
+            name = title,
+            apiName = this.name,
+            syncId = recId,
+            url = getUrlFromId(recMedia.id),
+            posterUrl = cover
+        )
+    }
+
+    private fun mapTrailers(trailer: MediaTrailer?): List<String>? {
+        if (trailer?.site?.lowercase()?.trim() == "youtube" && !trailer.id.isNullOrBlank()) {
+            return listOf("https://www.youtube.com/watch?v=${trailer.id}")
+        }
+        return null
+    }
+
     override suspend fun load(auth: AuthData?, id: String): SyncAPI.SyncResult? {
-        val internalId = (Regex("anilist\\.co/anime/(\\d*)").find(id)?.groupValues?.getOrNull(1)
-            ?: id).toIntOrNull() ?: throw ErrorLoadingException("Invalid internalId")
+        val internalId = extractInternalId(id)
         val season = getSeason(internalId).data.media
         return SyncAPI.SyncResult(
-            season.id.toString(),
-            nextAiring = season.nextAiringEpisode?.let {
-                NextAiring(
-                    it.episode ?: return@let null,
-                    (it.timeUntilAiring ?: return@let null) + APIHolder.unixTime
-                )
-            },
+            id = season.id.toString(),
+            nextAiring = parseNextAiring(season.nextAiringEpisode),
             title = season.title?.userPreferred,
             synonyms = season.synonyms,
             isAdult = season.isAdult,
             totalEpisodes = season.episodes,
             synopsis = season.description,
-            actors = season.characters?.edges?.mapNotNull { edge ->
-                val node = edge.node ?: return@mapNotNull null
-                ActorData(
-                    actor = Actor(
-                        name = node.name?.userPreferred ?: node.name?.full ?: node.name?.native
-                        ?: return@mapNotNull null,
-                        image = node.image?.large ?: node.image?.medium
-                    ),
-                    role = when (edge.role) {
-                        "MAIN" -> ActorRole.Main
-                        "SUPPORTING" -> ActorRole.Supporting
-                        "BACKGROUND" -> ActorRole.Background
-                        else -> null
-                    },
-                    voiceActor = edge.voiceActors?.firstNotNullOfOrNull { staff ->
-                        Actor(
-                            name = staff.name?.userPreferred ?: staff.name?.full
-                            ?: staff.name?.native
-                            ?: return@mapNotNull null,
-                            image = staff.image?.large ?: staff.image?.medium
-                        )
-                    }
-                )
-            },
+            actors = season.characters?.edges?.mapNotNull { mapCharacterEdge(it) },
             publicScore = Score.from100(season.averageScore),
-            recommendations = season.recommendations?.edges?.mapNotNull { rec ->
-                val recMedia = rec.node.mediaRecommendation
-                SyncAPI.SyncSearchResult(
-                    name = recMedia?.title?.userPreferred ?: return@mapNotNull null,
-                    this.name,
-                    recMedia.id?.toString() ?: return@mapNotNull null,
-                    getUrlFromId(recMedia.id),
-                    recMedia.coverImage?.extraLarge ?: recMedia.coverImage?.large
-                    ?: recMedia.coverImage?.medium
-                )
-            },
-            trailers = when (season.trailer?.site?.lowercase()?.trim()) {
-                "youtube" -> listOf("https://www.youtube.com/watch?v=${season.trailer.id}")
-                else -> null
-            }
-            // TODO REST
+            recommendations = season.recommendations?.edges?.mapNotNull { mapRecommendationEdge(it) },
+            trailers = mapTrailers(season.trailer)
         )
     }
 

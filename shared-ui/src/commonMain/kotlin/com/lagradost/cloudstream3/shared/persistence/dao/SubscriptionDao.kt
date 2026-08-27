@@ -9,9 +9,6 @@ import androidx.room.Upsert
 import com.lagradost.cloudstream3.shared.persistence.entity.SubscriptionEntity
 import kotlinx.coroutines.flow.Flow
 
-/**
- * Data Access Object for series subscriptions and episode updates.
- */
 @Dao
 interface SubscriptionDao {
     @Query("SELECT * FROM subscriptions WHERE accountId = :accountId AND id = :id LIMIT 1")

@@ -965,7 +965,7 @@ private class JsInterpreter(
 
     init { installGlobals() }
 
-    private fun installGlobals() {
+    private fun installMathGlobals() {
         val mathObj = JsObject(mutableMapOf(
             "PI" to PI, "E" to E,
             "floor" to nativeFn("floor") { args -> floor(toNumber(args.getOrNull(0))) },
@@ -986,42 +986,43 @@ private class JsInterpreter(
             "log10" to nativeFn("log10") { args -> log10(toNumber(args.getOrNull(0))) },
         ))
         globalScope.define("Math", mathObj)
+    }
 
-        // For String.fromCharCode
+    private fun installStringGlobals() {
         val stringObj = JsObject(mutableMapOf(
             "fromCharCode" to nativeFn("fromCharCode") { args -> args.joinToString("") { toNumber(it).toInt().toChar().toString() } }
         ))
         globalScope.define("String", stringObj)
+    }
 
-        globalScope.define("parseInt", nativeFn("parseInt") { args ->
-            val s = toJsString(args.getOrNull(0)).trim()
-            var i = 0
-            var negative = false
-            if (i < s.length && (s[i] == '+' || s[i] == '-')) {
-                negative = s[i] == '-'
-                i++
-            }
-            var radix = args.getOrNull(1)?.let { toNumber(it).toInt() } ?: 0
-            if (radix != 0 && (radix < 2 || radix > 36)) {
-                Double.NaN
-            } else {
-                val stripHexPrefix = radix == 0 || radix == 16
-                if (radix == 0) radix = 10
-                if (stripHexPrefix && i + 1 < s.length && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X')) {
-                    radix = 16
-                    i += 2
-                }
-                val start = i
-                while (i < s.length && digitValue(s[i], radix) != -1) i++
-                if (i == start) {
-                    Double.NaN
-                } else {
-                    var value = 0.0
-                    for (idx in start until i) value = value * radix + digitValue(s[idx], radix)
-                    if (negative) -value else value
-                }
-            }
-        })
+    private fun parseJsInt(args: List<Any?>): Double {
+        val s = toJsString(args.getOrNull(0)).trim()
+        var i = 0
+        var negative = false
+        if (i < s.length && (s[i] == '+' || s[i] == '-')) {
+            negative = s[i] == '-'
+            i++
+        }
+        var radix = args.getOrNull(1)?.let { toNumber(it).toInt() } ?: 0
+        if (radix != 0 && (radix < 2 || radix > 36)) return Double.NaN
+
+        val stripHexPrefix = radix == 0 || radix == 16
+        if (radix == 0) radix = 10
+        if (stripHexPrefix && i + 1 < s.length && s[i] == '0' && (s[i + 1] == 'x' || s[i + 1] == 'X')) {
+            radix = 16
+            i += 2
+        }
+        val start = i
+        while (i < s.length && digitValue(s[i], radix) != -1) i++
+        if (i == start) return Double.NaN
+
+        var value = 0.0
+        for (idx in start until i) value = value * radix + digitValue(s[idx], radix)
+        return if (negative) -value else value
+    }
+
+    private fun installCoreFunctions() {
+        globalScope.define("parseInt", nativeFn("parseInt") { args -> parseJsInt(args) })
         globalScope.define("parseFloat", nativeFn("parseFloat") { args -> toNumber(args.getOrNull(0)) })
         globalScope.define("isNaN", nativeFn("isNaN") { args -> toNumber(args.getOrNull(0)).isNaN() })
         globalScope.define("isFinite", nativeFn("isFinite") { args -> toNumber(args.getOrNull(0)).isFinite() })
@@ -1029,20 +1030,19 @@ private class JsInterpreter(
         globalScope.define("encodeURIComponent", nativeFn("encodeURIComponent") { args -> toJsString(args.getOrNull(0)).encodeUrl() })
         globalScope.define("escape", nativeFn("escape") { args -> toJsString(args.getOrNull(0)).encodeUrl() })
         globalScope.define("unescape", nativeFn("unescape") { args -> toJsString(args.getOrNull(0)).decodeUrl() })
-        // Nested eval() reuses the current budget rather than resetting it, otherwise a
-        // script could keep itself alive forever via `while(true){ eval("1") }`.
         globalScope.define("eval", nativeFn("eval") { args -> evalInternal(toJsString(args.getOrNull(0))) })
         globalScope.define("undefined", Unit)
         globalScope.define("NaN", Double.NaN)
         globalScope.define("Infinity", Double.POSITIVE_INFINITY)
+    }
 
+    private fun installObjectAndArrayGlobals() {
         globalScope.define("Array", nativeFn("Array") { args ->
             if (args.size == 1 && args[0] is Double) JsList(MutableList((args[0] as Double).toInt()) { Unit })
             else JsList(args.toMutableList())
         })
 
         globalScope.define("Object", NativeFn({ args ->
-            // Object() called as a function, wrap primitive or return object as-is
             when (val v = args.getOrNull(0)) {
                 null, is Unit -> JsObject()
                 is JsObject -> v
@@ -1068,13 +1068,19 @@ private class JsInterpreter(
         globalScope.define("Number", nativeFn("Number") { args -> toNumber(args.getOrNull(0)) })
         globalScope.define("Boolean", nativeFn("Boolean") { args -> toBoolean(args.getOrNull(0)) })
 
-        // console.log (no-op for silence, but avoids errors)
         val consoleObj = JsObject(mutableMapOf(
             "log" to nativeFn("log") { _ -> Unit },
             "error" to nativeFn("error") { _ -> Unit },
             "warn" to nativeFn("warn") { _ -> Unit },
         ))
         globalScope.define("console", consoleObj)
+    }
+
+    private fun installGlobals() {
+        installMathGlobals()
+        installStringGlobals()
+        installCoreFunctions()
+        installObjectAndArrayGlobals()
     }
 
     private fun nativeFn(name: String, fn: (List<Any?>) -> Any?): Any? = NativeFn(fn, name)
@@ -1135,83 +1141,100 @@ private class JsInterpreter(
     fun getVar(name: String): Any? = globalScope.get(name).let { if (it is Unit) null else it }
     fun setVar(name: String, value: Any?) = globalScope.define(name, value)
 
+    private fun execVarDecl(node: VarDecl, scope: Scope) {
+        for ((name, init) in node.decls) {
+            scope.define(name, init?.let { evalExpr(it, scope) })
+        }
+    }
+
+    private fun execBlockStmt(node: BlockStmt, scope: Scope): Any? {
+        val inner = Scope(scope)
+        var last: Any? = Unit
+        for (s in node.stmts) last = execNode(s, inner)
+        return last
+    }
+
+    private fun execIfStmt(node: IfStmt, scope: Scope): Any? =
+        if (toBoolean(evalExpr(node.test, scope))) {
+            execNode(node.cons, scope)
+        } else {
+            node.alt?.let { execNode(it, scope) }
+        }
+
+    private fun execWhileStmt(node: WhileStmt, scope: Scope) {
+        try {
+            while (toBoolean(evalExpr(node.test, scope))) {
+                try {
+                    execNode(node.body, scope)
+                } catch (_: ContinueSignal) {
+                }
+            }
+        } catch (_: BreakSignal) {
+        }
+    }
+
+    private fun execForStmt(node: ForStmt, scope: Scope) {
+        val inner = Scope(scope)
+        node.init?.let { execNode(it, inner) }
+        try {
+            while (node.test == null || toBoolean(evalExpr(node.test, inner))) {
+                try {
+                    execNode(node.body, inner)
+                } catch (_: ContinueSignal) {
+                }
+                node.update?.let { evalExpr(it, inner) }
+            }
+        } catch (_: BreakSignal) {
+        }
+    }
+
+    private fun execForInStmt(node: ForInStmt, scope: Scope) {
+        val obj = evalExpr(node.obj, scope)
+        val inner = Scope(scope)
+        try {
+            when (obj) {
+                is JsObject -> for (key in obj.props.keys) {
+                    inner.define(node.decl, key)
+                    try { execNode(node.body, inner) } catch (_: ContinueSignal) {}
+                }
+                is JsList -> for (i in obj.elements.indices) {
+                    inner.define(node.decl, i.toDouble())
+                    try { execNode(node.body, inner) } catch (_: ContinueSignal) {}
+                }
+                else -> {}
+            }
+        } catch (_: BreakSignal) {}
+    }
+
+    private fun execTryCatch(node: TryCatch, scope: Scope) {
+        try {
+            for (s in node.body) execNode(s, scope)
+        } catch (ts: ThrowSignal) {
+            if (node.catchBody != null) {
+                val inner = Scope(scope)
+                if (node.catchParam != null) inner.define(node.catchParam, ts.value)
+                for (s in node.catchBody) execNode(s, inner)
+            }
+        } catch (e: JsCancellationException) {
+            throw e
+        } catch (_: Exception) {
+        } finally {
+            node.finallyBody?.forEach { execNode(it, scope) }
+        }
+    }
+
     private fun execNode(node: Node, scope: Scope): Any? {
         checkBudget()
         return when (node) {
-            is VarDecl -> {
-                for ((name, init) in node.decls) scope.define(name, init?.let { evalExpr(it, scope) })
-                Unit
-            }
+            is VarDecl -> execVarDecl(node, scope)
             is ExprStmt -> evalExpr(node.expr, scope)
-            is BlockStmt -> {
-                val inner = Scope(scope)
-                var last: Any? = Unit
-                for (s in node.stmts) last = execNode(s, inner)
-                last
-            }
+            is BlockStmt -> execBlockStmt(node, scope)
             is ReturnStmt -> throw ReturnSignal(node.expr?.let { evalExpr(it, scope) })
-            is IfStmt -> {
-                if (toBoolean(evalExpr(node.test, scope))) execNode(node.cons, scope)
-                else node.alt?.let { execNode(it, scope) }
-            }
-            is WhileStmt -> {
-                try {
-                    while (toBoolean(evalExpr(node.test, scope))) {
-                        try { execNode(node.body, scope) } catch (_: ContinueSignal) {}
-                    }
-                } catch (_: BreakSignal) {}
-                Unit
-            }
-            is ForStmt -> {
-                val inner = Scope(scope)
-                node.init?.let { execNode(it, inner) }
-                try {
-                    while (node.test == null || toBoolean(evalExpr(node.test, inner))) {
-                        try { execNode(node.body, inner) } catch (_: ContinueSignal) {}
-                        node.update?.let { evalExpr(it, inner) }
-                    }
-                } catch (_: BreakSignal) {}
-                Unit
-            }
-            is ForInStmt -> {
-                val obj = evalExpr(node.obj, scope)
-                val inner = Scope(scope)
-                try {
-                    when (obj) {
-                        is JsObject -> for (key in obj.props.keys) {
-                            inner.define(node.decl, key)
-                            try { execNode(node.body, inner) } catch (_: ContinueSignal) {}
-                        }
-                        is JsList -> for (i in obj.elements.indices) {
-                            inner.define(node.decl, i.toDouble())
-                            try { execNode(node.body, inner) } catch (_: ContinueSignal) {}
-                        }
-                        else -> {}
-                    }
-                } catch (_: BreakSignal) {}
-                Unit
-            }
-            is TryCatch -> {
-                try {
-                    for (s in node.body) execNode(s, scope)
-                } catch (ts: ThrowSignal) {
-                    if (node.catchBody != null) {
-                        val inner = Scope(scope)
-                        if (node.catchParam != null) inner.define(node.catchParam, ts.value)
-                        for (s in node.catchBody) execNode(s, inner)
-                    }
-                } catch (e: JsCancellationException) {
-                    // CancellationException must never be swallowed by a JS try/catch.
-                    // It must propagate so withTimeout and structured concurrency
-                    // work correctly.
-                    throw e
-                } catch (_: Exception) {
-                    // swallow other exceptions inside try (e.g. runtime errors)
-                } finally {
-                    node.finallyBody?.forEach { execNode(it, scope) }
-                }
-                Unit
-            }
+            is IfStmt -> execIfStmt(node, scope)
+            is WhileStmt -> execWhileStmt(node, scope)
+            is ForStmt -> execForStmt(node, scope)
+            is ForInStmt -> execForInStmt(node, scope)
+            is TryCatch -> execTryCatch(node, scope)
             is ThrowStmt -> throw ThrowSignal(evalExpr(node.expr, scope))
             is BreakStmt -> throw BreakSignal
             is ContinueStmt -> throw ContinueSignal
@@ -1274,8 +1297,68 @@ private class JsInterpreter(
         }
     }
 
+    private fun evalPlus(l: Any?, r: Any?): Any {
+        val lp = if (l is JsList || l is JsObject || l is NativeFn || l is JsFunction) toJsString(l) else l
+        val rp = if (r is JsList || r is JsObject || r is NativeFn || r is JsFunction) toJsString(r) else r
+        return if (lp is String || rp is String) toJsString(lp) + toJsString(rp)
+        else toNumber(lp) + toNumber(rp)
+    }
+
+    private fun evalArithmetic(op: String, l: Any?, r: Any?): Any = when (op) {
+        "+" -> evalPlus(l, r)
+        "-" -> toNumber(l) - toNumber(r)
+        "*" -> toNumber(l) * toNumber(r)
+        "/" -> toNumber(l) / toNumber(r)
+        "%" -> toNumber(l) % toNumber(r)
+        "**" -> toNumber(l).pow(toNumber(r))
+        else -> Unit
+    }
+
+    private fun evalComparison(op: String, l: Any?, r: Any?): Boolean = when (op) {
+        "<" -> toNumber(l) < toNumber(r)
+        "<=" -> toNumber(l) <= toNumber(r)
+        ">" -> toNumber(l) > toNumber(r)
+        ">=" -> toNumber(l) >= toNumber(r)
+        "==" -> looseEq(l, r)
+        "!=" -> !looseEq(l, r)
+        "===" -> strictEq(l, r)
+        "!==" -> !strictEq(l, r)
+        else -> false
+    }
+
+    private fun evalBitwise(op: String, l: Any?, r: Any?): Double = when (op) {
+        "&" -> (toNumber(l).toLong() and toNumber(r).toLong()).toDouble()
+        "|" -> (toNumber(l).toLong() or toNumber(r).toLong()).toDouble()
+        "^" -> (toNumber(l).toLong() xor toNumber(r).toLong()).toDouble()
+        "<<" -> (toNumber(l).toLong() shl toNumber(r).toInt()).toDouble()
+        ">>" -> (toNumber(l).toLong() shr toNumber(r).toInt()).toDouble()
+        ">>>" -> (toNumber(l).toInt().toLong() and 0xFFFFFFFFL ushr toNumber(r).toInt()).toDouble()
+        else -> 0.0
+    }
+
+    private fun evalInstanceOfNative(name: String, l: Any?): Boolean = when (name) {
+        "Array" -> l is JsList
+        "Object" -> l is JsObject || l is JsList
+        "Function" -> l is JsFunction || l is NativeFn
+        "String" -> l is String
+        "Number" -> l is Double
+        "Boolean" -> l is Boolean
+        else -> false
+    }
+
+    private fun evalInstanceOf(l: Any?, r: Any?): Boolean = when (r) {
+        is NativeFn -> evalInstanceOfNative(r.name, l)
+        is JsFunction -> l is JsObject && l.constructor === r
+        else -> false
+    }
+
+    private fun evalIn(l: Any?, r: Any?): Boolean = when (r) {
+        is JsObject -> toJsString(l) in r.props
+        is JsList -> toNumber(l).toInt().let { it >= 0 && it < r.elements.size }
+        else -> false
+    }
+
     private fun evalBinary(node: BinExpr, scope: Scope): Any? {
-        // Short-circuit
         if (node.op == "&&") {
             val l = evalExpr(node.left, scope)
             return if (!toBoolean(l)) l else evalExpr(node.right, scope)
@@ -1287,49 +1370,11 @@ private class JsInterpreter(
         val l = evalExpr(node.left, scope)
         val r = evalExpr(node.right, scope)
         return when (node.op) {
-            "+" -> {
-                val lp = if (l is JsList || l is JsObject || l is NativeFn || l is JsFunction) toJsString(l) else l
-                val rp = if (r is JsList || r is JsObject || r is NativeFn || r is JsFunction) toJsString(r) else r
-                if (lp is String || rp is String) toJsString(lp) + toJsString(rp)
-                else toNumber(lp) + toNumber(rp)
-            }
-            "-" -> toNumber(l) - toNumber(r)
-            "*" -> toNumber(l) * toNumber(r)
-            "/" -> toNumber(l) / toNumber(r)
-            "%" -> toNumber(l) % toNumber(r)
-            "**" -> toNumber(l).pow(toNumber(r))
-            "<" -> toNumber(l) < toNumber(r)
-            "<=" -> toNumber(l) <= toNumber(r)
-            ">" -> toNumber(l) > toNumber(r)
-            ">=" -> toNumber(l) >= toNumber(r)
-            "==" -> looseEq(l, r)
-            "!=" -> !looseEq(l, r)
-            "===" -> strictEq(l, r)
-            "!==" -> !strictEq(l, r)
-            "&" -> (toNumber(l).toLong() and toNumber(r).toLong()).toDouble()
-            "|" -> (toNumber(l).toLong() or toNumber(r).toLong()).toDouble()
-            "^" -> (toNumber(l).toLong() xor toNumber(r).toLong()).toDouble()
-            "<<" -> (toNumber(l).toLong() shl toNumber(r).toInt()).toDouble()
-            ">>" -> (toNumber(l).toLong() shr toNumber(r).toInt()).toDouble()
-            ">>>" -> (toNumber(l).toInt().toLong() and 0xFFFFFFFFL ushr toNumber(r).toInt()).toDouble()
-            "instanceof" -> when (r) {
-                is NativeFn -> when (r.name) {
-                    "Array" -> l is JsList
-                    "Object" -> l is JsObject || l is JsList
-                    "Function" -> l is JsFunction || l is NativeFn
-                    "String" -> l is String
-                    "Number" -> l is Double
-                    "Boolean" -> l is Boolean
-                    else -> false
-                }
-                is JsFunction -> l is JsObject && l.constructor === r
-                else -> false
-            }
-            "in" -> when (r) {
-                is JsObject -> toJsString(l) in r.props
-                is JsList -> toNumber(l).toInt().let { it >= 0 && it < r.elements.size }
-                else -> false
-            }
+            "+", "-", "*", "/", "%", "**" -> evalArithmetic(node.op, l, r)
+            "<", "<=", ">", ">=", "==", "!=", "===", "!==" -> evalComparison(node.op, l, r)
+            "&", "|", "^", "<<", ">>", ">>>" -> evalBitwise(node.op, l, r)
+            "instanceof" -> evalInstanceOf(l, r)
+            "in" -> evalIn(l, r)
             else -> Unit
         }
     }
@@ -1386,192 +1431,224 @@ private class JsInterpreter(
         return getMember(obj, key)
     }
 
+    private fun getListAccessMember(obj: JsList, key: String): Any? = when (key) {
+        "length" -> obj.length.toDouble()
+        "join" -> nativeFn("join") { args ->
+            val sep = args.getOrNull(0)?.let { toJsString(it) } ?: ","
+            obj.elements.joinToString(sep) { joinElement(it) }
+        }
+        "slice" -> nativeFn("slice") { args ->
+            val start = args.getOrNull(0)?.let { toNumber(it).toInt() } ?: 0
+            val end = args.getOrNull(1)?.let { toNumber(it).toInt() } ?: obj.elements.size
+            val s = if (start < 0) maxOf(0, obj.elements.size + start) else minOf(start, obj.elements.size)
+            val e = if (end < 0) maxOf(0, obj.elements.size + end) else minOf(end, obj.elements.size)
+            JsList(obj.elements.subList(maxOf(0, s), maxOf(s, e)).toMutableList())
+        }
+        "indexOf" -> nativeFn("indexOf") { args ->
+            val v = args.getOrNull(0); val start = args.getOrNull(1)?.let { toNumber(it).toInt() } ?: 0
+            obj.elements.indexOfFirst { strictEq(it, v) }.let { if (it < start) -1.0 else it.toDouble() }
+        }
+        "concat" -> nativeFn("concat") { args ->
+            val result = JsList(obj.elements.toMutableList())
+            args.forEach { a -> when (a) { is JsList -> result.elements.addAll(a.elements); else -> result.elements.add(a) } }
+            result
+        }
+        "includes" -> nativeFn("includes") { args -> obj.elements.any { looseEq(it, args.getOrNull(0)) } }
+        "toString" -> nativeFn("toString") { _ -> obj.elements.joinToString(",") { joinElement(it) } }
+        "flat" -> nativeFn("flat") { _ ->
+            val result = JsList()
+            obj.elements.forEach { if (it is JsList) result.elements.addAll(it.elements) else result.elements.add(it) }
+            result
+        }
+        else -> null
+    }
+
+    private fun getListMutationMember(obj: JsList, key: String): Any? = when (key) {
+        "reverse" -> nativeFn("reverse") { _ -> obj.elements.reverse(); obj }
+        "push" -> nativeFn("push") { args -> args.forEach { obj.elements.add(it) }; obj.elements.size.toDouble() }
+        "pop" -> nativeFn("pop") { _ -> if (obj.elements.isEmpty()) Unit else obj.elements.removeAt(obj.elements.size - 1) }
+        "shift" -> nativeFn("shift") { _ -> if (obj.elements.isEmpty()) Unit else obj.elements.removeAt(0) }
+        "unshift" -> nativeFn("unshift") { args -> args.reversed().forEach { obj.elements.add(0, it) }; obj.elements.size.toDouble() }
+        "splice" -> nativeFn("splice") { args ->
+            val start = args.getOrNull(0)?.let { toNumber(it).toInt() }?.let { if (it < 0) maxOf(0, obj.elements.size + it) else minOf(it, obj.elements.size) } ?: 0
+            val deleteCount = args.getOrNull(1)?.let { toNumber(it).toInt() }?.coerceIn(0, obj.elements.size - start) ?: (obj.elements.size - start)
+            val removed = JsList(obj.elements.subList(start, start + deleteCount).toMutableList())
+            repeat(deleteCount) { obj.elements.removeAt(start) }
+            args.drop(2).forEachIndexed { i, v -> obj.elements.add(start + i, v) }
+            removed
+        }
+        else -> null
+    }
+
+    private fun getListTransformMember(obj: JsList, key: String): Any? = when (key) {
+        "map" -> nativeFn("map") { args ->
+            val fn = args.getOrNull(0)
+            JsList(obj.elements.mapIndexed { i, v -> callAny(fn, listOf(v, i.toDouble(), obj), null) }.toMutableList())
+        }
+        "filter" -> nativeFn("filter") { args ->
+            val fn = args.getOrNull(0)
+            JsList(obj.elements.filterIndexed { i, v -> toBoolean(callAny(fn, listOf(v, i.toDouble(), obj), null)) }.toMutableList())
+        }
+        "forEach" -> nativeFn("forEach") { args ->
+            val fn = args.getOrNull(0)
+            obj.elements.forEachIndexed { i, v -> callAny(fn, listOf(v, i.toDouble(), obj), null) }
+            Unit
+        }
+        "reduce" -> nativeFn("reduce") { args ->
+            val fn = args.getOrNull(0)
+            var acc: Any? = if (args.size > 1) args[1] else obj.elements.firstOrNull() ?: Unit
+            val startIdx = if (args.size > 1) 0 else 1
+            for (i in startIdx until obj.elements.size) acc = callAny(fn, listOf(acc, obj.elements[i], i.toDouble(), obj), null)
+            acc
+        }
+        "find" -> nativeFn("find") { args ->
+            val fn = args.getOrNull(0)
+            obj.elements.firstOrNull { toBoolean(callAny(fn, listOf(it), null)) } ?: Unit
+        }
+        "some" -> nativeFn("some") { args ->
+            val fn = args.getOrNull(0)
+            obj.elements.any { toBoolean(callAny(fn, listOf(it), null)) }
+        }
+        "every" -> nativeFn("every") { args ->
+            val fn = args.getOrNull(0)
+            obj.elements.all { toBoolean(callAny(fn, listOf(it), null)) }
+        }
+        "sort" -> nativeFn("sort") { args ->
+            val fn = args.getOrNull(0)
+            if (fn == null) obj.elements.sortWith { a, b -> toJsString(a).compareTo(toJsString(b)) }
+            else obj.elements.sortWith { a, b -> toNumber(callAny(fn, listOf(a, b), null)).toInt() }
+            obj
+        }
+        else -> null
+    }
+
+    private fun getListMember(obj: JsList, key: String): Any? {
+        getListAccessMember(obj, key)?.let { return it }
+        getListMutationMember(obj, key)?.let { return it }
+        getListTransformMember(obj, key)?.let { return it }
+        return key.toIntOrNull()?.let { obj[it] } ?: Unit
+    }
+
+    private fun getStringSliceMember(obj: String, key: String): Any? = when (key) {
+        "length" -> obj.length.toDouble()
+        "split" -> nativeFn("split") { args ->
+            val sep = args.getOrNull(0)
+            when {
+                sep == null || sep is Unit -> JsList(mutableListOf(obj))
+                sep is String && sep.isEmpty() -> JsList(obj.map { it.toString() as Any? }.toMutableList())
+                sep is String -> JsList(obj.split(sep).map { it as Any? }.toMutableList())
+                else -> JsList(obj.split(toJsString(sep)).map { it as Any? }.toMutableList())
+            }
+        }
+        "join" -> nativeFn("join") { _ -> obj }
+        "replace" -> nativeFn("replace") { args ->
+            val from = args.getOrNull(0); val to = toJsString(args.getOrNull(1))
+            when (from) {
+                is String -> obj.replaceFirst(from, to)
+                else -> obj.replace(toJsString(from), to)
+            }
+        }
+        "replaceAll" -> nativeFn("replaceAll") { args ->
+            val from = args.getOrNull(0); val to = toJsString(args.getOrNull(1))
+            obj.replace(toJsString(from), to)
+        }
+        "slice" -> nativeFn("slice") { args ->
+            val start = args.getOrNull(0)?.let { toNumber(it).toInt() }?.let { if (it < 0) maxOf(0, obj.length + it) else minOf(it, obj.length) } ?: 0
+            val end = args.getOrNull(1)?.let { toNumber(it).toInt() }?.let { if (it < 0) maxOf(0, obj.length + it) else minOf(it, obj.length) } ?: obj.length
+            if (end <= start) "" else obj.substring(start, end)
+        }
+        "substr" -> nativeFn("substr") { args ->
+            val start = args.getOrNull(0)?.let { toNumber(it).toInt() }?.let { if (it < 0) maxOf(0, obj.length + it) else minOf(it, obj.length) } ?: 0
+            val len = args.getOrNull(1)?.let { toNumber(it).toInt() } ?: (obj.length - start)
+            if (len <= 0) "" else obj.substring(start, minOf(start + len, obj.length))
+        }
+        "substring" -> nativeFn("substring") { args ->
+            val a = args.getOrNull(0)?.let { toNumber(it).toInt().coerceIn(0, obj.length) } ?: 0
+            val b = args.getOrNull(1)?.let { toNumber(it).toInt().coerceIn(0, obj.length) } ?: obj.length
+            obj.substring(minOf(a, b), maxOf(a, b))
+        }
+        "charAt" -> nativeFn("charAt") { args ->
+            val i = args.getOrNull(0)?.let { toNumber(it).toInt() } ?: 0
+            if (i < 0 || i >= obj.length) "" else obj[i].toString()
+        }
+        "charCodeAt", "codePointAt" -> nativeFn(key) { args ->
+            val i = args.getOrNull(0)?.let { toNumber(it).toInt() } ?: 0
+            if (i < 0 || i >= obj.length) Double.NaN else obj[i].code.toDouble()
+        }
+        else -> null
+    }
+
+    private fun getStringSearchMember(obj: String, key: String): Any? = when (key) {
+        "indexOf" -> nativeFn("indexOf") { args -> obj.indexOf(toJsString(args.getOrNull(0))).toDouble() }
+        "lastIndexOf" -> nativeFn("lastIndexOf") { args -> obj.lastIndexOf(toJsString(args.getOrNull(0))).toDouble() }
+        "includes" -> nativeFn("includes") { args -> obj.contains(toJsString(args.getOrNull(0))) }
+        "startsWith" -> nativeFn("startsWith") { args -> obj.startsWith(toJsString(args.getOrNull(0))) }
+        "endsWith" -> nativeFn("endsWith") { args -> obj.endsWith(toJsString(args.getOrNull(0))) }
+        "match" -> nativeFn("match") { args ->
+            val pattern = toJsString(args.getOrNull(0))
+            try {
+                val result = Regex(pattern).find(obj)
+                if (result == null) null
+                else JsList(result.groupValues.map { it as Any? }.toMutableList())
+            } catch (_: Exception) { null }
+        }
+        else -> null
+    }
+
+    private fun getStringTransformMember(obj: String, key: String): Any? = when (key) {
+        "toUpperCase", "toLocaleUpperCase" -> nativeFn("toUpperCase") { _ -> obj.uppercase() }
+        "toLowerCase", "toLocaleLowerCase" -> nativeFn("toLowerCase") { _ -> obj.lowercase() }
+        "trim" -> nativeFn("trim") { _ -> obj.trim() }
+        "trimStart", "trimLeft" -> nativeFn("trimStart") { _ -> obj.trimStart() }
+        "trimEnd", "trimRight" -> nativeFn("trimEnd") { _ -> obj.trimEnd() }
+        "repeat" -> nativeFn("repeat") { args -> obj.repeat(toNumber(args.getOrNull(0)).toInt().coerceAtLeast(0)) }
+        "padStart" -> nativeFn("padStart") { args ->
+            val len = toNumber(args.getOrNull(0)).toInt(); val pad = args.getOrNull(1)?.let { toJsString(it) } ?: " "
+            if (obj.length >= len) obj else (pad.repeat(len) + obj).takeLast(len)
+        }
+        "padEnd" -> nativeFn("padEnd") { args ->
+            val len = toNumber(args.getOrNull(0)).toInt(); val pad = args.getOrNull(1)?.let { toJsString(it) } ?: " "
+            if (obj.length >= len) obj else (obj + pad.repeat(len)).take(len)
+        }
+        "toString" -> nativeFn("toString") { _ -> obj }
+        "valueOf" -> nativeFn("valueOf") { _ -> obj }
+        else -> null
+    }
+
+    private fun getStringMember(obj: String, key: String): Any? {
+        getStringSliceMember(obj, key)?.let { return it }
+        getStringSearchMember(obj, key)?.let { return it }
+        getStringTransformMember(obj, key)?.let { return it }
+        return key.toIntOrNull()?.let {
+            if (it >= 0 && it < obj.length) obj[it].toString() else Unit
+        } ?: Unit
+    }
+
+    private fun getNumberMember(obj: Double, key: String): Any? = when (key) {
+        "toString" -> nativeFn("toString") { args ->
+            val radix = args.getOrNull(0)?.let { toNumber(it).toInt() } ?: 10
+            if (radix == 10) toJsString(obj) else obj.toLong().toString(radix)
+        }
+        "toFixed" -> nativeFn("toFixed") { args ->
+            val digits = (args.getOrNull(0)?.let { toNumber(it).toInt() } ?: 0).coerceIn(0, 20)
+            val factor = 10.0.pow(digits)
+            val rounded = round(obj * factor) / factor
+            val sign = if (rounded < 0) "-" else ""
+            val absVal = abs(rounded)
+            val intPart = absVal.toLong()
+            val fracPart = round((absVal - intPart) * factor).toLong()
+            val fracStr = fracPart.toString().padStart(digits, '0')
+            if (digits == 0) "$sign$intPart" else "$sign$intPart.$fracStr"
+        }
+        else -> Unit
+    }
+
     private fun getMember(obj: Any?, key: String): Any? = when (obj) {
         is NativeFn -> obj.props[key] ?: Unit
         is JsObject -> obj.props[key] ?: Unit
-        is JsList -> when (key) {
-            "length" -> obj.length.toDouble()
-            "join" -> nativeFn("join") { args ->
-                val sep = args.getOrNull(0)?.let { toJsString(it) } ?: ","
-                obj.elements.joinToString(sep) { joinElement(it) }
-            }
-            "reverse" -> nativeFn("reverse") { _ -> obj.elements.reverse(); obj }
-            "push" -> nativeFn("push") { args -> args.forEach { obj.elements.add(it) }; obj.elements.size.toDouble() }
-            "pop" -> nativeFn("pop") { _ -> if (obj.elements.isEmpty()) Unit else obj.elements.removeAt(obj.elements.size - 1) }
-            "shift" -> nativeFn("shift") { _ -> if (obj.elements.isEmpty()) Unit else obj.elements.removeAt(0) }
-            "unshift" -> nativeFn("unshift") { args -> args.reversed().forEach { obj.elements.add(0, it) }; obj.elements.size.toDouble() }
-            "slice" -> nativeFn("slice") { args ->
-                val start = args.getOrNull(0)?.let { toNumber(it).toInt() } ?: 0
-                val end = args.getOrNull(1)?.let { toNumber(it).toInt() } ?: obj.elements.size
-                val s = if (start < 0) maxOf(0, obj.elements.size + start) else minOf(start, obj.elements.size)
-                val e = if (end < 0) maxOf(0, obj.elements.size + end) else minOf(end, obj.elements.size)
-                JsList(obj.elements.subList(maxOf(0, s), maxOf(s, e)).toMutableList())
-            }
-            "splice" -> nativeFn("splice") { args ->
-                val start = args.getOrNull(0)?.let { toNumber(it).toInt() }?.let { if (it < 0) maxOf(0, obj.elements.size + it) else minOf(it, obj.elements.size) } ?: 0
-                val deleteCount = args.getOrNull(1)?.let { toNumber(it).toInt() }?.coerceIn(0, obj.elements.size - start) ?: (obj.elements.size - start)
-                val removed = JsList(obj.elements.subList(start, start + deleteCount).toMutableList())
-                repeat(deleteCount) { obj.elements.removeAt(start) }
-                args.drop(2).forEachIndexed { i, v -> obj.elements.add(start + i, v) }
-                removed
-            }
-            "indexOf" -> nativeFn("indexOf") { args ->
-                val v = args.getOrNull(0); val start = args.getOrNull(1)?.let { toNumber(it).toInt() } ?: 0
-                obj.elements.indexOfFirst { strictEq(it, v) }.let { if (it < start) -1.0 else it.toDouble() }
-            }
-            "map" -> nativeFn("map") { args ->
-                val fn = args.getOrNull(0)
-                JsList(obj.elements.mapIndexed { i, v -> callAny(fn, listOf(v, i.toDouble(), obj), null) }.toMutableList())
-            }
-            "filter" -> nativeFn("filter") { args ->
-                val fn = args.getOrNull(0)
-                JsList(obj.elements.filterIndexed { i, v -> toBoolean(callAny(fn, listOf(v, i.toDouble(), obj), null)) }.toMutableList())
-            }
-            "forEach" -> nativeFn("forEach") { args ->
-                val fn = args.getOrNull(0)
-                obj.elements.forEachIndexed { i, v -> callAny(fn, listOf(v, i.toDouble(), obj), null) }
-                Unit
-            }
-            "reduce" -> nativeFn("reduce") { args ->
-                val fn = args.getOrNull(0)
-                var acc: Any? = if (args.size > 1) args[1] else obj.elements.firstOrNull() ?: Unit
-                val startIdx = if (args.size > 1) 0 else 1
-                for (i in startIdx until obj.elements.size) acc = callAny(fn, listOf(acc, obj.elements[i], i.toDouble(), obj), null)
-                acc
-            }
-            "concat" -> nativeFn("concat") { args ->
-                val result = JsList(obj.elements.toMutableList())
-                args.forEach { a -> when (a) { is JsList -> result.elements.addAll(a.elements); else -> result.elements.add(a) } }
-                result
-            }
-            "find" -> nativeFn("find") { args ->
-                val fn = args.getOrNull(0)
-                obj.elements.firstOrNull { toBoolean(callAny(fn, listOf(it), null)) } ?: Unit
-            }
-            "some" -> nativeFn("some") { args ->
-                val fn = args.getOrNull(0)
-                obj.elements.any { toBoolean(callAny(fn, listOf(it), null)) }
-            }
-            "every" -> nativeFn("every") { args ->
-                val fn = args.getOrNull(0)
-                obj.elements.all { toBoolean(callAny(fn, listOf(it), null)) }
-            }
-            "sort" -> nativeFn("sort") { args ->
-                val fn = args.getOrNull(0)
-                if (fn == null) obj.elements.sortWith { a, b -> toJsString(a).compareTo(toJsString(b)) }
-                else obj.elements.sortWith { a, b -> toNumber(callAny(fn, listOf(a, b), null)).toInt() }
-                obj
-            }
-            "includes" -> nativeFn("includes") { args -> obj.elements.any { looseEq(it, args.getOrNull(0)) } }
-            "toString" -> nativeFn("toString") { _ -> obj.elements.joinToString(",") { joinElement(it) } }
-            "flat" -> nativeFn("flat") { _ ->
-                val result = JsList()
-                obj.elements.forEach { if (it is JsList) result.elements.addAll(it.elements) else result.elements.add(it) }
-                result
-            }
-            else -> key.toIntOrNull()?.let { obj[it] } ?: Unit
-        }
-        is String -> when (key) {
-            "length" -> obj.length.toDouble()
-            "split" -> nativeFn("split") { args ->
-                val sep = args.getOrNull(0)
-                when {
-                    sep == null || sep is Unit -> JsList(mutableListOf(obj))
-                    sep is String && sep.isEmpty() -> JsList(obj.map { it.toString() as Any? }.toMutableList())
-                    sep is String -> JsList(obj.split(sep).map { it as Any? }.toMutableList())
-                    else -> JsList(obj.split(toJsString(sep)).map { it as Any? }.toMutableList())
-                }
-            }
-            "join" -> nativeFn("join") { args -> obj } // strings don't have join but just in case
-            "replace" -> nativeFn("replace") { args ->
-                val from = args.getOrNull(0); val to = toJsString(args.getOrNull(1))
-                when (from) {
-                    is String -> obj.replaceFirst(from, to)
-                    else -> obj.replace(toJsString(from), to)
-                }
-            }
-            "replaceAll" -> nativeFn("replaceAll") { args ->
-                val from = args.getOrNull(0); val to = toJsString(args.getOrNull(1))
-                obj.replace(toJsString(from), to)
-            }
-            "indexOf" -> nativeFn("indexOf") { args -> obj.indexOf(toJsString(args.getOrNull(0))).toDouble() }
-            "lastIndexOf" -> nativeFn("lastIndexOf") { args -> obj.lastIndexOf(toJsString(args.getOrNull(0))).toDouble() }
-            "includes" -> nativeFn("includes") { args -> obj.contains(toJsString(args.getOrNull(0))) }
-            "startsWith" -> nativeFn("startsWith") { args -> obj.startsWith(toJsString(args.getOrNull(0))) }
-            "endsWith" -> nativeFn("endsWith") { args -> obj.endsWith(toJsString(args.getOrNull(0))) }
-            "slice" -> nativeFn("slice") { args ->
-                val start = args.getOrNull(0)?.let { toNumber(it).toInt() }?.let { if (it < 0) maxOf(0, obj.length + it) else minOf(it, obj.length) } ?: 0
-                val end = args.getOrNull(1)?.let { toNumber(it).toInt() }?.let { if (it < 0) maxOf(0, obj.length + it) else minOf(it, obj.length) } ?: obj.length
-                if (end <= start) "" else obj.substring(start, end)
-            }
-            "substr" -> nativeFn("substr") { args ->
-                val start = args.getOrNull(0)?.let { toNumber(it).toInt() }?.let { if (it < 0) maxOf(0, obj.length + it) else minOf(it, obj.length) } ?: 0
-                val len = args.getOrNull(1)?.let { toNumber(it).toInt() } ?: (obj.length - start)
-                if (len <= 0) "" else obj.substring(start, minOf(start + len, obj.length))
-            }
-            "substring" -> nativeFn("substring") { args ->
-                val a = args.getOrNull(0)?.let { toNumber(it).toInt().coerceIn(0, obj.length) } ?: 0
-                val b = args.getOrNull(1)?.let { toNumber(it).toInt().coerceIn(0, obj.length) } ?: obj.length
-                obj.substring(minOf(a, b), maxOf(a, b))
-            }
-            "charAt" -> nativeFn("charAt") { args ->
-                val i = args.getOrNull(0)?.let { toNumber(it).toInt() } ?: 0
-                if (i < 0 || i >= obj.length) "" else obj[i].toString()
-            }
-            "charCodeAt" -> nativeFn("charCodeAt") { args ->
-                val i = args.getOrNull(0)?.let { toNumber(it).toInt() } ?: 0
-                if (i < 0 || i >= obj.length) Double.NaN else obj[i].code.toDouble()
-            }
-            "codePointAt" -> nativeFn("codePointAt") { args ->
-                val i = args.getOrNull(0)?.let { toNumber(it).toInt() } ?: 0
-                if (i < 0 || i >= obj.length) Double.NaN else obj[i].code.toDouble()
-            }
-            "toUpperCase", "toLocaleUpperCase" -> nativeFn("toUpperCase") { _ -> obj.uppercase() }
-            "toLowerCase", "toLocaleLowerCase" -> nativeFn("toLowerCase") { _ -> obj.lowercase() }
-            "trim" -> nativeFn("trim") { _ -> obj.trim() }
-            "trimStart", "trimLeft" -> nativeFn("trimStart") { _ -> obj.trimStart() }
-            "trimEnd", "trimRight" -> nativeFn("trimEnd") { _ -> obj.trimEnd() }
-            "repeat" -> nativeFn("repeat") { args -> obj.repeat(toNumber(args.getOrNull(0)).toInt().coerceAtLeast(0)) }
-            "padStart" -> nativeFn("padStart") { args ->
-                val len = toNumber(args.getOrNull(0)).toInt(); val pad = args.getOrNull(1)?.let { toJsString(it) } ?: " "
-                if (obj.length >= len) obj else (pad.repeat(len) + obj).takeLast(len)
-            }
-            "padEnd" -> nativeFn("padEnd") { args ->
-                val len = toNumber(args.getOrNull(0)).toInt(); val pad = args.getOrNull(1)?.let { toJsString(it) } ?: " "
-                if (obj.length >= len) obj else (obj + pad.repeat(len)).take(len)
-            }
-            "toString" -> nativeFn("toString") { _ -> obj }
-            "valueOf" -> nativeFn("valueOf") { _ -> obj }
-            "match" -> nativeFn("match") { args ->
-                val pattern = toJsString(args.getOrNull(0))
-                try {
-                    val result = Regex(pattern).find(obj)
-                    if (result == null) null
-                    else JsList(result.groupValues.map { it as Any? }.toMutableList())
-                } catch (_: Exception) { null }
-            }
-            else -> key.toIntOrNull()?.let {
-                if (it >= 0 && it < obj.length) obj[it].toString() else Unit
-            } ?: Unit
-        }
-        is Double -> when (key) {
-            "toString" -> nativeFn("toString") { args ->
-                val radix = args.getOrNull(0)?.let { toNumber(it).toInt() } ?: 10
-                if (radix == 10) toJsString(obj) else obj.toLong().toString(radix)
-            }
-            "toFixed" -> nativeFn("toFixed") { args ->
-                val digits = (args.getOrNull(0)?.let { toNumber(it).toInt() } ?: 0).coerceIn(0, 20)
-                val factor = 10.0.pow(digits)
-                val rounded = round(obj * factor) / factor
-                val sign = if (rounded < 0) "-" else ""
-                val absVal = abs(rounded)
-                val intPart = absVal.toLong()
-                val fracPart = round((absVal - intPart) * factor).toLong()
-                val fracStr = fracPart.toString().padStart(digits, '0')
-                if (digits == 0) "$sign$intPart" else "$sign$intPart.$fracStr"
-            }
-            else -> Unit
-        }
+        is JsList -> getListMember(obj, key)
+        is String -> getStringMember(obj, key)
+        is Double -> getNumberMember(obj, key)
         else -> Unit
     }
 

@@ -14,6 +14,9 @@ import com.lagradost.cloudstream3.shared.syncproviders.providers.SubDlApi
 import com.lagradost.cloudstream3.shared.syncproviders.providers.SubSourceApi
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
 import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
+import kotlinx.collections.immutable.PersistentMap
+import kotlinx.collections.immutable.persistentMapOf
+import kotlinx.collections.immutable.toPersistentMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,8 +41,8 @@ abstract class AccountManager {
         var cachedAccounts: MutableMap<String, Array<AuthData>> = mutableMapOf()
         var cachedAccountIds: MutableMap<String, Int> = mutableMapOf()
 
-        private val _accountsState = MutableStateFlow<Map<String, AuthData?>>(emptyMap())
-        val accountsState: StateFlow<Map<String, AuthData?>> = _accountsState.asStateFlow()
+        private val _accountsState = MutableStateFlow<PersistentMap<String, AuthData?>>(persistentMapOf())
+        val accountsState: StateFlow<PersistentMap<String, AuthData?>> = _accountsState.asStateFlow()
 
         const val ACCOUNT_TOKEN = "auth_tokens"
         const val ACCOUNT_IDS = "auth_ids"
@@ -88,7 +91,7 @@ abstract class AccountManager {
             } ?: AppPreferenceManager.getIntSync("$ACCOUNT_IDS/$prefix/${currentAccount()}", NONE_ID)
             val activeAuth = array.firstOrNull { it.user.id == activeId }
             _accountsState.update { current ->
-                current + (prefix to activeAuth)
+                current.put(prefix, activeAuth)
             }
         }
 
@@ -104,7 +107,7 @@ abstract class AccountManager {
             } ?: accounts(prefix)
             val activeAuth = accs.firstOrNull { it.user.id == id }
             _accountsState.update { current ->
-                current + (prefix to activeAuth)
+                current.put(prefix, activeAuth)
             }
         }
 
@@ -141,7 +144,7 @@ abstract class AccountManager {
             synchronized(cachedAccountIds) {
                 cachedAccountIds = ids
             }
-            _accountsState.update { activeMap }
+            _accountsState.update { activeMap.toPersistentMap() }
         }
 
         fun updateAccountIds() {

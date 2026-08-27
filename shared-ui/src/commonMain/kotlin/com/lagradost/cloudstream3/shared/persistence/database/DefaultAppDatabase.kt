@@ -1,5 +1,7 @@
 package com.lagradost.cloudstream3.shared.persistence.database
 
+import androidx.room.InvalidationTracker
+import com.lagradost.cloudstream3.mvvm.logError
 import com.lagradost.cloudstream3.shared.persistence.dao.AccountDao
 import com.lagradost.cloudstream3.shared.persistence.dao.AppPreferenceDao
 import com.lagradost.cloudstream3.shared.persistence.dao.BookmarkDao
@@ -19,16 +21,11 @@ import com.lagradost.cloudstream3.shared.persistence.entity.ResumeWatchingEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.SubscriptionEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.SyncMappingEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.WatchProgressEntity
-import androidx.room.InvalidationTracker
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 
-/**
- * Pure Kotlin Multiplatform thread-safe, reactive default database implementation for [AppDatabase].
- * Provides fallback persistence and in-memory caching without relying on runtime reflection.
- */
 abstract class DefaultAppDatabase(
     storageDir: java.io.File? = null
 ) : AppDatabase() {
@@ -74,10 +71,6 @@ abstract class DefaultAppDatabase(
     }
 }
 
-// -----------------------------------------------------------------------------
-// DAO Implementations
-// -----------------------------------------------------------------------------
-
 internal class DefaultAccountDao : AccountDao {
     private val store = MutableStateFlow<Map<Int, AccountEntity>>(emptyMap())
 
@@ -111,7 +104,9 @@ internal class DefaultAppPreferenceDao(
                         }
                     }
                 }
-            } catch (_: Throwable) {}
+            } catch (e: Exception) {
+                logError(e)
+            }
         }
         store = MutableStateFlow(initial)
     }
@@ -128,7 +123,9 @@ internal class DefaultAppPreferenceDao(
                     }
                 }
                 tempFile.renameTo(storageFile)
-            } catch (_: Throwable) {}
+            } catch (e: Exception) {
+                logError(e)
+            }
         }
     }
 
@@ -453,7 +450,6 @@ internal class DefaultDownloadCacheDao : DownloadCacheDao {
         episodesState.update { it.filterValues { e -> e.parentId != parentId } }
     }
     fun clearAllTables() {
-        // Fallback in-memory reset
     }
     override suspend fun clearAllHeaders() { headersState.value = emptyMap() }
     override suspend fun clearAllEpisodes() { episodesState.value = emptyMap() }

@@ -31,10 +31,8 @@ import androidx.compose.ui.unit.sp
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamColors
-
-// =============================================================================
-// 1. TITLE TEXT
-// =============================================================================
+import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
+import org.jetbrains.compose.ui.tooling.preview.Preview
 
 /**
  * Semantic Title typography for headings, dialog titles, and card headers.
@@ -89,10 +87,6 @@ fun TitleText(
     lineHeight = lineHeight
 )
 
-// =============================================================================
-// 2. SUBTITLE TEXT
-// =============================================================================
-
 /**
  * Semantic Subtitle typography for section subheadings, descriptions, and secondary card lines.
  */
@@ -146,10 +140,6 @@ fun SubtitleText(
     lineHeight = lineHeight
 )
 
-// =============================================================================
-// 3. BODY TEXT
-// =============================================================================
-
 /**
  * Semantic Body typography for general UI descriptions, paragraphs, and primary content.
  */
@@ -202,10 +192,6 @@ fun BodyText(
     fontSize = fontSize,
     lineHeight = lineHeight
 )
-
-// =============================================================================
-// 4. BODY MUTED TEXT
-// =============================================================================
 
 /**
  * Semantic Muted Body typography for low-emphasis labels, timestamps, and secondary info.
@@ -264,10 +250,6 @@ fun BodyMutedText(
     lineHeight = lineHeight,
     style = style
 )
-
-// =============================================================================
-// 5. SECTION HEADER
-// =============================================================================
 
 /**
  * Standardized Section Header with optional accent bar, icon, subtitle/description, and trailing action button slot.
@@ -359,3 +341,24 @@ fun SectionHeader(
     showAccentBar = showAccentBar,
     action = action
 )
+
+@Preview
+@Composable
+private fun CloudStreamTypographyPreview() {
+    CloudStreamTheme {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SectionHeader(
+                title = "Section Title",
+                subtitle = "Section subtitle explanation",
+                showAccentBar = true
+            )
+            TitleText(text = "Title Text")
+            SubtitleText(text = "Subtitle Text")
+            BodyText(text = "Body text standard paragraph")
+            BodyMutedText(text = "Muted auxiliary note")
+        }
+    }
+}

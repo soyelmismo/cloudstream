@@ -14,9 +14,6 @@ import com.lagradost.cloudstream3.shared.syncproviders.toYear
 import com.lagradost.cloudstream3.syncproviders.SyncIdName
 import com.lagradost.cloudstream3.ui.WatchType
 import com.lagradost.cloudstream3.utils.txt
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.IO
-import kotlinx.coroutines.withContext
 
 class LocalList : SyncAPI() {
     override val name = "Local"
@@ -96,7 +93,7 @@ class LocalList : SyncAPI() {
         )
     }
 
-    override suspend fun library(auth: AuthData?): SyncAPI.LibraryMetadata? = withContext(Dispatchers.IO) {
+    override suspend fun library(auth: AuthData?): SyncAPI.LibraryMetadata? {
         val accountId = AccountManager.currentAccount().toIntOrNull() ?: 0
         val db = DatabaseDriverFactory.getDatabase()
 
@@ -126,7 +123,7 @@ class LocalList : SyncAPI() {
 
         val list = baseMap + watchStatusMap + favoritesMap + subscriptionsMap
 
-        SyncAPI.LibraryMetadata(
+        return SyncAPI.LibraryMetadata(
             list.map { SyncAPI.LibraryList(txt(it.key), it.value) },
             setOf(
                 ListSorting.AlphabeticalA,
