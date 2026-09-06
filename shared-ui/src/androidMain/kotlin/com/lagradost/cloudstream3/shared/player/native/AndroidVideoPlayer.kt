@@ -3,6 +3,7 @@ package com.lagradost.cloudstream3.shared.player.native
 
 import android.content.Context
 import com.lagradost.cloudstream3.shared.player.PlayerEvent as SharedPlayerEvent
+import com.lagradost.cloudstream3.shared.player.PlayerSeekSettler
 import com.lagradost.cloudstream3.shared.player.PlayerState
 import com.lagradost.cloudstream3.shared.player.VideoPlayer
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerQuality
@@ -16,12 +17,15 @@ import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.toImmutableMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -52,10 +56,41 @@ class AndroidVideoPlayer(
     private val _events = MutableSharedFlow<SharedPlayerEvent>(extraBufferCapacity = 64)
     override val events: SharedFlow<SharedPlayerEvent> get() = _events.asSharedFlow()
 
+    private val seekSettler = PlayerSeekSettler()
+    private var progressLoopJob: Job? = null
+
     init {
         player.initCallbacks(eventHandler = { event ->
             handleInternalPlayerEvent(event)
         })
+    }
+
+    private fun startProgressLoop() {
+        if (progressLoopJob?.isActive == true) return
+        progressLoopJob = scope.launch {
+            while (isActive) {
+                delay(250L)
+                updatePlaybackProgress()
+            }
+        }
+    }
+
+    private fun stopProgressLoop() {
+        progressLoopJob?.cancel()
+        progressLoopJob = null
+    }
+
+    private fun updatePlaybackProgress() {
+        val rawPosition = player.getPosition() ?: return
+        val currentPosition = seekSettler.filterIncomingPosition(rawPosition) ?: return
+        val currentDuration = player.getDuration() ?: _state.value.durationMs
+        if (currentPosition != _state.value.positionMs || currentDuration != _state.value.durationMs) {
+            _state.value = _state.value.copy(
+                positionMs = currentPosition,
+                durationMs = currentDuration
+            )
+            emitEvent(SharedPlayerEvent.OnPositionChanged(positionMs = currentPosition, durationMs = currentDuration))
+        }
     }
 
     private fun handleInternalPlayerEvent(event: PlayerEvent) {
@@ -65,17 +100,19 @@ class AndroidVideoPlayer(
                 _exoPlayerState.value = event.player as? androidx.media3.common.Player
             }
             is PositionEvent -> {
+                val filteredPosition = seekSettler.filterIncomingPosition(event.toMs) ?: return
                 _state.value = _state.value.copy(
-                    positionMs = event.toMs,
+                    positionMs = filteredPosition,
                     durationMs = event.durationMs
                 )
-                emitEvent(SharedPlayerEvent.OnPositionChanged(positionMs = event.toMs, durationMs = event.durationMs))
+                emitEvent(SharedPlayerEvent.OnPositionChanged(positionMs = filteredPosition, durationMs = event.durationMs))
             }
             is StatusEvent -> {
                 when (event.isPlaying) {
                     CSPlayerLoading.IsPlaying -> {
                         _state.value = _state.value.copy(isPlaying = true, isBuffering = false)
                         emitEvent(SharedPlayerEvent.OnPlay)
+                        startProgressLoop()
                     }
                     CSPlayerLoading.IsBuffering -> {
                         _state.value = _state.value.copy(isBuffering = true)
@@ -84,26 +121,35 @@ class AndroidVideoPlayer(
                     CSPlayerLoading.IsPaused -> {
                         _state.value = _state.value.copy(isPlaying = false, isBuffering = false)
                         emitEvent(SharedPlayerEvent.OnPause)
+                        stopProgressLoop()
                     }
                     CSPlayerLoading.IsEnded -> {
+                        seekSettler.reset()
                         _state.value = _state.value.copy(isPlaying = false, isBuffering = false)
                         emitEvent(SharedPlayerEvent.OnStop)
+                        stopProgressLoop()
                     }
                 }
             }
             is PlayEvent -> {
                 _state.value = _state.value.copy(isPlaying = true, isBuffering = false)
                 emitEvent(SharedPlayerEvent.OnPlay)
+                startProgressLoop()
             }
             is PauseEvent -> {
                 _state.value = _state.value.copy(isPlaying = false)
                 emitEvent(SharedPlayerEvent.OnPause)
+                stopProgressLoop()
             }
             is VideoEndedEvent -> {
+                seekSettler.reset()
                 _state.value = _state.value.copy(isPlaying = false, isBuffering = false)
                 emitEvent(SharedPlayerEvent.OnStop)
+                stopProgressLoop()
             }
             is ErrorEvent -> {
+                stopProgressLoop()
+                seekSettler.reset()
                 val errorMsg = event.error.localizedMessage ?: event.error.message ?: "Playback error"
                 emitEvent(SharedPlayerEvent.OnError(errorMsg))
             }
@@ -122,9 +168,13 @@ class AndroidVideoPlayer(
     }
 
     @Suppress("DEPRECATION")
-    override fun play(quality: PlayerQuality, subtitles: List<PlayerSubtitleTrack>) {
+    override fun play(
+        quality: PlayerQuality,
+        subtitles: List<PlayerSubtitleTrack>,
+        startPositionMs: Long?
+    ) {
         runOnMainThread {
-            android.util.Log.d("CloudStreamDebug", "AndroidVideoPlayer.play called: url=${quality.url}, headers=${quality.headers}, subtitles=${subtitles.size}")
+            android.util.Log.d("CloudStreamDebug", "AndroidVideoPlayer.play called: url=${quality.url}, headers=${quality.headers}, subtitles=${subtitles.size}, startPosition=$startPositionMs")
             val link = quality.extractorLink ?: run {
                 val referer = quality.headers["Referer"] ?: quality.headers["referer"] ?: ""
                 val isM3u8 = quality.url.contains(".m3u8", ignoreCase = true) || quality.url.contains("m3u8", ignoreCase = true)
@@ -162,11 +212,18 @@ class AndroidVideoPlayer(
                 subDataSet.firstOrNull { it.url == def.url }
             } ?: subDataSet.firstOrNull()
 
+            val initialPos = startPositionMs ?: 0L
+            if (initialPos > 0L) {
+                seekSettler.startSeek(targetMs = initialPos, currentPosMs = 0L)
+            } else {
+                seekSettler.reset()
+            }
+
             _state.value = _state.value.copy(
                 currentUrl = quality.url,
                 isBuffering = true,
                 isPlaying = false,
-                positionMs = 0L
+                positionMs = initialPos
             )
             emitEvent(SharedPlayerEvent.OnBuffering)
 
@@ -175,12 +232,16 @@ class AndroidVideoPlayer(
                 sameEpisode = false,
                 link = link,
                 data = null,
-                startPosition = null,
+                startPosition = startPositionMs,
                 subtitles = subDataSet,
                 subtitle = selectedSub,
                 autoPlay = true
             )
         }
+    }
+
+    override fun play(quality: PlayerQuality, subtitles: List<PlayerSubtitleTrack>) {
+        play(quality, subtitles, null)
     }
 
     override fun play(url: String, headers: Map<String, String>?) {
@@ -208,6 +269,7 @@ class AndroidVideoPlayer(
 
     override fun pause() {
         runOnMainThread {
+            stopProgressLoop()
             player.handleEvent(CSPlayerEvent.Pause)
             _state.value = _state.value.copy(isPlaying = false)
             emitEvent(SharedPlayerEvent.OnPause)
@@ -219,11 +281,14 @@ class AndroidVideoPlayer(
             player.handleEvent(CSPlayerEvent.Play)
             _state.value = _state.value.copy(isPlaying = true)
             emitEvent(SharedPlayerEvent.OnPlay)
+            startProgressLoop()
         }
     }
 
     override fun stop() {
         runOnMainThread {
+            stopProgressLoop()
+            seekSettler.reset()
             player.onStop()
             player.release()
             _state.value = PlayerState()
@@ -232,6 +297,7 @@ class AndroidVideoPlayer(
     }
 
     override fun seekTo(positionMs: Long) {
+        seekSettler.startSeek(targetMs = positionMs, currentPosMs = _state.value.positionMs)
         runOnMainThread {
             player.seekTo(positionMs)
             _state.value = _state.value.copy(positionMs = positionMs)
@@ -260,6 +326,8 @@ class AndroidVideoPlayer(
      */
     fun release() {
         runOnMainThread {
+            stopProgressLoop()
+            seekSettler.reset()
             player.releaseCallbacks()
             player.release()
         }

@@ -1,6 +1,7 @@
 package com.lagradost.cloudstream3.desktop.player
 
 import com.lagradost.cloudstream3.shared.player.PlayerEvent
+import com.lagradost.cloudstream3.shared.player.PlayerSeekSettler
 import com.lagradost.cloudstream3.shared.player.PlayerState
 import com.lagradost.cloudstream3.shared.player.VideoPlayer
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerQuality
@@ -12,6 +13,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -88,7 +91,8 @@ class DesktopVideoPlayer(
     private data class PendingPlayRequest(
         val url: String,
         val headers: Map<String, String>? = null,
-        val subtitles: List<PlayerSubtitleTrack> = emptyList()
+        val subtitles: List<PlayerSubtitleTrack> = emptyList(),
+        val startPositionMs: Long? = null
     )
 
     private val _stateFlow = MutableStateFlow(PlayerState())
@@ -125,6 +129,13 @@ class DesktopVideoPlayer(
 
     @Volatile
     private var targetMuted: Boolean = false
+
+    private val seekSettler = PlayerSeekSettler()
+
+    private var cachedPixelArray: ByteArray? = null
+    private val frameRenderLock = Any()
+
+    private var internalSyncJob: Job? = null
 
     private val pendingRequestLock = Any()
     private var pendingPlayRequest: PendingPlayRequest? = null
@@ -206,17 +217,67 @@ class DesktopVideoPlayer(
             if (byteBuffer.capacity() < expectedBytes) return
 
             byteBuffer.position(0)
-            val byteArray = ByteArray(expectedBytes)
-            byteBuffer.get(byteArray, 0, expectedBytes)
+            val skiaImage = synchronized(frameRenderLock) {
+                val existing = cachedPixelArray
+                val byteArray = if (existing != null && existing.size == expectedBytes) {
+                    existing
+                } else {
+                    ByteArray(expectedBytes).also { cachedPixelArray = it }
+                }
+                byteBuffer.get(byteArray, 0, expectedBytes)
 
-            val imageInfo = ImageInfo(
-                width = width,
-                height = height,
-                colorType = ColorType.BGRA_8888,
-                alphaType = ColorAlphaType.PREMUL
-            )
-            val skiaImage = SkiaImage.makeRaster(imageInfo, byteArray, width * 4)
+                val imageInfo = ImageInfo(
+                    width = width,
+                    height = height,
+                    colorType = ColorType.BGRA_8888,
+                    alphaType = ColorAlphaType.PREMUL
+                )
+                SkiaImage.makeRaster(imageInfo, byteArray, width * 4)
+            }
             _videoFrameFlow.value = skiaImage.toComposeImageBitmap()
+        } catch (_: Throwable) {}
+    }
+
+    private fun startInternalSyncLoop() {
+        if (internalSyncJob?.isActive == true) return
+        internalSyncJob = coroutineScope.launch(Dispatchers.Default) {
+            while (isActive) {
+                delay(250L)
+                syncStateFromPlayer()
+            }
+        }
+    }
+
+    private fun stopInternalSyncLoop() {
+        internalSyncJob?.cancel()
+        internalSyncJob = null
+    }
+
+    private fun syncStateFromPlayer() {
+        val player = mediaPlayer ?: return
+        if (!isNativePlayerAvailable) return
+        try {
+            val status = player.status() ?: return
+            val currentTime = status.time()
+            val currentLength = status.length()
+            val isPlaying = status.isPlaying
+
+            if (currentTime >= 0) {
+                val filteredTime = seekSettler.filterIncomingPosition(currentTime)
+                if (filteredTime != null) {
+                    val safeLength = currentLength.coerceAtLeast(0L)
+                    val current = _stateFlow.value
+                    if (current.positionMs != filteredTime || current.durationMs != safeLength || current.isPlaying != isPlaying) {
+                        _stateFlow.update {
+                            it.copy(
+                                isPlaying = isPlaying,
+                                positionMs = filteredTime,
+                                durationMs = if (safeLength > 0L) safeLength else it.durationMs
+                            )
+                        }
+                    }
+                }
+            }
         } catch (_: Throwable) {}
     }
 
@@ -229,7 +290,8 @@ class DesktopVideoPlayer(
 
         play(
             quality = PlayerQuality(url = requestToPlay.url, headers = requestToPlay.headers?.toImmutableMap() ?: persistentMapOf()),
-            subtitles = requestToPlay.subtitles
+            subtitles = requestToPlay.subtitles,
+            startPositionMs = requestToPlay.startPositionMs
         )
     }
 
@@ -244,45 +306,56 @@ class DesktopVideoPlayer(
             override fun playing(mediaPlayer: MediaPlayer) {
                 applyDeferredAudioSettings(mediaPlayer)
                 _stateFlow.update { it.copy(isPlaying = true, isBuffering = false) }
-                coroutineScope.launch { _events.emit(PlayerEvent.OnPlay) }
+                _events.tryEmit(PlayerEvent.OnPlay)
+                startInternalSyncLoop()
             }
 
             override fun paused(mediaPlayer: MediaPlayer) {
                 _stateFlow.update { it.copy(isPlaying = false) }
-                coroutineScope.launch { _events.emit(PlayerEvent.OnPause) }
+                _events.tryEmit(PlayerEvent.OnPause)
+                stopInternalSyncLoop()
             }
 
             override fun stopped(mediaPlayer: MediaPlayer) {
+                seekSettler.reset()
                 _stateFlow.update { it.copy(isPlaying = false, isBuffering = false) }
-                coroutineScope.launch { _events.emit(PlayerEvent.OnStop) }
+                _events.tryEmit(PlayerEvent.OnStop)
+                stopInternalSyncLoop()
             }
 
             override fun finished(mediaPlayer: MediaPlayer) {
+                seekSettler.reset()
                 _stateFlow.update { it.copy(isPlaying = false, isBuffering = false) }
-                coroutineScope.launch { _events.emit(PlayerEvent.OnStop) }
+                _events.tryEmit(PlayerEvent.OnStop)
+                stopInternalSyncLoop()
             }
 
             override fun buffering(mediaPlayer: MediaPlayer, newCache: Float) {
                 val isBuffering = newCache < 100.0f
                 _stateFlow.update { it.copy(isBuffering = isBuffering) }
                 if (isBuffering) {
-                    coroutineScope.launch { _events.emit(PlayerEvent.OnBuffering) }
+                    _events.tryEmit(PlayerEvent.OnBuffering)
                 }
             }
 
             override fun timeChanged(mediaPlayer: MediaPlayer, newTime: Long) {
+                val filteredTime = seekSettler.filterIncomingPosition(newTime) ?: return
                 val duration = _stateFlow.value.durationMs
-                _stateFlow.update { it.copy(positionMs = newTime) }
-                coroutineScope.launch { _events.emit(PlayerEvent.OnPositionChanged(newTime, duration)) }
+                _stateFlow.update { it.copy(positionMs = filteredTime, isBuffering = false) }
+                _events.tryEmit(PlayerEvent.OnPositionChanged(filteredTime, duration))
             }
 
             override fun lengthChanged(mediaPlayer: MediaPlayer, newLength: Long) {
-                _stateFlow.update { it.copy(durationMs = newLength.coerceAtLeast(0L)) }
+                val duration = newLength.coerceAtLeast(0L)
+                _stateFlow.update { it.copy(durationMs = duration) }
+                _events.tryEmit(PlayerEvent.OnPositionChanged(_stateFlow.value.positionMs, duration))
             }
 
             override fun error(mediaPlayer: MediaPlayer) {
+                seekSettler.reset()
                 _stateFlow.update { it.copy(isPlaying = false, isBuffering = false) }
-                coroutineScope.launch { _events.emit(PlayerEvent.OnError("VLC playback error occurred.")) }
+                _events.tryEmit(PlayerEvent.OnError("VLC playback error occurred."))
+                stopInternalSyncLoop()
             }
         }
     }
@@ -298,9 +371,13 @@ class DesktopVideoPlayer(
         }
     }
 
-    override fun play(quality: PlayerQuality, subtitles: List<PlayerSubtitleTrack>) {
+    override fun play(
+        quality: PlayerQuality,
+        subtitles: List<PlayerSubtitleTrack>,
+        startPositionMs: Long?
+    ) {
         if (!_isReadyFlow.value) {
-            queuePendingRequest(quality, subtitles)
+            queuePendingRequest(quality, subtitles, startPositionMs)
             return
         }
 
@@ -311,16 +388,25 @@ class DesktopVideoPlayer(
                 handlePlaybackUnavailable(quality.url)
                 return@launch
             }
-            executePlayback(player, quality, subtitles)
+            executePlayback(player, quality, subtitles, startPositionMs)
         }
     }
 
-    private fun queuePendingRequest(quality: PlayerQuality, subtitles: List<PlayerSubtitleTrack>) {
+    override fun play(quality: PlayerQuality, subtitles: List<PlayerSubtitleTrack>) {
+        play(quality, subtitles, null)
+    }
+
+    private fun queuePendingRequest(
+        quality: PlayerQuality,
+        subtitles: List<PlayerSubtitleTrack>,
+        startPositionMs: Long? = null
+    ) {
         synchronized(pendingRequestLock) {
             pendingPlayRequest = PendingPlayRequest(
                 url = quality.url,
                 headers = quality.headers,
-                subtitles = subtitles
+                subtitles = subtitles,
+                startPositionMs = startPositionMs
             )
         }
         _stateFlow.update { it.copy(currentUrl = quality.url, isBuffering = true) }
@@ -334,28 +420,33 @@ class DesktopVideoPlayer(
     private fun executePlayback(
         player: MediaPlayer,
         quality: PlayerQuality,
-        subtitles: List<PlayerSubtitleTrack>
+        subtitles: List<PlayerSubtitleTrack>,
+        startPositionMs: Long? = null
     ) {
         try {
+            val initialPos = startPositionMs ?: 0L
+            if (initialPos > 0L) {
+                seekSettler.startSeek(targetMs = initialPos, currentPosMs = 0L)
+            } else {
+                seekSettler.reset()
+            }
             _stateFlow.update {
                 it.copy(
                     currentUrl = quality.url,
                     isPlaying = true,
                     isBuffering = true,
-                    positionMs = 0L
+                    positionMs = initialPos
                 )
             }
 
-            val options = buildVlcMediaOptions(quality)
+            val options = buildVlcMediaOptions(quality, startPositionMs)
             synchronized(nativePlayerLock) {
                 player.media().play(quality.url, *options)
             }
             loadInitialSubtitle(subtitles)
         } catch (e: Exception) {
             _stateFlow.update { it.copy(isPlaying = false, isBuffering = false) }
-            coroutineScope.launch {
-                _events.emit(PlayerEvent.OnError("Failed to play media: ${e.message}"))
-            }
+            _events.tryEmit(PlayerEvent.OnError("Failed to play media: ${e.message}"))
         }
     }
 
@@ -373,11 +464,14 @@ class DesktopVideoPlayer(
             ?: com.lagradost.cloudstream3.USER_AGENT
     }
 
-    private fun buildVlcMediaOptions(quality: PlayerQuality): Array<String> {
+    private fun buildVlcMediaOptions(quality: PlayerQuality, startPositionMs: Long? = null): Array<String> {
         val options = mutableListOf(OPT_FORWARD_COOKIES)
         options.add("$OPT_HTTP_USER_AGENT${resolveUserAgent(quality.headers)}")
         resolveReferer(quality.url, quality.headers)?.takeIf { it.isNotBlank() }?.let {
             options.add("$OPT_HTTP_REFERRER$it")
+        }
+        if (startPositionMs != null && startPositionMs > 0L) {
+            options.add(":start-time=${startPositionMs / 1000L}")
         }
         return options.toTypedArray()
     }
@@ -430,6 +524,8 @@ class DesktopVideoPlayer(
     }
 
     override fun stop() {
+        stopInternalSyncLoop()
+        seekSettler.reset()
         synchronized(pendingRequestLock) {
             pendingPlayRequest = null
         }
@@ -443,23 +539,22 @@ class DesktopVideoPlayer(
             _stateFlow.update {
                 it.copy(isPlaying = false, isBuffering = false, positionMs = 0L)
             }
-            coroutineScope.launch {
-                _events.emit(PlayerEvent.OnStop)
-            }
+            _events.tryEmit(PlayerEvent.OnStop)
         }
     }
 
     override fun seekTo(positionMs: Long) {
         val player = mediaPlayer ?: return
+        seekSettler.startSeek(targetMs = positionMs, currentPosMs = _stateFlow.value.positionMs)
         try {
             synchronized(nativePlayerLock) {
                 player.controls().setTime(positionMs)
             }
-            _stateFlow.update { it.copy(positionMs = positionMs) }
+            _stateFlow.update { it.copy(positionMs = positionMs, isBuffering = true) }
+            _events.tryEmit(PlayerEvent.OnPositionChanged(positionMs, _stateFlow.value.durationMs))
         } catch (e: Exception) {
-            coroutineScope.launch {
-                _events.emit(PlayerEvent.OnError("Failed to seek: ${e.message}"))
-            }
+            seekSettler.reset()
+            _events.tryEmit(PlayerEvent.OnError("Failed to seek: ${e.message}"))
         }
     }
 
@@ -596,6 +691,8 @@ class DesktopVideoPlayer(
     }
 
     fun release() {
+        stopInternalSyncLoop()
+        seekSettler.reset()
         synchronized(pendingRequestLock) {
             pendingPlayRequest = null
         }

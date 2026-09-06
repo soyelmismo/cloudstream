@@ -43,13 +43,27 @@ compose.desktop {
         )
 
         nativeDistributions {
-            targetFormats(
-                TargetFormat.Deb,
-                TargetFormat.Rpm,
-                TargetFormat.Dmg,
-                TargetFormat.Msi,
-                TargetFormat.Exe
-            )
+            val isCi = System.getenv("CI") == "true" || System.getenv("GITHUB_ACTIONS") == "true"
+            val os = org.gradle.internal.os.OperatingSystem.current()
+            val availableFormats = mutableListOf<TargetFormat>()
+
+            if (os.isLinux) {
+                val pathDirs = (System.getenv("PATH") ?: "").split(File.pathSeparator).map { File(it) }
+                val hasDpkg = isCi || pathDirs.any { File(it, "dpkg-deb").exists() || File(it, "dpkg").exists() }
+                val hasRpm = isCi || pathDirs.any { File(it, "rpmbuild").exists() }
+
+                if (hasDpkg) availableFormats.add(TargetFormat.Deb)
+                if (hasRpm) availableFormats.add(TargetFormat.Rpm)
+            } else if (os.isWindows) {
+                availableFormats.add(TargetFormat.Msi)
+                availableFormats.add(TargetFormat.Exe)
+            } else if (os.isMacOsX) {
+                availableFormats.add(TargetFormat.Dmg)
+            }
+
+            if (availableFormats.isNotEmpty()) {
+                targetFormats(*availableFormats.toTypedArray())
+            }
             packageName = "CloudStream"
             packageVersion = "1.0.0"
             description = "CloudStream - Modern cross-platform streaming application"

@@ -18,6 +18,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.coroutines.CoroutineContext
 
 class PlayerControllerViewModel(
@@ -36,6 +38,7 @@ class PlayerControllerViewModel(
     val uiState: StateFlow<PlayerUiState> get() = state
 
     private var hasAutoPlayedCurrentEpisode = false
+    private val saveProgressMutex = Mutex()
 
     init {
         launch {
@@ -51,14 +54,16 @@ class PlayerControllerViewModel(
         }
     }
 
+    private fun isPlaybackStopped(playerState: PlayerState): Boolean =
+        !playerState.isPlaying && !playerState.isBuffering &&
+                playerState.positionMs == 0L && playerState.currentUrl == null
+
     private fun handlePlayerStateUpdate(playerState: PlayerState) {
         val wasPlaying = currentState.isPlaying
         val isNowPlaying = playerState.isPlaying
 
         updateState {
-            val isStopped = !playerState.isPlaying && !playerState.isBuffering &&
-                    playerState.positionMs == 0L && playerState.currentUrl == null
-
+            val isStopped = isPlaybackStopped(playerState)
             val activeStamp = skipTimestamps.firstOrNull { it.contains(playerState.positionMs) }
 
             copy(
@@ -66,7 +71,7 @@ class PlayerControllerViewModel(
                 isBuffering = playerState.isBuffering,
                 isStopped = isStopped,
                 positionMs = playerState.positionMs,
-                durationMs = playerState.durationMs,
+                durationMs = if (playerState.durationMs > 0L) playerState.durationMs else durationMs,
                 currentUrl = playerState.currentUrl ?: currentUrl,
                 activeSkipTimestamp = activeStamp
             )
@@ -74,6 +79,11 @@ class PlayerControllerViewModel(
 
         if (wasPlaying != isNowPlaying) {
             onPlaybackActiveChanged(isNowPlaying)
+        }
+        if (wasPlaying && !isNowPlaying) {
+            launch {
+                saveCurrentWatchProgress()
+            }
         }
     }
 
@@ -113,7 +123,7 @@ class PlayerControllerViewModel(
                     val activeStamp = skipTimestamps.firstOrNull { it.contains(event.positionMs) }
                     copy(
                         positionMs = event.positionMs,
-                        durationMs = event.durationMs,
+                        durationMs = if (event.durationMs > 0L) event.durationMs else durationMs,
                         activeSkipTimestamp = activeStamp
                     )
                 }
@@ -326,10 +336,7 @@ class PlayerControllerViewModel(
             )
         }
         if (quality.url.isNotBlank()) {
-            player.play(quality, currentState.availableSubtitles)
-            if (currentPos > 0L) {
-                player.seekTo(currentPos)
-            }
+            player.play(quality, currentState.availableSubtitles, currentPos.takeIf { it > 0L })
             if (!wasPlaying) {
                 player.pause()
             }
@@ -450,10 +457,8 @@ class PlayerControllerViewModel(
         selectedSub: PlayerSubtitleTrack?
     ) {
         if (quality.url.isBlank()) return
-        player.play(quality, subtitles)
-        if (currentState.positionMs > 0L) {
-            player.seekTo(currentState.positionMs)
-        }
+        val resumePos = currentState.positionMs.takeIf { it > 0L }
+        player.play(quality, subtitles, resumePos)
         if (selectedSub != null && selectedSub.url.isNotBlank()) {
             player.loadSubtitle(selectedSub.url, selectedSub.headers)
         }
@@ -539,10 +544,11 @@ class PlayerControllerViewModel(
         autoPlay: Boolean
     ) {
         if (initialUrl.isNotBlank()) {
-            player.play(quality ?: PlayerQuality(url = initialUrl), subtitles)
-            if (targetResume != null && targetResume > 0L) {
-                player.seekTo(targetResume)
-            }
+            player.play(
+                quality = quality ?: PlayerQuality(url = initialUrl),
+                subtitles = subtitles,
+                startPositionMs = targetResume
+            )
             if (!autoPlay) {
                 player.pause()
             }
@@ -732,30 +738,32 @@ class PlayerControllerViewModel(
     }
 
     suspend fun saveCurrentWatchProgress() {
-        val current = currentState
-        val mediaId = current.currentEpisodeId ?: return
-        val pos = if (current.positionMs > 0L) current.positionMs else player.state.positionMs
-        val dur = if (current.durationMs > 0L) current.durationMs else player.state.durationMs
+        saveProgressMutex.withLock {
+            val current = currentState
+            val mediaId = current.currentEpisodeId ?: return@withLock
+            val pos = if (current.positionMs > 0L) current.positionMs else player.state.positionMs
+            val dur = if (current.durationMs > 0L) current.durationMs else player.state.durationMs
 
-        if (pos <= 0L && dur <= 0L) return
+            if (pos <= 0L && dur <= 0L) return@withLock
 
-        val watchState = computeWatchState(pos, dur)
+            val watchState = computeWatchState(pos, dur)
 
-        try {
-            watchProgressRepository?.setProgress(
-                accountId = current.accountId,
-                mediaId = mediaId,
-                position = pos,
-                duration = dur,
-                watchState = watchState
-            )
-        } catch (e: Exception) {
-            // Ignore persistence error
+            try {
+                watchProgressRepository?.setProgress(
+                    accountId = current.accountId,
+                    mediaId = mediaId,
+                    position = pos,
+                    duration = dur,
+                    watchState = watchState
+                )
+            } catch (e: Exception) {
+                // Ignore persistence error
+            }
+
+            val parentId = current.parentId ?: mediaId
+            persistResumeWatching(current.accountId, parentId, mediaId)
+            persistBookmarkUpdate(current.accountId, parentId)
         }
-
-        val parentId = current.parentId ?: mediaId
-        persistResumeWatching(current.accountId, parentId, mediaId)
-        persistBookmarkUpdate(current.accountId, parentId)
     }
 
     private fun onPlaybackActiveChanged(isActive: Boolean) {

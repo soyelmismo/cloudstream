@@ -9,16 +9,18 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.videoskip.VideoSkipStamp
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.mockito.Mockito.mock
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AndroidVideoPlayerTest {
+
+    private val dummyContext: Context = object : android.content.ContextWrapper(null) {}
 
     private class FakePlayer : IPlayer {
         var eventHandler: ((PlayerEvent) -> Unit)? = null
@@ -123,8 +125,7 @@ class AndroidVideoPlayerTest {
     @Test
     fun `play url updates state and loads player`() = runTest(UnconfinedTestDispatcher()) {
         val fakePlayer = FakePlayer()
-        val mockContext = mock(Context::class.java)
-        val player = AndroidVideoPlayer(mockContext, fakePlayer, this)
+        val player = AndroidVideoPlayer(dummyContext, fakePlayer, this)
 
         val testUrl = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
         player.play(testUrl)
@@ -137,8 +138,7 @@ class AndroidVideoPlayerTest {
     @Test
     fun `play with PlayerQuality and subtitles maps data and selects default subtitle`() = runTest(UnconfinedTestDispatcher()) {
         val fakePlayer = FakePlayer()
-        val mockContext = mock(Context::class.java)
-        val player = AndroidVideoPlayer(mockContext, fakePlayer, this)
+        val player = AndroidVideoPlayer(dummyContext, fakePlayer, this)
 
         val customLink = ExtractorLink(
             source = "CustomSource",
@@ -180,8 +180,7 @@ class AndroidVideoPlayerTest {
     @Test
     fun `loadSubtitle constructs SubtitleData and initializes subtitles`() = runTest(UnconfinedTestDispatcher()) {
         val fakePlayer = FakePlayer()
-        val mockContext = mock(Context::class.java)
-        val player = AndroidVideoPlayer(mockContext, fakePlayer, this)
+        val player = AndroidVideoPlayer(dummyContext, fakePlayer, this)
 
         val subUrl = "https://example.com/sub.vtt"
         player.loadSubtitle(subUrl, mapOf("Authorization" to "Bearer token"))
@@ -194,8 +193,7 @@ class AndroidVideoPlayerTest {
     @Test
     fun `status event updates isPlaying and isBuffering states`() = runTest(UnconfinedTestDispatcher()) {
         val fakePlayer = FakePlayer()
-        val mockContext = mock(Context::class.java)
-        val player = AndroidVideoPlayer(mockContext, fakePlayer, this)
+        val player = AndroidVideoPlayer(dummyContext, fakePlayer, this)
 
         fakePlayer.triggerEvent(StatusEvent(CSPlayerLoading.IsBuffering, CSPlayerLoading.IsPlaying))
         assertTrue(player.state.isPlaying)
@@ -209,8 +207,7 @@ class AndroidVideoPlayerTest {
     @Test
     fun `position event updates position and duration and emits event`() = runTest(UnconfinedTestDispatcher()) {
         val fakePlayer = FakePlayer()
-        val mockContext = mock(Context::class.java)
-        val player = AndroidVideoPlayer(mockContext, fakePlayer, this)
+        val player = AndroidVideoPlayer(dummyContext, fakePlayer, this)
 
         fakePlayer.triggerEvent(PositionEvent(PlayerEventSource.Player, fromMs = 0L, toMs = 5000L, durationMs = 60000L))
         assertEquals(5000L, player.state.positionMs)
@@ -220,8 +217,7 @@ class AndroidVideoPlayerTest {
     @Test
     fun `pause and resume control playback and state`() = runTest(UnconfinedTestDispatcher()) {
         val fakePlayer = FakePlayer()
-        val mockContext = mock(Context::class.java)
-        val player = AndroidVideoPlayer(mockContext, fakePlayer, this)
+        val player = AndroidVideoPlayer(dummyContext, fakePlayer, this)
 
         player.pause()
         assertEquals(CSPlayerEvent.Pause, fakePlayer.lastHandledEvent)
@@ -230,13 +226,13 @@ class AndroidVideoPlayerTest {
         player.resume()
         assertEquals(CSPlayerEvent.Play, fakePlayer.lastHandledEvent)
         assertTrue(player.state.isPlaying)
+        player.release()
     }
 
     @Test
     fun `seekTo delegates to player and updates position`() = runTest(UnconfinedTestDispatcher()) {
         val fakePlayer = FakePlayer()
-        val mockContext = mock(Context::class.java)
-        val player = AndroidVideoPlayer(mockContext, fakePlayer, this)
+        val player = AndroidVideoPlayer(dummyContext, fakePlayer, this)
 
         player.seekTo(12345L)
         assertEquals(12345L, fakePlayer.lastSeekPosition)
@@ -244,10 +240,54 @@ class AndroidVideoPlayerTest {
     }
 
     @Test
+    fun `seekTo suppresses stale PositionEvent before settling`() = runTest(UnconfinedTestDispatcher()) {
+        val fakePlayer = FakePlayer()
+        val player = AndroidVideoPlayer(dummyContext, fakePlayer, this)
+
+        // Player starts at 5_000ms
+        fakePlayer.triggerEvent(PositionEvent(PlayerEventSource.Player, fromMs = 0L, toMs = 5_000L, durationMs = 60_000L))
+        assertEquals(5_000L, player.state.positionMs)
+
+        // User seeks to 30_000ms
+        player.seekTo(30_000L)
+        assertEquals(30_000L, player.state.positionMs)
+
+        // Stale buffer packet at 5_250ms from pre-seek decoder
+        fakePlayer.triggerEvent(PositionEvent(PlayerEventSource.Player, fromMs = 5_000L, toMs = 5_250L, durationMs = 60_000L))
+        // Position remains at seek target, NOT clobbered back to 5_250ms!
+        assertEquals(30_000L, player.state.positionMs)
+
+        // Decoder catches up and arrives near target (29_800ms)
+        fakePlayer.triggerEvent(PositionEvent(PlayerEventSource.Player, fromMs = 5_250L, toMs = 29_800L, durationMs = 60_000L))
+        assertEquals(29_800L, player.state.positionMs)
+    }
+
+    @Test
+    fun `play with startPositionMs initializes position and suppresses stale 0ms PositionEvent`() = runTest(UnconfinedTestDispatcher()) {
+        val fakePlayer = FakePlayer()
+        val player = AndroidVideoPlayer(dummyContext, fakePlayer, this)
+
+        val quality = com.lagradost.cloudstream3.shared.viewmodels.player.PlayerQuality(
+            url = "https://example.com/video.mp4"
+        )
+        // Play with resume position of 45_000ms
+        player.play(quality, emptyList(), startPositionMs = 45_000L)
+        assertEquals(45_000L, player.state.positionMs)
+
+        // Stale 0ms packet emitted by ExoPlayer initial buffer preparation
+        fakePlayer.triggerEvent(PositionEvent(PlayerEventSource.Player, fromMs = 0L, toMs = 0L, durationMs = 100_000L))
+        // Position is NOT clobbered back to 0ms
+        assertEquals(45_000L, player.state.positionMs)
+
+        // Settled packet at 45_100ms
+        fakePlayer.triggerEvent(PositionEvent(PlayerEventSource.Player, fromMs = 0L, toMs = 45_100L, durationMs = 100_000L))
+        assertEquals(45_100L, player.state.positionMs)
+    }
+
+    @Test
     fun `stop resets state and releases player`() = runTest(UnconfinedTestDispatcher()) {
         val fakePlayer = FakePlayer()
-        val mockContext = mock(Context::class.java)
-        val player = AndroidVideoPlayer(mockContext, fakePlayer, this)
+        val player = AndroidVideoPlayer(dummyContext, fakePlayer, this)
 
         player.play("https://example.com/video.mp4")
         player.stop()
@@ -261,13 +301,15 @@ class AndroidVideoPlayerTest {
     @Test
     fun `error event emits OnError`() = runTest(UnconfinedTestDispatcher()) {
         val fakePlayer = FakePlayer()
-        val mockContext = mock(Context::class.java)
-        val player = AndroidVideoPlayer(mockContext, fakePlayer, this)
+        val player = AndroidVideoPlayer(dummyContext, fakePlayer, this)
+
+        var capturedEvent: SharedPlayerEvent? = null
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            player.events.collect { capturedEvent = it }
+        }
 
         fakePlayer.triggerEvent(ErrorEvent(RuntimeException("Test error message")))
-        // player.events extraBufferCapacity allows observing the emitted event
-        val event = player.events.first()
-        assertTrue(event is SharedPlayerEvent.OnError)
-        assertEquals("Test error message", (event as SharedPlayerEvent.OnError).message)
+        assertTrue(capturedEvent is SharedPlayerEvent.OnError)
+        assertEquals("Test error message", (capturedEvent as SharedPlayerEvent.OnError).message)
     }
 }

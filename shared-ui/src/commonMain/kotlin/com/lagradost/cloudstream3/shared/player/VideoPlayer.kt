@@ -1,5 +1,6 @@
 package com.lagradost.cloudstream3.shared.player
 
+import androidx.compose.runtime.Immutable
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerQuality
 import com.lagradost.cloudstream3.shared.viewmodels.player.PlayerSubtitleTrack
 import kotlinx.coroutines.flow.SharedFlow
@@ -10,13 +11,25 @@ import kotlinx.coroutines.flow.StateFlow
  * This abstracts away ExoPlayer (Android) and VLCJ/MPV (Desktop).
  */
 interface VideoPlayer {
-    /** Plays the media using full PlayerQuality metadata and available subtitle tracks. */
-    fun play(quality: PlayerQuality, subtitles: List<PlayerSubtitleTrack> = emptyList()) {
+    /** Plays the media using full PlayerQuality metadata, available subtitle tracks, and optional start position. */
+    fun play(
+        quality: PlayerQuality,
+        subtitles: List<PlayerSubtitleTrack> = emptyList(),
+        startPositionMs: Long? = null
+    ) {
         play(quality.url, quality.headers)
         val defaultSub = subtitles.firstOrNull { it.isDefault } ?: subtitles.firstOrNull()
         if (defaultSub != null && defaultSub.url.isNotBlank()) {
             loadSubtitle(defaultSub.url, defaultSub.headers)
         }
+        if (startPositionMs != null && startPositionMs > 0L) {
+            seekTo(startPositionMs)
+        }
+    }
+
+    /** Plays the media using full PlayerQuality metadata and available subtitle tracks. */
+    fun play(quality: PlayerQuality, subtitles: List<PlayerSubtitleTrack>) {
+        play(quality, subtitles, null)
     }
 
     /** Plays the media at the specified URL with optional HTTP headers. */
@@ -68,6 +81,7 @@ interface VideoPlayer {
 /**
  * Represents the current state of the video player.
  */
+@Immutable
 data class PlayerState(
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,

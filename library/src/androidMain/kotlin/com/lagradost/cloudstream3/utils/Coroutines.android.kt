@@ -10,8 +10,8 @@ import androidx.annotation.MainThread
 @AnyThread
 actual fun runOnMainThreadNative(@MainThread work: () -> Unit) {
     val mainLooper = Looper.getMainLooper()
-    if (mainLooper.isCurrentThread) {
-        // Do the work directly if we already are on the main thread, no need to enqueue it
+    if (mainLooper == null || mainLooper.isCurrentThread) {
+        // Do the work directly if we already are on the main thread or running in a headless test environment
         work()
     } else {
         // Otherwise post it to the other main thread

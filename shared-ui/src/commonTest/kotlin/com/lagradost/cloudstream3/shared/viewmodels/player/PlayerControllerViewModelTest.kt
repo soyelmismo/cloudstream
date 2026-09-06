@@ -50,10 +50,18 @@ class FakeVideoPlayer : VideoPlayer {
     var lastSpeed: Float = 1.0f
     var lastSubtitleUrl: String? = null
 
-    override fun play(quality: PlayerQuality, subtitles: List<PlayerSubtitleTrack>) {
+    override fun play(
+        quality: PlayerQuality,
+        subtitles: List<PlayerSubtitleTrack>,
+        startPositionMs: Long?
+    ) {
         lastQuality = quality
         lastSubtitles = subtitles
-        super.play(quality, subtitles)
+        super.play(quality, subtitles, startPositionMs)
+    }
+
+    override fun play(quality: PlayerQuality, subtitles: List<PlayerSubtitleTrack>) {
+        play(quality, subtitles, null)
     }
 
     override fun play(url: String) {
