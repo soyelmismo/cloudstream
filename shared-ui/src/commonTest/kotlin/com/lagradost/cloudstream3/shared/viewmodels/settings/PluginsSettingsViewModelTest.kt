@@ -68,7 +68,18 @@ class FakePluginsRepository(
         return availablePlugins.map { it.copy(isInstalled = installedNames.contains(it.internalName)) }
     }
 
+    fun addAvailablePlugin(plugin: PluginItem) {
+        availablePlugins.add(plugin)
+    }
+
+    fun addInstalledPlugin(plugin: PluginItem) {
+        installedPlugins.add(plugin)
+    }
+
     override suspend fun installPlugin(plugin: PluginItem): Result<PluginItem> {
+        if (!plugin.canInstall || plugin.isDown) {
+            return Result.failure(Exception("Cannot install disabled plugin: ${plugin.name}"))
+        }
         if (shouldFailAll || failingPlugins.contains(plugin.internalName)) {
             return Result.failure(Exception("Failed to install ${plugin.name}"))
         }
@@ -163,7 +174,7 @@ class PluginsSettingsViewModelTest {
         assertTrue(viewModel.state.value.operationState is PluginOperationState.Success)
         val installSuccess = viewModel.state.value.operationState as PluginOperationState.Success
         assertEquals(Res.string.plugin_installed_success, installSuccess.messageRes)
-        assertEquals(listOf(pluginToInstall.name), installSuccess.formatArgs)
+        assertEquals(listOf<Any>(pluginToInstall.name), installSuccess.formatArgs)
 
         viewModel.uninstallPlugin(pluginToInstall.internalName)
         testScope.advanceUntilIdle()
@@ -174,7 +185,7 @@ class PluginsSettingsViewModelTest {
         assertTrue(viewModel.state.value.operationState is PluginOperationState.Success)
         val uninstallSuccess = viewModel.state.value.operationState as PluginOperationState.Success
         assertEquals(Res.string.plugin_uninstalled_success, uninstallSuccess.messageRes)
-        assertEquals(listOf(pluginToInstall.internalName), uninstallSuccess.formatArgs)
+        assertEquals(listOf<Any>(pluginToInstall.internalName), uninstallSuccess.formatArgs)
     }
 
     @Test
@@ -504,7 +515,7 @@ class PluginsSettingsViewModelTest {
         assertTrue(installedState.operationState is PluginOperationState.Success)
         val batchInstallSuccess = installedState.operationState
         assertEquals(Res.string.batch_install_success, batchInstallSuccess.messageRes)
-        assertEquals(listOf(2), batchInstallSuccess.formatArgs)
+        assertEquals(listOf<Any>(2), batchInstallSuccess.formatArgs)
         assertEquals(2, installedState.installedPlugins.size)
         assertTrue(installedState.installedPlugins.all { it.repositoryUrl == repoUrl })
         assertTrue(installedState.availablePlugins.filter { it.repositoryUrl == repoUrl }.all { it.isInstalled })
@@ -520,7 +531,7 @@ class PluginsSettingsViewModelTest {
         assertTrue(uninstalledState.operationState is PluginOperationState.Success)
         val batchUninstallSuccess = uninstalledState.operationState
         assertEquals(Res.string.batch_uninstall_success, batchUninstallSuccess.messageRes)
-        assertEquals(listOf(2), batchUninstallSuccess.formatArgs)
+        assertEquals(listOf<Any>(2), batchUninstallSuccess.formatArgs)
         assertEquals(0, uninstalledState.installedPlugins.size)
         assertTrue(uninstalledState.availablePlugins.filter { it.repositoryUrl == repoUrl }.none { it.isInstalled })
     }
@@ -547,7 +558,7 @@ class PluginsSettingsViewModelTest {
         assertTrue(state.operationState is PluginOperationState.Error)
         val opError = state.operationState
         assertEquals(Res.string.batch_operation_failed, opError.messageRes)
-        assertEquals(listOf(1), opError.formatArgs)
+        assertEquals(listOf<Any>(1), opError.formatArgs)
         assertEquals(1, state.installedPlugins.size)
         assertEquals("StreamPlugin", state.installedPlugins.first().internalName)
     }
@@ -603,5 +614,281 @@ class PluginsSettingsViewModelTest {
 
         assertEquals(PluginOperationState.Idle, viewModel.state.value.operationState)
     }
+
+    @Test
+    fun testRepositoryPluginCountCalculatedInState() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val testScope = TestScope(testDispatcher)
+        val repository = FakePluginsRepository()
+
+        val viewModel = PluginsSettingsViewModel(
+            pluginsRepository = repository,
+            coroutineScope = testScope
+        )
+        testScope.advanceUntilIdle()
+
+        val repos = viewModel.state.value.repositories
+        val communityRepo = repos.first { it.url == "https://example.com/community.json" }
+        val hexatedRepo = repos.first { it.url == "https://example.com/hexated.json" }
+
+        assertEquals(2, communityRepo.pluginCount)
+        assertEquals(1, hexatedRepo.pluginCount)
+    }
+
+    @Test
+    fun testSelectRepositoryWithTrailingSlashDifferences() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val testScope = TestScope(testDispatcher)
+        val repository = FakePluginsRepository()
+
+        val viewModel = PluginsSettingsViewModel(
+            pluginsRepository = repository,
+            coroutineScope = testScope
+        )
+        testScope.advanceUntilIdle()
+
+        viewModel.filterByRepository("https://example.com/community.json/")
+        testScope.advanceUntilIdle()
+
+        assertEquals("https://example.com/community.json", viewModel.state.value.selectedRepositoryUrl)
+        assertEquals(2, viewModel.state.value.currentRepoPlugins.size)
+    }
+
+    @Test
+    fun testRepoUrlNormalizationAndValidation() {
+        assertTrue(PluginsSettingsViewModel.isValidRepoUrl("c.listo.click"))
+        assertTrue(PluginsSettingsViewModel.isValidRepoUrl("https://c.listo.click/"))
+        assertFalse(PluginsSettingsViewModel.isValidRepoUrl("invalid url with spaces"))
+
+        assertEquals("https://c.listo.click", PluginsSettingsViewModel.normalizeRepoUrl("c.listo.click"))
+        assertEquals("https://c.listo.click", PluginsSettingsViewModel.normalizeRepoUrl("https://c.listo.click/"))
+        assertEquals("https://example.com/repo.json", PluginsSettingsViewModel.normalizeRepoUrl("https://cs.repo/?https://example.com/repo.json"))
+    }
+
+    @Test
+    fun testFilterByRepositoryWithCasingAndTrailingSlash() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val testScope = TestScope(testDispatcher)
+        val repository = FakePluginsRepository()
+
+        val viewModel = PluginsSettingsViewModel(
+            pluginsRepository = repository,
+            coroutineScope = testScope
+        )
+        testScope.advanceUntilIdle()
+
+        viewModel.filterByRepository("HTTPS://EXAMPLE.COM/COMMUNITY.JSON/")
+        testScope.advanceUntilIdle()
+
+        assertEquals("https://example.com/community.json", viewModel.state.value.selectedRepositoryUrl)
+        assertEquals(2, viewModel.state.value.currentRepoPlugins.size)
+    }
+
+    @Test
+    fun testEmitCachedDataBeforeNetwork() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val testScope = TestScope(testDispatcher)
+
+        val cachedItem = PluginItem(
+            internalName = "CachedPlugin",
+            name = "Cached Provider",
+            version = 1,
+            repositoryUrl = "https://example.com/cached.json"
+        )
+        val cachedRepo = PluginRepositoryItem("Cached Repo", "https://example.com/cached.json")
+
+        val repository = object : PluginsRepository {
+            override suspend fun getRepositories() = listOf(cachedRepo)
+            override suspend fun getInstalledPlugins() = emptyList<PluginItem>()
+            override suspend fun getCachedAvailablePlugins() = listOf(cachedItem)
+            override suspend fun getAvailablePlugins(repositories: List<PluginRepositoryItem>): List<PluginItem> = listOf(cachedItem)
+            override suspend fun addRepository(repository: PluginRepositoryItem) {}
+            override suspend fun removeRepository(url: String) {}
+            override suspend fun installPlugin(plugin: PluginItem): Result<PluginItem> = Result.success(plugin)
+            override suspend fun uninstallPlugin(filenameOrName: String): Result<Unit> = Result.success(Unit)
+        }
+
+        val viewModel = PluginsSettingsViewModel(
+            pluginsRepository = repository,
+            coroutineScope = testScope
+        )
+
+        testScope.advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertEquals(1, state.repositories.size)
+        assertEquals(1, state.repositories.first().pluginCount)
+        assertEquals(1, state.availablePlugins.size)
+        assertEquals("CachedPlugin", state.availablePlugins.first().internalName)
+    }
+
+    @Test
+    fun testRepositoryInstalledCountUpdatedInState() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val testScope = TestScope(testDispatcher)
+        val repository = FakePluginsRepository()
+
+        var pluginLoadedCalled = false
+        val viewModel = PluginsSettingsViewModel(
+            pluginsRepository = repository,
+            coroutineScope = testScope,
+            onPluginLoaded = { pluginLoadedCalled = true }
+        )
+        testScope.advanceUntilIdle()
+
+        var communityRepo = viewModel.state.value.repositories.first { it.url == "https://example.com/community.json" }
+        assertEquals(0, communityRepo.installedCount)
+
+        val pluginToInstall = viewModel.state.value.availablePlugins.first { it.repositoryUrl == communityRepo.url }
+        viewModel.installPlugin(pluginToInstall)
+        testScope.advanceUntilIdle()
+
+        communityRepo = viewModel.state.value.repositories.first { it.url == "https://example.com/community.json" }
+        assertEquals(1, communityRepo.installedCount)
+        assertTrue(pluginLoadedCalled)
+
+        viewModel.uninstallPlugin(pluginToInstall.internalName)
+        testScope.advanceUntilIdle()
+
+        communityRepo = viewModel.state.value.repositories.first { it.url == "https://example.com/community.json" }
+        assertEquals(0, communityRepo.installedCount)
+    }
+
+    @Test
+    fun testInstallAllAndUninstallAllUpdatesRepositoriesAndInvokesCallback() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val testScope = TestScope(testDispatcher)
+        val repository = FakePluginsRepository()
+
+        var loadCallbackCount = 0
+        val viewModel = PluginsSettingsViewModel(
+            pluginsRepository = repository,
+            coroutineScope = testScope,
+            onPluginLoaded = { loadCallbackCount++ }
+        )
+        testScope.advanceUntilIdle()
+
+        var communityRepo = viewModel.state.value.repositories.first { it.url == "https://example.com/community.json" }
+        assertEquals(0, communityRepo.installedCount)
+
+        // Install all for community repo with trailing slash difference
+        viewModel.installAllPlugins("https://example.com/community.json/")
+        testScope.advanceUntilIdle()
+
+        communityRepo = viewModel.state.value.repositories.first { it.url == "https://example.com/community.json" }
+        assertEquals(2, communityRepo.installedCount, "All community plugins should be marked installed")
+        assertTrue(loadCallbackCount > 0, "onPluginLoaded should be invoked after batch install")
+        val initialLoads = loadCallbackCount
+
+        // Uninstall all for community repo
+        viewModel.uninstallAllPlugins("https://example.com/community.json")
+        testScope.advanceUntilIdle()
+
+        communityRepo = viewModel.state.value.repositories.first { it.url == "https://example.com/community.json" }
+        assertEquals(0, communityRepo.installedCount, "All community plugins should be uninstalled")
+        assertTrue(loadCallbackCount > initialLoads, "onPluginLoaded should be invoked after batch uninstall")
+    }
+
+    @Test
+    fun testInstallDisabledPluginBlockedInViewModel() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val testScope = TestScope(testDispatcher)
+        val repository = FakePluginsRepository()
+
+        val downPlugin = PluginItem(
+            internalName = "AnimeflvProvider",
+            name = "AnimeFLV",
+            version = 1,
+            url = "https://example.com/animeflv.cs3",
+            repositoryUrl = "https://example.com/community.json",
+            tvTypes = listOf("Anime"),
+            language = "es",
+            providerStatus = ProviderStatus.DOWN
+        )
+        repository.addAvailablePlugin(downPlugin)
+
+        val viewModel = PluginsSettingsViewModel(
+            pluginsRepository = repository,
+            coroutineScope = testScope
+        )
+        testScope.advanceUntilIdle()
+
+        viewModel.installPlugin(downPlugin)
+        testScope.advanceUntilIdle()
+
+        assertFalse(viewModel.state.value.installedPlugins.any { it.internalName == "AnimeflvProvider" })
+        assertTrue(viewModel.state.value.operationState is PluginOperationState.Error)
+        val errorState = viewModel.state.value.operationState as PluginOperationState.Error
+        assertEquals(Res.string.plugin_disabled_cannot_install, errorState.messageRes)
+        assertEquals(listOf<Any>("AnimeFLV"), errorState.formatArgs)
+    }
+
+    @Test
+    fun testToggleDisabledPluginBlockedInViewModel() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val testScope = TestScope(testDispatcher)
+        val repository = FakePluginsRepository()
+
+        val downInstalledPlugin = PluginItem(
+            internalName = "AnimeflvProvider",
+            name = "AnimeFLV",
+            version = 1,
+            url = "https://example.com/animeflv.cs3",
+            repositoryUrl = "https://example.com/community.json",
+            tvTypes = listOf("Anime"),
+            language = "es",
+            isInstalled = true,
+            isEnabled = false,
+            providerStatus = ProviderStatus.DOWN
+        )
+        repository.addInstalledPlugin(downInstalledPlugin)
+        repository.addAvailablePlugin(downInstalledPlugin)
+
+        val viewModel = PluginsSettingsViewModel(
+            pluginsRepository = repository,
+            coroutineScope = testScope
+        )
+        testScope.advanceUntilIdle()
+
+        viewModel.togglePlugin(downInstalledPlugin)
+        testScope.advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.operationState is PluginOperationState.Error)
+        val errorState = viewModel.state.value.operationState as PluginOperationState.Error
+        assertEquals(Res.string.plugin_disabled_cannot_enable, errorState.messageRes)
+        assertEquals(listOf<Any>("AnimeFLV"), errorState.formatArgs)
+    }
+
+    @Test
+    fun testBatchInstallExcludesDownPlugins() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val testScope = TestScope(testDispatcher)
+        val repository = FakePluginsRepository()
+
+        val downPlugin = PluginItem(
+            internalName = "AnimeflvProvider",
+            name = "AnimeFLV",
+            version = 1,
+            url = "https://example.com/animeflv.cs3",
+            repositoryUrl = "https://example.com/community.json",
+            tvTypes = listOf("Anime"),
+            language = "es",
+            providerStatus = ProviderStatus.DOWN
+        )
+        repository.addAvailablePlugin(downPlugin)
+
+        val viewModel = PluginsSettingsViewModel(
+            pluginsRepository = repository,
+            coroutineScope = testScope
+        )
+        testScope.advanceUntilIdle()
+
+        viewModel.installAllPlugins("https://example.com/community.json")
+        testScope.advanceUntilIdle()
+
+        assertFalse(viewModel.state.value.installedPlugins.any { it.internalName == "AnimeflvProvider" })
+        assertEquals(2, viewModel.state.value.installedPlugins.size)
+    }
 }
+
 

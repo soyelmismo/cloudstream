@@ -1302,10 +1302,13 @@
     <string name="no_installed_plugins_desc">Explora la pestaña Disponibles para instalar extensiones de proveedores.</string>
     <string name="no_available_plugins_match">No hay extensiones disponibles que coincidan con los filtros</string>
     <string name="no_available_plugins_match_desc">Intenta cambiar los términos de búsqueda o añade un nuevo repositorio.</string>
-    <string name="plugin_by_author_format">por %s</string>
-    <string name="repositories_configured_format">%d repositorios configurados</string>
-    <string name="plugin_installing_format">Instalando %s...</string>
-    <string name="plugin_uninstalling_format">Desinstalando %s...</string>
+    <string name="plugin_by_author_format" formatted="true">por %1$s</string>
+    <string name="repositories_configured_format" formatted="true">%1$d repositorios configurados</string>
+    <string name="repository_configured_format" formatted="true">%1$d repositorio configurado</string>
+    <string name="plugin_installing_format" formatted="true">Instalando %1$s...</string>
+    <string name="plugin_uninstalling_format" formatted="true">Desinstalando %1$s...</string>
+    <string name="plugin_disabled_cannot_install" formatted="true">No se puede instalar %s porque está inhabilitado o caído</string>
+    <string name="plugin_disabled_cannot_enable" formatted="true">No se puede activar %s porque está inhabilitado o caído</string>
     <string name="settings_version_title">Versión</string>
     <string name="settings_version_value">v4.8.0-multiplatform</string>
     <string name="settings_architecture_title">Arquitectura</string>

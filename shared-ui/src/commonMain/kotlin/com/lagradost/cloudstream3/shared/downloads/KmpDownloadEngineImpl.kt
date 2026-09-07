@@ -311,7 +311,7 @@ class KmpDownloadEngineImpl(
             throw e
         } catch (e: Throwable) {
             mutex.withLock {
-                if (!cancelledIds.contains(item.id)) {
+                if (!cancelledIds.contains(item.id) && !pausedIds.contains(item.id)) {
                     _progressFlow.update { current ->
                         val existing = current[item.id] ?: DownloadProgress(id = item.id)
                         current + (item.id to existing.copy(

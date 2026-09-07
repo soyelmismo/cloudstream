@@ -261,7 +261,24 @@ class JvmPluginLoader(
             false
         }
     }
+
+    override fun isPluginLoaded(filePathOrName: String): Boolean {
+        val rawName = File(filePathOrName).nameWithoutExtension
+        val fileName = File(filePathOrName).name
+        return synchronized(loadedPlugins) {
+            loadedPlugins.containsKey(filePathOrName) ||
+                loadedPlugins.containsKey(rawName) ||
+                loadedPlugins.containsKey(fileName) ||
+                loadedPlugins.keys.any {
+                    it.equals(filePathOrName, ignoreCase = true) ||
+                        it.equals(rawName, ignoreCase = true) ||
+                        it.equals(fileName, ignoreCase = true)
+                }
+        }
+    }
 }
+
+
 
 class JvmPluginClassLoader(
     urls: Array<java.net.URL>,

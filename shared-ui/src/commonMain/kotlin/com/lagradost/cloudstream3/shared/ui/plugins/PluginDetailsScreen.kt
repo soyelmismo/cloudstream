@@ -3,6 +3,7 @@ package com.lagradost.cloudstream3.shared.ui.plugins
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.shared.ui.theme.CloudStreamTheme
 import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginStatus
+import com.lagradost.cloudstream3.shared.viewmodels.settings.ProviderStatus
 import org.jetbrains.compose.ui.tooling.preview.Preview
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -422,6 +423,7 @@ private fun PluginHeroHeaderCard(
             PluginHeroBadgesRow(
                 repositoryName = repositoryName,
                 status = plugin.status,
+                providerStatus = plugin.providerStatus,
                 language = plugin.language,
                 isInstalled = isInstalled,
                 isUpdateAvailable = isUpdateAvailable,
@@ -542,6 +544,7 @@ private fun PluginHeroTitleSection(
 private fun PluginHeroBadgesRow(
     repositoryName: String,
     status: PluginStatus,
+    providerStatus: ProviderStatus = ProviderStatus.OK,
     language: String?,
     isInstalled: Boolean,
     isUpdateAvailable: Boolean,
@@ -580,7 +583,7 @@ private fun PluginHeroBadgesRow(
             }
         }
 
-        PluginStatusBadge(status = status)
+        PluginStatusBadge(status = status, providerStatus = providerStatus)
 
         if (!language.isNullOrBlank()) {
             Surface(
@@ -772,9 +775,10 @@ private fun PluginActionBarCard(
             } else if (!isInstalled) {
                 // Not installed: Large Install Button using PrimaryButton
                 com.lagradost.cloudstream3.shared.ui.components.designsystem.PrimaryButton(
-                    text = stringResource(Res.string.plugin_install_extension_format, plugin.version),
-                    icon = Icons.Default.Download,
-                    onClick = onInstall,
+                    text = if (plugin.isDown) stringResource(Res.string.plugin_status_down) else stringResource(Res.string.plugin_install_extension_format, plugin.version),
+                    icon = if (plugin.isDown) Icons.Default.ErrorOutline else Icons.Default.Download,
+                    enabled = plugin.canInstall,
+                    onClick = { if (plugin.canInstall) onInstall() },
                     modifier = Modifier.fillMaxWidth()
                 )
             } else {
@@ -794,25 +798,35 @@ private fun PluginActionBarCard(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = if (plugin.isEnabled) stringResource(Res.string.enablePlugin) else stringResource(Res.string.disablePlugin),
+                                text = when {
+                                    plugin.isDown -> stringResource(Res.string.plugin_status_down)
+                                    plugin.isEnabled -> stringResource(Res.string.enablePlugin)
+                                    else -> stringResource(Res.string.disablePlugin)
+                                },
                                 style = MaterialTheme.typography.subtitle2.copy(fontWeight = FontWeight.Bold),
-                                color = CloudstreamTheme.extendedColors.textPrimary
+                                color = if (plugin.isDown) CloudStreamColors.Error else CloudstreamTheme.extendedColors.textPrimary
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = if (plugin.isEnabled) stringResource(Res.string.plugin_scrapers_active_desc)
-                                else stringResource(Res.string.plugin_scrapers_disabled_desc),
+                                text = when {
+                                    plugin.isDown -> stringResource(Res.string.plugin_status_down)
+                                    plugin.isEnabled -> stringResource(Res.string.plugin_scrapers_active_desc)
+                                    else -> stringResource(Res.string.plugin_scrapers_disabled_desc)
+                                },
                                 style = MaterialTheme.typography.caption,
                                 color = CloudstreamTheme.extendedColors.textMuted
                             )
                         }
 
                         Switch(
-                            checked = plugin.isEnabled,
-                            onCheckedChange = onToggleEnabled,
+                            checked = plugin.isEnabled && !plugin.isDown,
+                            onCheckedChange = { if (plugin.canEnable) onToggleEnabled(it) },
+                            enabled = plugin.canEnable,
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = CloudStreamColors.Primary,
-                                checkedTrackColor = CloudStreamColors.Primary.copy(alpha = 0.5f)
+                                checkedTrackColor = CloudStreamColors.Primary.copy(alpha = 0.5f),
+                                uncheckedThumbColor = CloudStreamColors.TextMuted,
+                                uncheckedTrackColor = CloudStreamColors.Divider
                             )
                         )
                     }
@@ -824,7 +838,7 @@ private fun PluginActionBarCard(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (isUpdateAvailable) {
+                    if (isUpdateAvailable && plugin.canInstall) {
                         com.lagradost.cloudstream3.shared.ui.components.designsystem.PrimaryButton(
                             text = stringResource(Res.string.plugin_update_to_format, remoteVersion),
                             icon = Icons.Default.SystemUpdate,
@@ -1480,7 +1494,7 @@ private fun resolvePluginProviders(plugin: PluginItem, isInstalled: Boolean): Im
                 mainUrl = api.mainUrl,
                 language = api.lang,
                 supportedTypes = api.supportedTypes.toImmutableSet(),
-                isActive = isInstalled && plugin.isEnabled,
+                isActive = isInstalled && plugin.isEnabled && !plugin.isDown,
                 isDirectProvider = api.providerType == ProviderType.DirectProvider,
                 hasMainPage = api.hasMainPage,
                 hasQuickSearch = api.hasQuickSearch,
@@ -1501,7 +1515,7 @@ private fun resolvePluginProviders(plugin: PluginItem, isInstalled: Boolean): Im
             mainUrl = plugin.url.ifBlank { "https://${plugin.internalName.lowercase()}.com" },
             language = plugin.language ?: "en",
             supportedTypes = parsedTypes.toImmutableSet(),
-            isActive = isInstalled && plugin.isEnabled,
+            isActive = isInstalled && plugin.isEnabled && !plugin.isDown,
             isDirectProvider = true,
             hasMainPage = true,
             hasQuickSearch = true,

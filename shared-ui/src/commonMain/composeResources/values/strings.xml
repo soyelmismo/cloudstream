@@ -1514,10 +1514,11 @@
     <string name="no_installed_plugins_desc">Explore the Available tab to discover and install provider extensions.</string>
     <string name="no_available_plugins_match">No available plugins match your filters</string>
     <string name="no_available_plugins_match_desc">Try changing your search terms or add a new repository URL.</string>
-    <string name="plugin_by_author_format">by %s</string>
-    <string name="repositories_configured_format">%d repositories configured</string>
-    <string name="plugin_installing_format">Installing %s...</string>
-    <string name="plugin_uninstalling_format">Uninstalling %s...</string>
+    <string name="plugin_by_author_format" formatted="true">by %1$s</string>
+    <string name="repositories_configured_format" formatted="true">%1$d repositories configured</string>
+    <string name="repository_configured_format" formatted="true">%1$d repository configured</string>
+    <string name="plugin_installing_format" formatted="true">Installing %1$s...</string>
+    <string name="plugin_uninstalling_format" formatted="true">Uninstalling %1$s...</string>
     <string name="settings_version_title">Version</string>
     <string name="settings_version_value">v4.8.0-multiplatform</string>
     <string name="settings_architecture_title">Architecture</string>
@@ -1759,6 +1760,8 @@
     <string name="plugin_uninstalled_success" formatted="true">Successfully uninstalled %s</string>
     <string name="plugin_install_failed" formatted="true">Failed to install %s</string>
     <string name="plugin_uninstall_failed" formatted="true">Failed to uninstall %s</string>
+    <string name="plugin_disabled_cannot_install" formatted="true">Cannot install %s because it is disabled or down</string>
+    <string name="plugin_disabled_cannot_enable" formatted="true">Cannot enable %s because it is disabled or down</string>
     <string name="plugins_load_failed">Failed to load plugins and repositories</string>
     <string name="repo_add_failed" formatted="true">Failed to add repository: %s</string>
     <string name="repo_remove_failed" formatted="true">Failed to remove repository: %s</string>

@@ -29,4 +29,12 @@ interface PluginLoader {
      * @return True if uninstalled and cleaned up, false otherwise.
      */
     fun unloadPlugin(filePathOrName: String): Boolean = false
+
+    /**
+     * Checks if the plugin is currently loaded in memory.
+     * @param filePathOrName The file path, internal name, or display name of the plugin.
+     * @return True if loaded in memory, false otherwise.
+     */
+    fun isPluginLoaded(filePathOrName: String): Boolean = false
 }
+

@@ -93,6 +93,7 @@ import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginItem
 import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginOperationState
 import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginRepositoryItem
 import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginStatus
+import com.lagradost.cloudstream3.shared.viewmodels.settings.ProviderStatus
 import com.lagradost.cloudstream3.shared.viewmodels.settings.PluginsSettingsViewModel
 import com.lagradost.cloudstream3.utils.UiText
 import com.lagradost.cloudstream3.utils.asString
@@ -143,7 +144,8 @@ fun PluginsScreen(
                     onDeleteRepoClick = { repoToDelete = it },
                     onRepoClick = { repoUrl ->
                         viewModel.filterByRepository(repoUrl)
-                    }
+                    },
+                    availablePlugins = state.availablePlugins
                 )
             } else {
                 RepositoryPluginsLevelView(
@@ -159,6 +161,7 @@ fun PluginsScreen(
                     onInstallAllPlugins = { viewModel.installAllPlugins(it) },
                     onQueryChange = { viewModel.setSearchQuery(it) },
                     onLanguageSelected = { viewModel.setLanguageFilter(it) },
+                    onTvTypeSelected = { viewModel.filterByTvType(it) },
                     onInstallPlugin = { viewModel.installPlugin(it) },
                     onUninstallPlugin = { viewModel.uninstallPlugin(it) },
                     onTogglePlugin = { viewModel.togglePlugin(it) },
@@ -213,7 +216,8 @@ fun RepositoriesLevelView(
     onAddRepoClick: () -> Unit,
     onDeleteRepoClick: (PluginRepositoryItem) -> Unit,
     onRepoClick: (String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    availablePlugins: ImmutableList<PluginItem> = persistentListOf()
 ) {
     val uriHandler = LocalUriHandler.current
 
@@ -250,10 +254,34 @@ fun RepositoriesLevelView(
                     key = { index -> repositories[index].url }
                 ) { index ->
                     val repo = repositories[index]
-                    val installedCount = installedPlugins.count { it.repositoryUrl == repo.url }
+                    val normalizedRepoUrl = com.lagradost.cloudstream3.shared.plugins.normalizeUrlKey(repo.url)
+                    val installedCount = if (repo.installedCount > 0) {
+                        repo.installedCount
+                    } else {
+                        installedPlugins.count { inst ->
+                            com.lagradost.cloudstream3.shared.plugins.normalizeUrlKey(inst.repositoryUrl) == normalizedRepoUrl ||
+                                availablePlugins.any { avail ->
+                                    com.lagradost.cloudstream3.shared.plugins.normalizeUrlKey(avail.repositoryUrl) == normalizedRepoUrl &&
+                                        (avail.internalName.equals(inst.internalName, ignoreCase = true) ||
+                                            (avail.name.isNotBlank() && avail.name.equals(inst.name, ignoreCase = true)))
+                                }
+                        }
+                    }
+                    val totalPlugins = if (repo.pluginCount > 0) {
+                        repo.pluginCount
+                    } else {
+                        availablePlugins.count {
+                            com.lagradost.cloudstream3.shared.plugins.normalizeUrlKey(it.repositoryUrl) == normalizedRepoUrl
+                        }
+                    }
+                    val displayRepo = if (repo.pluginCount != totalPlugins && totalPlugins > 0) {
+                        repo.copy(pluginCount = totalPlugins)
+                    } else {
+                        repo
+                    }
 
                     RepositoryCard(
-                        repository = repo,
+                        repository = displayRepo,
                         installedCount = installedCount,
                         onRepoClick = { onRepoClick(repo.url) },
                         onReload = onRefresh,
@@ -279,6 +307,15 @@ fun RepositoriesHeader(
             .background(CloudStreamColors.SurfaceVariant)
     ) {
         val isWideScreen = maxWidth >= 600.dp
+        val formatRes = if (repoCount == 1) Res.string.repository_configured_format else Res.string.repositories_configured_format
+        val rawRepoCountText = stringResource(formatRes, repoCount)
+        val formattedRepoText = remember(rawRepoCountText, repoCount) {
+            if (rawRepoCountText.contains("%d") || rawRepoCountText.contains("%1\$d")) {
+                rawRepoCountText.replace("%1\$d", repoCount.toString()).replace("%d", repoCount.toString())
+            } else {
+                rawRepoCountText
+            }
+        }
 
         if (isWideScreen) {
             Row(
@@ -314,7 +351,7 @@ fun RepositoriesHeader(
                             color = CloudStreamColors.TextPrimary
                         )
                         Text(
-                            text = stringResource(Res.string.repositories_configured_format, repoCount),
+                            text = formattedRepoText,
                             style = MaterialTheme.typography.caption,
                             color = CloudStreamColors.TextSecondary
                         )
@@ -394,7 +431,7 @@ fun RepositoriesHeader(
                                 color = CloudStreamColors.TextPrimary
                             )
                             Text(
-                                text = stringResource(Res.string.repositories_configured_format, repoCount),
+                                text = formattedRepoText,
                                 style = MaterialTheme.typography.caption,
                                 color = CloudStreamColors.TextSecondary
                             )
@@ -601,8 +638,9 @@ fun RepositoryCard(
                                     modifier = Modifier.size(11.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
+                                val pluginLabel = if (repository.pluginCount == 1) stringResource(Res.string.plugin_singular) else stringResource(Res.string.plugin)
                                 Text(
-                                    text = "${repository.pluginCount} ${stringResource(Res.string.plugin)} · $installedCount ${stringResource(Res.string.tabInstalled)}",
+                                    text = "${repository.pluginCount} $pluginLabel · $installedCount ${stringResource(Res.string.tabInstalled)}",
                                     style = MaterialTheme.typography.caption.copy(
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 10.sp,
@@ -758,9 +796,12 @@ fun RepositoryPluginsLevelView(
     onTogglePlugin: (PluginItem) -> Unit,
     onBackClick: () -> Unit,
     onPluginClick: (PluginItem) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onTvTypeSelected: (String?) -> Unit = {}
 ) {
-    val currentRepo = repositories.firstOrNull { it.url == selectedRepoUrl }
+    val currentRepo = repositories.firstOrNull {
+        it.url.trim().removeSuffix("/").equals(selectedRepoUrl.trim().removeSuffix("/"), ignoreCase = true)
+    }
     val repoName = currentRepo?.name ?: selectedRepoUrl
     val distinctLanguages = remember(plugins) {
         plugins.mapNotNull { it.language?.takeIf { lang -> lang.isNotBlank() } }.distinct().toImmutableList()
@@ -782,7 +823,7 @@ fun RepositoryPluginsLevelView(
             query = searchQuery,
             onQueryChange = onQueryChange,
             selectedTvType = selectedTvType,
-            onTvTypeSelected = {},
+            onTvTypeSelected = onTvTypeSelected,
             selectedLanguage = selectedLanguage,
             onLanguageSelected = onLanguageSelected,
             availableLanguages = distinctLanguages
@@ -884,8 +925,9 @@ fun RepositoryDetailTopBar(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        val pluginLabel = if (pluginCount == 1) stringResource(Res.string.plugin_singular) else stringResource(Res.string.plugin)
                         Text(
-                            text = "$pluginCount ${stringResource(Res.string.plugin)} · $repoUrl",
+                            text = "$pluginCount $pluginLabel · $repoUrl",
                             style = MaterialTheme.typography.caption,
                             color = CloudStreamColors.TextSecondary,
                             maxLines = 1,
@@ -1041,9 +1083,12 @@ fun PluginCard(
     val isHovered by interactionSource.collectIsHoveredAsState()
 
     val isOperating = when (operationState) {
-        is PluginOperationState.Downloading -> operationState.pluginName.equals(plugin.name, ignoreCase = true)
-        is PluginOperationState.Installing -> operationState.pluginName.equals(plugin.name, ignoreCase = true)
-        is PluginOperationState.Uninstalling -> operationState.pluginName.equals(plugin.internalName, ignoreCase = true)
+        is PluginOperationState.Downloading -> operationState.pluginName.equals(plugin.name, ignoreCase = true) ||
+            operationState.pluginName.equals(plugin.internalName, ignoreCase = true)
+        is PluginOperationState.Installing -> operationState.pluginName.equals(plugin.name, ignoreCase = true) ||
+            operationState.pluginName.equals(plugin.internalName, ignoreCase = true)
+        is PluginOperationState.Uninstalling -> operationState.pluginName.equals(plugin.internalName, ignoreCase = true) ||
+            operationState.pluginName.equals(plugin.name, ignoreCase = true)
         else -> false
     }
 
@@ -1087,6 +1132,9 @@ fun PluginCard(
                     isOperating = isOperating,
                     isInstalled = isInstalled,
                     isEnabled = plugin.isEnabled,
+                    canEnable = plugin.canEnable,
+                    canInstall = plugin.canInstall,
+                    isDown = plugin.isDown,
                     onToggleEnabled = onToggleEnabled,
                     onUninstall = onUninstall,
                     onInstall = onInstall
@@ -1192,7 +1240,10 @@ private fun PluginCardInfo(
                 )
             }
 
-            PluginStatusBadge(status = plugin.status)
+            PluginStatusBadge(
+                status = plugin.status,
+                providerStatus = plugin.providerStatus
+            )
         }
 
         Row(
@@ -1224,6 +1275,9 @@ private fun PluginCardActions(
     isOperating: Boolean,
     isInstalled: Boolean,
     isEnabled: Boolean,
+    canEnable: Boolean,
+    canInstall: Boolean,
+    isDown: Boolean,
     onToggleEnabled: (Boolean) -> Unit,
     onUninstall: () -> Unit,
     onInstall: () -> Unit
@@ -1240,11 +1294,14 @@ private fun PluginCardActions(
             )
         } else if (isInstalled) {
             Switch(
-                checked = isEnabled,
-                onCheckedChange = onToggleEnabled,
+                checked = isEnabled && !isDown,
+                onCheckedChange = { if (canEnable) onToggleEnabled(it) },
+                enabled = canEnable,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = MaterialTheme.colors.primary,
-                    checkedTrackColor = MaterialTheme.colors.primary.copy(alpha = 0.5f)
+                    checkedTrackColor = MaterialTheme.colors.primary.copy(alpha = 0.5f),
+                    uncheckedThumbColor = CloudStreamColors.TextMuted,
+                    uncheckedTrackColor = CloudStreamColors.Divider
                 )
             )
 
@@ -1260,9 +1317,10 @@ private fun PluginCardActions(
             }
         } else {
             PrimaryButton(
-                onClick = onInstall,
-                icon = Icons.Default.Download,
-                text = stringResource(Res.string.install),
+                onClick = { if (canInstall) onInstall() },
+                enabled = canInstall,
+                icon = if (isDown) Icons.Default.ErrorOutline else Icons.Default.Download,
+                text = if (isDown) stringResource(Res.string.plugin_status_down) else stringResource(Res.string.install),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.height(36.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
@@ -1304,7 +1362,8 @@ private fun PluginDownloadingProgressBar(
     plugin: PluginItem
 ) {
     if (operationState !is PluginOperationState.Downloading ||
-        !operationState.pluginName.equals(plugin.name, ignoreCase = true)
+        (!operationState.pluginName.equals(plugin.name, ignoreCase = true) &&
+            !operationState.pluginName.equals(plugin.internalName, ignoreCase = true))
     ) return
 
     val progress = plugin.progress ?: 0.5f
@@ -1321,11 +1380,17 @@ private fun PluginDownloadingProgressBar(
 }
 
 @Composable
-fun PluginStatusBadge(status: PluginStatus) {
-    val (labelRes, color) = when (status) {
-        PluginStatus.ERROR -> Res.string.plugin_status_down to CloudStreamColors.Error
-        PluginStatus.DOWNLOADING, PluginStatus.UPDATING -> Res.string.plugin_status_slow to CloudStreamColors.Warning
-        PluginStatus.INSTALLED -> Res.string.plugin_status_ok to CloudStreamColors.Success
+fun PluginStatusBadge(
+    status: PluginStatus,
+    providerStatus: ProviderStatus = ProviderStatus.OK
+) {
+    val (labelRes, color) = when {
+        providerStatus.isDown -> Res.string.plugin_status_down to CloudStreamColors.Error
+        providerStatus == ProviderStatus.SLOW -> Res.string.plugin_status_slow to CloudStreamColors.Warning
+        providerStatus == ProviderStatus.BETA_ONLY -> Res.string.plugin_status_beta to CloudStreamColors.Warning
+        status == PluginStatus.ERROR -> Res.string.plugin_status_down to CloudStreamColors.Error
+        status == PluginStatus.DOWNLOADING || status == PluginStatus.UPDATING -> Res.string.plugin_status_slow to CloudStreamColors.Warning
+        status == PluginStatus.INSTALLED -> Res.string.plugin_status_ok to CloudStreamColors.Success
         else -> Res.string.plugin_status_ok to CloudStreamColors.Success
     }
 
@@ -1446,17 +1511,26 @@ private fun PluginDialogButtons(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Switch(
-                    checked = livePlugin.isEnabled,
-                    onCheckedChange = { _ -> viewModel.togglePlugin(livePlugin) },
+                    checked = livePlugin.isEnabled && !livePlugin.isDown,
+                    onCheckedChange = { if (livePlugin.canEnable) viewModel.togglePlugin(livePlugin) },
+                    enabled = livePlugin.canEnable,
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = MaterialTheme.colors.primary,
-                        checkedTrackColor = MaterialTheme.colors.primary.copy(alpha = 0.5f)
+                        checkedTrackColor = MaterialTheme.colors.primary.copy(alpha = 0.5f),
+                        uncheckedThumbColor = CloudStreamColors.TextMuted,
+                        uncheckedTrackColor = CloudStreamColors.Divider
                     )
                 )
                 Text(
-                    text = if (livePlugin.isEnabled) stringResource(Res.string.plugin_status_ok) else stringResource(Res.string.plugin_status_down),
+                    text = if (livePlugin.isDown) {
+                        stringResource(Res.string.plugin_status_down)
+                    } else if (livePlugin.isEnabled) {
+                        stringResource(Res.string.plugin_status_ok)
+                    } else {
+                        stringResource(Res.string.plugin_status_down)
+                    },
                     style = MaterialTheme.typography.caption.copy(fontWeight = FontWeight.Medium),
-                    color = CloudStreamColors.TextSecondary
+                    color = if (livePlugin.isDown) CloudStreamColors.Error else CloudStreamColors.TextSecondary
                 )
             }
 
@@ -1488,9 +1562,10 @@ private fun PluginDialogButtons(
                 )
             } else {
                 PrimaryButton(
-                    text = stringResource(Res.string.install),
-                    icon = Icons.Default.Download,
-                    onClick = { viewModel.downloadPlugin(livePlugin) }
+                    text = if (livePlugin.isDown) stringResource(Res.string.plugin_status_down) else stringResource(Res.string.install),
+                    icon = if (livePlugin.isDown) Icons.Default.ErrorOutline else Icons.Default.Download,
+                    enabled = livePlugin.canInstall,
+                    onClick = { if (livePlugin.canInstall) viewModel.downloadPlugin(livePlugin) }
                 )
             }
         }
