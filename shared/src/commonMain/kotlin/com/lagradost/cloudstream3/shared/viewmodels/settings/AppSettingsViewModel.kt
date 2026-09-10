@@ -44,6 +44,7 @@ import com.lagradost.cloudstream3.shared.sync.manager.CloudSyncManager
 import com.lagradost.cloudstream3.shared.sync.manager.CloudSyncProvider
 import com.lagradost.cloudstream3.shared.sync.manager.CloudSyncState
 import com.lagradost.cloudstream3.shared.sync.oauth.GoogleDriveOAuth
+import com.lagradost.cloudstream3.shared.sync.oauth.OneDriveOAuth
 import com.lagradost.cloudstream3.utils.UiText
 import com.lagradost.cloudstream3.utils.txt
 import org.jetbrains.compose.resources.StringResource
@@ -174,7 +175,9 @@ data class AppSettingsState(
     val isTestingCloudConnection: Boolean = false,
     val cloudConnectionTestResult: Boolean? = null,
     val pendingOAuthUrl: String? = null,
-    val pendingOAuthVerifier: String? = null
+    val pendingOAuthVerifier: String? = null,
+    val pendingOneDriveOAuthUrl: String? = null,
+    val pendingOneDriveOAuthVerifier: String? = null
 ) : UiState
 
 class AppSettingsViewModel(
@@ -194,6 +197,7 @@ class AppSettingsViewModel(
         get() = _state.value
 
     private var oauthCallbackServer: AutoCloseable? = null
+    private var oneDriveCallbackServer: AutoCloseable? = null
 
     protected fun updateState(reducer: AppSettingsState.() -> AppSettingsState) {
         _state.update { it.reducer() }
@@ -765,6 +769,16 @@ class AppSettingsViewModel(
         CloudSyncManager.saveLocalSyncPath(path)
     }
 
+    fun saveS3Config(
+        endpoint: String,
+        bucket: String,
+        accessKey: String,
+        secretKey: String,
+        region: String = "auto"
+    ) {
+        CloudSyncManager.saveS3Config(endpoint, bucket, accessKey, secretKey, region)
+    }
+
     fun startGoogleDriveAuth() {
         oauthCallbackServer?.close()
         oauthCallbackServer = GoogleDriveOAuth.startLocalCallbackServer(viewModelScope) { code ->
@@ -834,10 +848,81 @@ class AppSettingsViewModel(
         }
     }
 
+    fun startOneDriveAuth() {
+        oneDriveCallbackServer?.close()
+        oneDriveCallbackServer = OneDriveOAuth.startLocalCallbackServer(viewModelScope) { code ->
+            completeOneDriveAuth(code)
+        }
+        val verifier = OneDriveOAuth.generateCodeVerifier()
+        val challenge = OneDriveOAuth.generateCodeChallenge(verifier)
+        val url = OneDriveOAuth.buildAuthorizationUrl(codeChallenge = challenge)
+        updateState {
+            copy(
+                pendingOneDriveOAuthUrl = url,
+                pendingOneDriveOAuthVerifier = verifier
+            )
+        }
+    }
+
+    fun completeOneDriveAuth(rawInput: String) {
+        oneDriveCallbackServer?.close()
+        oneDriveCallbackServer = null
+        val verifier = currentState.pendingOneDriveOAuthVerifier ?: return
+        launchSafeJob(
+            key = "onedrive_auth",
+            onError = { t ->
+                updateState {
+                    copy(
+                        pendingOneDriveOAuthUrl = null,
+                        pendingOneDriveOAuthVerifier = null,
+                        error = t.message?.let { txt(it) } ?: txt(Res.string.cloud_sync_onedrive_auth_failed)
+                    )
+                }
+            }
+        ) {
+            val result = CloudSyncManager.authenticateOneDrive(
+                authCode = rawInput,
+                codeVerifier = verifier
+            )
+            result.fold(
+                onSuccess = {
+                    updateState {
+                        copy(
+                            pendingOneDriveOAuthUrl = null,
+                            pendingOneDriveOAuthVerifier = null
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    updateState {
+                        copy(
+                            pendingOneDriveOAuthUrl = null,
+                            pendingOneDriveOAuthVerifier = null,
+                            error = error.message?.let { txt(it) } ?: txt(Res.string.cloud_sync_onedrive_auth_failed)
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun cancelOneDriveAuth() {
+        oneDriveCallbackServer?.close()
+        oneDriveCallbackServer = null
+        updateState {
+            copy(
+                pendingOneDriveOAuthUrl = null,
+                pendingOneDriveOAuthVerifier = null
+            )
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         oauthCallbackServer?.close()
         oauthCallbackServer = null
+        oneDriveCallbackServer?.close()
+        oneDriveCallbackServer = null
     }
 
     fun disconnectCloudSync() {

@@ -7,6 +7,8 @@ import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceMan
 import com.lagradost.cloudstream3.shared.sync.cloud.CloudStorageClient
 import com.lagradost.cloudstream3.shared.sync.cloud.GoogleDriveStorageClient
 import com.lagradost.cloudstream3.shared.sync.cloud.LocalStorageClient
+import com.lagradost.cloudstream3.shared.sync.cloud.OneDriveStorageClient
+import com.lagradost.cloudstream3.shared.sync.cloud.S3StorageClient
 import com.lagradost.cloudstream3.shared.sync.cloud.WebDavStorageClient
 import com.lagradost.cloudstream3.shared.sync.engine.SyncEngine
 import com.lagradost.cloudstream3.shared.sync.engine.SyncEngineImpl
@@ -14,6 +16,9 @@ import com.lagradost.cloudstream3.shared.sync.models.SyncApplyResult
 import com.lagradost.cloudstream3.shared.sync.oauth.GoogleDriveOAuth
 import com.lagradost.cloudstream3.shared.sync.oauth.GoogleOAuthToken
 import com.lagradost.cloudstream3.shared.sync.oauth.GoogleUserInfo
+import com.lagradost.cloudstream3.shared.sync.oauth.OneDriveOAuth
+import com.lagradost.cloudstream3.shared.sync.oauth.OneDriveOAuthToken
+import com.lagradost.cloudstream3.shared.sync.oauth.OneDriveUserInfo
 import com.lagradost.cloudstream3.shared.sync.transport.CloudStorageSyncTransport
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -28,7 +33,9 @@ import java.util.UUID
 enum class CloudSyncProvider {
     NONE,
     GOOGLE_DRIVE,
+    ONEDRIVE,
     WEBDAV,
+    S3_COMPATIBLE,
     LOCAL_FOLDER
 }
 
@@ -46,7 +53,14 @@ data class CloudSyncState(
     val autoSyncEnabled: Boolean = false,
     val webDavUrl: String = "",
     val webDavUsername: String = "",
-    val localFolderPath: String = ""
+    val localFolderPath: String = "",
+    val oneDriveAccountName: String? = null,
+    val oneDriveAccountEmail: String? = null,
+    val s3Endpoint: String = "",
+    val s3Bucket: String = "",
+    val s3AccessKey: String = "",
+    val s3Region: String = "auto",
+    val pendingOneDriveOAuthUrl: String? = null
 )
 
 object CloudSyncManager {
@@ -61,6 +75,16 @@ object CloudSyncManager {
     const val PREF_CLOUD_SYNC_GDRIVE_EMAIL = "cloud_sync_gdrive_email"
     const val PREF_CLOUD_SYNC_GDRIVE_NAME = "cloud_sync_gdrive_name"
     const val PREF_CLOUD_SYNC_GDRIVE_PICTURE = "cloud_sync_gdrive_picture"
+    const val PREF_CLOUD_SYNC_ONEDRIVE_REFRESH_TOKEN = "cloud_sync_onedrive_refresh_token"
+    const val PREF_CLOUD_SYNC_ONEDRIVE_ACCESS_TOKEN = "cloud_sync_onedrive_access_token"
+    const val PREF_CLOUD_SYNC_ONEDRIVE_TOKEN_EXPIRY = "cloud_sync_onedrive_token_expiry"
+    const val PREF_CLOUD_SYNC_ONEDRIVE_EMAIL = "cloud_sync_onedrive_email"
+    const val PREF_CLOUD_SYNC_ONEDRIVE_NAME = "cloud_sync_onedrive_name"
+    const val PREF_CLOUD_SYNC_S3_ENDPOINT = "cloud_sync_s3_endpoint"
+    const val PREF_CLOUD_SYNC_S3_BUCKET = "cloud_sync_s3_bucket"
+    const val PREF_CLOUD_SYNC_S3_ACCESS_KEY = "cloud_sync_s3_access_key"
+    const val PREF_CLOUD_SYNC_S3_SECRET_KEY = "cloud_sync_s3_secret_key"
+    const val PREF_CLOUD_SYNC_S3_REGION = "cloud_sync_s3_region"
     const val PREF_CLOUD_SYNC_LAST_TIMESTAMP = "cloud_sync_last_timestamp"
     const val PREF_CLOUD_SYNC_LAST_SUMMARY = "cloud_sync_last_summary"
     const val PREF_CLOUD_SYNC_AUTO_ENABLED = "cloud_sync_auto_enabled"
@@ -122,6 +146,36 @@ object CloudSyncManager {
         AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_GDRIVE_TOKEN_EXPIRY, newExpiry.toString())
         if (!token.refreshToken.isNullOrBlank()) {
             AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_GDRIVE_REFRESH_TOKEN, token.refreshToken)
+        }
+    }
+
+    suspend fun getValidOneDriveAccessToken(): String? = tokenMutex.withLock {
+        val refreshToken = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_ONEDRIVE_REFRESH_TOKEN)
+        if (refreshToken.isNullOrBlank()) {
+            return null
+        }
+
+        val currentAccessToken = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_ONEDRIVE_ACCESS_TOKEN)
+        val expiryTimestamp = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_ONEDRIVE_TOKEN_EXPIRY)?.toLongOrNull() ?: 0L
+        val now = APIHolder.unixTimeMS
+
+        if (!currentAccessToken.isNullOrBlank() && now < (expiryTimestamp - TOKEN_EXPIRY_BUFFER_MS)) {
+            return currentAccessToken
+        }
+
+        val refreshResult = OneDriveOAuth.refreshAccessToken(refreshToken = refreshToken)
+        val token = refreshResult.getOrNull() ?: return null
+
+        persistOneDriveTokens(token)
+        return token.accessToken
+    }
+
+    private fun persistOneDriveTokens(token: OneDriveOAuthToken) {
+        val newExpiry = APIHolder.unixTimeMS + (token.expiresIn * 1000L)
+        AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_ONEDRIVE_ACCESS_TOKEN, token.accessToken)
+        AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_ONEDRIVE_TOKEN_EXPIRY, newExpiry.toString())
+        if (!token.refreshToken.isNullOrBlank()) {
+            AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_ONEDRIVE_REFRESH_TOKEN, token.refreshToken)
         }
     }
 
@@ -235,6 +289,22 @@ object CloudSyncManager {
         refreshState()
     }
 
+    fun configureOneDrive(token: OneDriveOAuthToken, userInfo: OneDriveUserInfo? = null) {
+        val expiry = APIHolder.unixTimeMS + (token.expiresIn * 1000L)
+        AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_PROVIDER, CloudSyncProvider.ONEDRIVE.name)
+        AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_ONEDRIVE_ACCESS_TOKEN, token.accessToken)
+        AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_ONEDRIVE_TOKEN_EXPIRY, expiry.toString())
+        if (!token.refreshToken.isNullOrBlank()) {
+            AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_ONEDRIVE_REFRESH_TOKEN, token.refreshToken)
+        }
+        if (userInfo != null) {
+            val email = userInfo.mail ?: userInfo.userPrincipalName
+            AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_ONEDRIVE_EMAIL, email)
+            AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_ONEDRIVE_NAME, userInfo.displayName)
+        }
+        refreshState()
+    }
+
     suspend fun authenticateGoogleDrive(
         authCode: String,
         codeVerifier: String,
@@ -256,6 +326,53 @@ object CloudSyncManager {
         userInfo ?: GoogleUserInfo()
     }
 
+    suspend fun authenticateOneDrive(
+        authCode: String,
+        codeVerifier: String,
+        clientId: String = OneDriveOAuth.DEFAULT_CLIENT_ID,
+        clientSecret: String? = OneDriveOAuth.DEFAULT_CLIENT_SECRET,
+        redirectUri: String = OneDriveOAuth.DEFAULT_REDIRECT_URI
+    ): Result<OneDriveUserInfo> = runCatching {
+        val sanitizedCode = OneDriveOAuth.sanitizeAuthCode(authCode)
+        val token = OneDriveOAuth.exchangeCode(
+            clientId = clientId,
+            clientSecret = clientSecret,
+            code = sanitizedCode,
+            codeVerifier = codeVerifier,
+            redirectUri = redirectUri
+        ).getOrThrow()
+
+        val userInfo = OneDriveOAuth.fetchUserInfo(token.accessToken).getOrNull()
+        configureOneDrive(token, userInfo)
+        userInfo ?: OneDriveUserInfo()
+    }
+
+    fun configureS3(
+        endpoint: String,
+        bucket: String,
+        accessKey: String,
+        secretKey: String,
+        region: String = "auto"
+    ) {
+        AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_PROVIDER, CloudSyncProvider.S3_COMPATIBLE.name)
+        AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_S3_ENDPOINT, endpoint)
+        AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_S3_BUCKET, bucket)
+        AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_S3_ACCESS_KEY, accessKey)
+        if (secretKey.isNotBlank()) {
+            AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_S3_SECRET_KEY, secretKey)
+        }
+        AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_S3_REGION, region)
+        refreshState()
+    }
+
+    fun saveS3Config(
+        endpoint: String,
+        bucket: String,
+        accessKey: String,
+        secretKey: String,
+        region: String = "auto"
+    ) = configureS3(endpoint, bucket, accessKey, secretKey, region)
+
     fun getOrCreateDeviceId(): String {
         val existing = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_DEVICE_ID)
         if (!existing.isNullOrBlank()) return existing
@@ -270,7 +387,9 @@ object CloudSyncManager {
 
     private suspend fun getClientForProvider(provider: CloudSyncProvider): CloudStorageClient? = when (provider) {
         CloudSyncProvider.GOOGLE_DRIVE -> resolveGoogleDriveClient()
+        CloudSyncProvider.ONEDRIVE -> resolveOneDriveClient()
         CloudSyncProvider.WEBDAV -> resolveWebDavClient()
+        CloudSyncProvider.S3_COMPATIBLE -> resolveS3Client()
         CloudSyncProvider.LOCAL_FOLDER -> resolveLocalStorageClient()
         CloudSyncProvider.NONE -> null
     }
@@ -281,12 +400,34 @@ object CloudSyncManager {
         return GoogleDriveStorageClient(accessTokenProvider = { getValidGoogleAccessToken() })
     }
 
+    private fun resolveOneDriveClient(): CloudStorageClient? {
+        val token = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_ONEDRIVE_REFRESH_TOKEN)
+        if (token.isNullOrBlank()) return null
+        return OneDriveStorageClient(accessTokenProvider = { getValidOneDriveAccessToken() })
+    }
+
     private fun resolveWebDavClient(): CloudStorageClient? {
         val url = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_WEBDAV_URL).orEmpty()
         if (url.isBlank()) return null
         val user = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_WEBDAV_USER).orEmpty()
         val pass = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_WEBDAV_PASS).orEmpty()
         return WebDavStorageClient(serverUrl = url, username = user, password = pass)
+    }
+
+    private fun resolveS3Client(): CloudStorageClient? {
+        val endpoint = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_S3_ENDPOINT).orEmpty()
+        val bucket = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_S3_BUCKET).orEmpty()
+        val accessKey = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_S3_ACCESS_KEY).orEmpty()
+        val secretKey = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_S3_SECRET_KEY).orEmpty()
+        val region = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_S3_REGION) ?: "auto"
+        if (endpoint.isBlank() || bucket.isBlank() || accessKey.isBlank() || secretKey.isBlank()) return null
+        return S3StorageClient(
+            endpointUrl = endpoint,
+            bucketName = bucket,
+            accessKey = accessKey,
+            secretKey = secretKey,
+            region = region
+        )
     }
 
     private fun resolveLocalStorageClient(): CloudStorageClient? {
@@ -297,9 +438,19 @@ object CloudSyncManager {
 
     private fun isProviderConnected(provider: CloudSyncProvider): Boolean = when (provider) {
         CloudSyncProvider.GOOGLE_DRIVE -> !AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_GDRIVE_REFRESH_TOKEN).isNullOrBlank()
+        CloudSyncProvider.ONEDRIVE -> !AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_ONEDRIVE_REFRESH_TOKEN).isNullOrBlank()
         CloudSyncProvider.WEBDAV -> !AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_WEBDAV_URL).isNullOrBlank()
+        CloudSyncProvider.S3_COMPATIBLE -> isS3Configured()
         CloudSyncProvider.LOCAL_FOLDER -> !AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_LOCAL_PATH).isNullOrBlank()
         CloudSyncProvider.NONE -> false
+    }
+
+    private fun isS3Configured(): Boolean {
+        val ep = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_S3_ENDPOINT)
+        val bk = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_S3_BUCKET)
+        val ak = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_S3_ACCESS_KEY)
+        val sk = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_S3_SECRET_KEY)
+        return !ep.isNullOrBlank() && !bk.isNullOrBlank() && !ak.isNullOrBlank() && !sk.isNullOrBlank()
     }
 
     private fun resolveAccountDetails(provider: CloudSyncProvider): Triple<String?, String?, String?> = when (provider) {
@@ -308,9 +459,19 @@ object CloudSyncManager {
             AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_GDRIVE_EMAIL),
             AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_GDRIVE_PICTURE)
         )
+        CloudSyncProvider.ONEDRIVE -> Triple(
+            AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_ONEDRIVE_NAME),
+            AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_ONEDRIVE_EMAIL),
+            null
+        )
         CloudSyncProvider.WEBDAV -> Triple(
             AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_WEBDAV_USER)?.ifBlank { null },
             null,
+            null
+        )
+        CloudSyncProvider.S3_COMPATIBLE -> Triple(
+            AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_S3_BUCKET)?.ifBlank { null },
+            AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_S3_ENDPOINT)?.ifBlank { null },
             null
         )
         CloudSyncProvider.LOCAL_FOLDER -> Triple(
@@ -338,14 +499,22 @@ object CloudSyncManager {
             autoSyncEnabled = AppPreferenceManager.getBooleanSync(PREF_CLOUD_SYNC_AUTO_ENABLED, false),
             webDavUrl = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_WEBDAV_URL).orEmpty(),
             webDavUsername = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_WEBDAV_USER).orEmpty(),
-            localFolderPath = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_LOCAL_PATH).orEmpty()
+            localFolderPath = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_LOCAL_PATH).orEmpty(),
+            oneDriveAccountName = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_ONEDRIVE_NAME),
+            oneDriveAccountEmail = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_ONEDRIVE_EMAIL),
+            s3Endpoint = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_S3_ENDPOINT).orEmpty(),
+            s3Bucket = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_S3_BUCKET).orEmpty(),
+            s3AccessKey = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_S3_ACCESS_KEY).orEmpty(),
+            s3Region = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_S3_REGION) ?: "auto"
         )
     }
 
     private fun clearProviderCredentials(provider: CloudSyncProvider) {
         when (provider) {
             CloudSyncProvider.GOOGLE_DRIVE -> clearGoogleCredentials()
+            CloudSyncProvider.ONEDRIVE -> clearOneDriveCredentials()
             CloudSyncProvider.WEBDAV -> clearWebDavCredentials()
+            CloudSyncProvider.S3_COMPATIBLE -> clearS3Credentials()
             CloudSyncProvider.LOCAL_FOLDER -> clearLocalFolderConfig()
             CloudSyncProvider.NONE -> Unit
         }
@@ -358,6 +527,22 @@ object CloudSyncManager {
         AppPreferenceManager.deletePreferenceSync(PREF_CLOUD_SYNC_GDRIVE_EMAIL)
         AppPreferenceManager.deletePreferenceSync(PREF_CLOUD_SYNC_GDRIVE_NAME)
         AppPreferenceManager.deletePreferenceSync(PREF_CLOUD_SYNC_GDRIVE_PICTURE)
+    }
+
+    private fun clearOneDriveCredentials() {
+        AppPreferenceManager.deletePreferenceSync(PREF_CLOUD_SYNC_ONEDRIVE_ACCESS_TOKEN)
+        AppPreferenceManager.deletePreferenceSync(PREF_CLOUD_SYNC_ONEDRIVE_REFRESH_TOKEN)
+        AppPreferenceManager.deletePreferenceSync(PREF_CLOUD_SYNC_ONEDRIVE_TOKEN_EXPIRY)
+        AppPreferenceManager.deletePreferenceSync(PREF_CLOUD_SYNC_ONEDRIVE_EMAIL)
+        AppPreferenceManager.deletePreferenceSync(PREF_CLOUD_SYNC_ONEDRIVE_NAME)
+    }
+
+    private fun clearS3Credentials() {
+        AppPreferenceManager.deletePreferenceSync(PREF_CLOUD_SYNC_S3_ENDPOINT)
+        AppPreferenceManager.deletePreferenceSync(PREF_CLOUD_SYNC_S3_BUCKET)
+        AppPreferenceManager.deletePreferenceSync(PREF_CLOUD_SYNC_S3_ACCESS_KEY)
+        AppPreferenceManager.deletePreferenceSync(PREF_CLOUD_SYNC_S3_SECRET_KEY)
+        AppPreferenceManager.deletePreferenceSync(PREF_CLOUD_SYNC_S3_REGION)
     }
 
     private fun clearWebDavCredentials() {

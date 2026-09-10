@@ -1498,4 +1498,15 @@
     <string name="cloud_sync_paste_code">Pegar código o URL de redirección</string>
     <string name="cloud_sync_auth_failed">Error en la autenticación con Google Drive</string>
     <string name="cloud_sync_failed">Error en la sincronización en la nube</string>
+    <string name="cloud_sync_provider_onedrive">Microsoft OneDrive</string>
+    <string name="cloud_sync_provider_s3">S3 / Cloudflare R2</string>
+    <string name="cloud_sync_connect_onedrive">Conectar con OneDrive</string>
+    <string name="cloud_sync_onedrive_oauth_instructions">Inicia sesión con Microsoft, concede acceso y pega el código o URL de redirección aquí.</string>
+    <string name="cloud_sync_onedrive_auth_failed">Error en la autenticación con Microsoft OneDrive</string>
+    <string name="cloud_sync_s3_endpoint">URL del Endpoint</string>
+    <string name="cloud_sync_s3_bucket">Nombre del Bucket</string>
+    <string name="cloud_sync_s3_access_key">Access Key ID</string>
+    <string name="cloud_sync_s3_secret_key">Secret Access Key</string>
+    <string name="cloud_sync_s3_region">Región (ej. auto, us-east-1)</string>
+    <string name="cloud_sync_save_s3">Guardar Configuración S3</string>
 </resources>

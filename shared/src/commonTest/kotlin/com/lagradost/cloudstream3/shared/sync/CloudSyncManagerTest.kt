@@ -7,6 +7,9 @@ import com.lagradost.cloudstream3.shared.sync.manager.CloudSyncProvider
 import com.lagradost.cloudstream3.shared.sync.oauth.GoogleDriveOAuth
 import com.lagradost.cloudstream3.shared.sync.oauth.GoogleOAuthToken
 import com.lagradost.cloudstream3.shared.sync.oauth.GoogleUserInfo
+import com.lagradost.cloudstream3.shared.sync.oauth.OneDriveOAuth
+import com.lagradost.cloudstream3.shared.sync.oauth.OneDriveOAuthToken
+import com.lagradost.cloudstream3.shared.sync.oauth.OneDriveUserInfo
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.ImmutableMap
 import kotlinx.collections.immutable.ImmutableSet
@@ -175,6 +178,88 @@ class CloudSyncManagerTest {
         assertEquals(CloudSyncProvider.NONE, disconnectedState.provider)
         assertFalse(disconnectedState.isConnected)
         assertNull(disconnectedState.accountName)
+    }
+
+    @Test
+    fun testOneDriveOAuthPkceAndUrl() {
+        val verifier = OneDriveOAuth.generateCodeVerifier()
+        assertEquals(64, verifier.length)
+        val validChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~".toSet()
+        assertTrue(verifier.all { it in validChars })
+
+        val challenge = OneDriveOAuth.generateCodeChallenge(verifier)
+        assertTrue(challenge.isNotBlank())
+        assertFalse(challenge.contains("+"))
+        assertFalse(challenge.contains("/"))
+        assertFalse(challenge.contains("="))
+
+        val url = OneDriveOAuth.buildAuthorizationUrl(codeChallenge = challenge)
+        assertTrue(url.startsWith(OneDriveOAuth.AUTH_URL))
+        assertTrue(url.contains("client_id=${OneDriveOAuth.DEFAULT_CLIENT_ID}"))
+        assertTrue(url.contains("code_challenge=$challenge"))
+        assertTrue(url.contains("code_challenge_method=S256"))
+    }
+
+    @Test
+    fun testOneDriveSanitizeAuthCode() {
+        val raw = "M.C12345"
+        assertEquals(raw, OneDriveOAuth.sanitizeAuthCode(raw))
+
+        val redirect = "http://localhost:53682/?code=M.C12345&state=xyz"
+        assertEquals("M.C12345", OneDriveOAuth.sanitizeAuthCode(redirect))
+    }
+
+    @Test
+    fun testConfigureOneDriveAndDisconnect() {
+        val token = OneDriveOAuthToken(
+            accessToken = "onedrive-access-token",
+            refreshToken = "onedrive-refresh-token",
+            expiresIn = 3600L
+        )
+        val userInfo = OneDriveUserInfo(
+            id = "ms-123",
+            displayName = "MS User",
+            userPrincipalName = "msuser@outlook.com"
+        )
+        CloudSyncManager.configureOneDrive(token, userInfo)
+        val state = CloudSyncManager.syncState.value
+        assertEquals(CloudSyncProvider.ONEDRIVE, state.provider)
+        assertTrue(state.isConnected)
+        assertEquals("MS User", state.accountName)
+        assertEquals("msuser@outlook.com", state.accountEmail)
+        assertEquals("MS User", state.oneDriveAccountName)
+        assertEquals("msuser@outlook.com", state.oneDriveAccountEmail)
+
+        CloudSyncManager.disconnectProvider(clearCredentials = true)
+        val disconnected = CloudSyncManager.syncState.value
+        assertEquals(CloudSyncProvider.NONE, disconnected.provider)
+        assertFalse(disconnected.isConnected)
+        assertNull(disconnected.oneDriveAccountName)
+    }
+
+    @Test
+    fun testConfigureS3AndDisconnect() {
+        CloudSyncManager.configureS3(
+            endpoint = "https://my-account.r2.cloudflarestorage.com",
+            bucket = "my-bucket",
+            accessKey = "AKIAEXAMPLE",
+            secretKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            region = "auto"
+        )
+        val state = CloudSyncManager.syncState.value
+        assertEquals(CloudSyncProvider.S3_COMPATIBLE, state.provider)
+        assertTrue(state.isConnected)
+        assertEquals("my-bucket", state.accountName)
+        assertEquals("https://my-account.r2.cloudflarestorage.com", state.accountEmail)
+        assertEquals("https://my-account.r2.cloudflarestorage.com", state.s3Endpoint)
+        assertEquals("my-bucket", state.s3Bucket)
+        assertEquals("AKIAEXAMPLE", state.s3AccessKey)
+
+        CloudSyncManager.disconnectProvider(clearCredentials = true)
+        val disconnected = CloudSyncManager.syncState.value
+        assertEquals(CloudSyncProvider.NONE, disconnected.provider)
+        assertFalse(disconnected.isConnected)
+        assertEquals("", disconnected.s3Endpoint)
     }
 
     @Test

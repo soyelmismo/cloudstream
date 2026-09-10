@@ -24,12 +24,14 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -68,12 +70,17 @@ fun CloudSyncCard(
     isTestingConnection: Boolean = false,
     testConnectionResult: Boolean? = null,
     pendingOAuthUrl: String? = null,
+    pendingOneDriveOAuthUrl: String? = null,
     onProviderSelected: (CloudSyncProvider) -> Unit,
     onStartGoogleAuth: () -> Unit,
     onCompleteGoogleAuth: (String) -> Unit,
     onCancelGoogleAuth: () -> Unit,
+    onStartOneDriveAuth: () -> Unit = {},
+    onCompleteOneDriveAuth: (String) -> Unit = {},
+    onCancelOneDriveAuth: () -> Unit = {},
     onDisconnect: () -> Unit,
     onSaveWebDavConfig: (url: String, username: String, pass: String) -> Unit,
+    onSaveS3Config: (endpoint: String, bucket: String, accessKey: String, secretKey: String, region: String) -> Unit = { _, _, _, _, _ -> },
     onSaveLocalPath: (path: String) -> Unit,
     onSyncNow: () -> Unit,
     onTestConnection: () -> Unit,
@@ -97,8 +104,10 @@ fun CloudSyncCard(
         ProviderContentSection(
             state = state,
             onStartGoogleAuth = onStartGoogleAuth,
+            onStartOneDriveAuth = onStartOneDriveAuth,
             onDisconnect = onDisconnect,
             onSaveWebDavConfig = onSaveWebDavConfig,
+            onSaveS3Config = onSaveS3Config,
             onSaveLocalPath = onSaveLocalPath
         )
 
@@ -119,6 +128,14 @@ fun CloudSyncCard(
             authUrl = pendingOAuthUrl,
             onCompleteAuth = onCompleteGoogleAuth,
             onDismiss = onCancelGoogleAuth
+        )
+    }
+
+    if (pendingOneDriveOAuthUrl != null) {
+        OneDriveOAuthDialog(
+            authUrl = pendingOneDriveOAuthUrl,
+            onCompleteAuth = onCompleteOneDriveAuth,
+            onDismiss = onCancelOneDriveAuth
         )
     }
 }
@@ -165,14 +182,18 @@ private fun ProviderChipItem(
 private fun providerDisplayName(provider: CloudSyncProvider): String = when (provider) {
     CloudSyncProvider.NONE -> stringResource(Res.string.cloud_sync_provider_none)
     CloudSyncProvider.GOOGLE_DRIVE -> stringResource(Res.string.cloud_sync_provider_gdrive)
+    CloudSyncProvider.ONEDRIVE -> stringResource(Res.string.cloud_sync_provider_onedrive)
     CloudSyncProvider.WEBDAV -> stringResource(Res.string.cloud_sync_provider_webdav)
+    CloudSyncProvider.S3_COMPATIBLE -> stringResource(Res.string.cloud_sync_provider_s3)
     CloudSyncProvider.LOCAL_FOLDER -> stringResource(Res.string.cloud_sync_provider_local)
 }
 
 private fun providerIcon(provider: CloudSyncProvider): ImageVector = when (provider) {
     CloudSyncProvider.NONE -> Icons.Default.CloudOff
     CloudSyncProvider.GOOGLE_DRIVE -> Icons.Default.Cloud
+    CloudSyncProvider.ONEDRIVE -> Icons.Default.CloudQueue
     CloudSyncProvider.WEBDAV -> Icons.Default.Dns
+    CloudSyncProvider.S3_COMPATIBLE -> Icons.Default.Storage
     CloudSyncProvider.LOCAL_FOLDER -> Icons.Default.Folder
 }
 
@@ -180,8 +201,10 @@ private fun providerIcon(provider: CloudSyncProvider): ImageVector = when (provi
 private fun ProviderContentSection(
     state: CloudSyncState,
     onStartGoogleAuth: () -> Unit,
+    onStartOneDriveAuth: () -> Unit,
     onDisconnect: () -> Unit,
     onSaveWebDavConfig: (String, String, String) -> Unit,
+    onSaveS3Config: (String, String, String, String, String) -> Unit,
     onSaveLocalPath: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -193,9 +216,20 @@ private fun ProviderContentSection(
             onDisconnect = onDisconnect,
             modifier = modifier
         )
+        CloudSyncProvider.ONEDRIVE -> OneDrivePanel(
+            state = state,
+            onStartAuth = onStartOneDriveAuth,
+            onDisconnect = onDisconnect,
+            modifier = modifier
+        )
         CloudSyncProvider.WEBDAV -> WebDavConfigPanel(
             state = state,
             onSaveConfig = onSaveWebDavConfig,
+            modifier = modifier
+        )
+        CloudSyncProvider.S3_COMPATIBLE -> S3ConfigPanel(
+            state = state,
+            onSaveConfig = onSaveS3Config,
             modifier = modifier
         )
         CloudSyncProvider.LOCAL_FOLDER -> LocalFolderConfigPanel(
@@ -373,6 +407,172 @@ private fun LocalFolderConfigPanel(
             text = stringResource(Res.string.cloud_sync_save_path),
             onClick = { onSavePath(path.trim()) },
             enabled = path.isNotBlank(),
+            icon = Icons.Default.Check
+        )
+    }
+}
+
+@Composable
+private fun OneDrivePanel(
+    state: CloudSyncState,
+    onStartAuth: () -> Unit,
+    onDisconnect: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (state.isConnected) {
+        OneDriveConnectedView(
+            state = state,
+            onDisconnect = onDisconnect,
+            modifier = modifier
+        )
+    } else {
+        OneDriveDisconnectedView(
+            onStartAuth = onStartAuth,
+            modifier = modifier
+        )
+    }
+}
+
+@Composable
+private fun OneDriveConnectedView(
+    state: CloudSyncState,
+    onDisconnect: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f, fill = false)
+        ) {
+            Icon(
+                imageVector = Icons.Default.CloudQueue,
+                contentDescription = null,
+                tint = MaterialTheme.colors.primary,
+                modifier = Modifier.size(36.dp)
+            )
+            Column {
+                val displayName = state.oneDriveAccountName ?: state.oneDriveAccountEmail.orEmpty()
+                Text(
+                    text = displayName.ifBlank { stringResource(Res.string.cloud_sync_provider_onedrive) },
+                    style = MaterialTheme.typography.subtitle1.copy(fontWeight = FontWeight.SemiBold),
+                    color = CloudStreamColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (!state.oneDriveAccountEmail.isNullOrBlank() && state.oneDriveAccountName != null) {
+                    Text(
+                        text = state.oneDriveAccountEmail,
+                        style = MaterialTheme.typography.caption,
+                        color = CloudStreamColors.TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+        SecondaryButton(
+            text = stringResource(Res.string.cloud_sync_disconnect),
+            onClick = onDisconnect,
+            icon = Icons.Default.Close
+        )
+    }
+}
+
+@Composable
+private fun OneDriveDisconnectedView(
+    onStartAuth: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = stringResource(Res.string.cloud_sync_desc),
+            style = MaterialTheme.typography.body2,
+            color = CloudStreamColors.TextSecondary
+        )
+        PrimaryButton(
+            text = stringResource(Res.string.cloud_sync_connect_onedrive),
+            onClick = onStartAuth,
+            icon = Icons.Default.CloudQueue
+        )
+    }
+}
+
+@Composable
+private fun S3ConfigPanel(
+    state: CloudSyncState,
+    onSaveConfig: (String, String, String, String, String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var endpoint by remember(state.s3Endpoint) { mutableStateOf(state.s3Endpoint) }
+    var bucket by remember(state.s3Bucket) { mutableStateOf(state.s3Bucket) }
+    var accessKey by remember(state.s3AccessKey) { mutableStateOf(state.s3AccessKey) }
+    var secretKey by remember { mutableStateOf("") }
+    var region by remember(state.s3Region) { mutableStateOf(state.s3Region) }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        CloudStreamTextField(
+            value = endpoint,
+            onValueChange = { endpoint = it },
+            label = stringResource(Res.string.cloud_sync_s3_endpoint),
+            placeholder = "https://<account_id>.r2.cloudflarestorage.com",
+            singleLine = true
+        )
+        CloudStreamTextField(
+            value = bucket,
+            onValueChange = { bucket = it },
+            label = stringResource(Res.string.cloud_sync_s3_bucket),
+            placeholder = "cloudstream-sync",
+            singleLine = true
+        )
+        CloudStreamTextField(
+            value = accessKey,
+            onValueChange = { accessKey = it },
+            label = stringResource(Res.string.cloud_sync_s3_access_key),
+            singleLine = true
+        )
+        CloudStreamTextField(
+            value = secretKey,
+            onValueChange = { secretKey = it },
+            label = stringResource(Res.string.cloud_sync_s3_secret_key),
+            isPassword = true,
+            singleLine = true
+        )
+        CloudStreamTextField(
+            value = region,
+            onValueChange = { region = it },
+            label = stringResource(Res.string.cloud_sync_s3_region),
+            placeholder = "auto",
+            singleLine = true
+        )
+        PrimaryButton(
+            text = stringResource(Res.string.cloud_sync_save_s3),
+            onClick = {
+                onSaveConfig(
+                    endpoint.trim(),
+                    bucket.trim(),
+                    accessKey.trim(),
+                    secretKey.trim(),
+                    region.trim()
+                )
+            },
+            enabled = endpoint.isNotBlank() && bucket.isNotBlank() && accessKey.isNotBlank(),
             icon = Icons.Default.Check
         )
     }
@@ -570,6 +770,108 @@ fun GoogleOAuthDialog(
                 onValueChange = { pastedCode = it },
                 label = stringResource(Res.string.cloud_sync_paste_code),
                 placeholder = "4/0A...",
+                singleLine = true
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SecondaryButton(
+                    text = stringResource(Res.string.cancel),
+                    onClick = onDismiss
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                PrimaryButton(
+                    text = stringResource(Res.string.confirm),
+                    onClick = {
+                        val trimmed = pastedCode.trim()
+                        if (trimmed.isNotEmpty()) {
+                            onCompleteAuth(trimmed)
+                        }
+                    },
+                    enabled = pastedCode.isNotBlank()
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun OneDriveOAuthDialog(
+    authUrl: String,
+    onCompleteAuth: (String) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val uriHandler = LocalUriHandler.current
+    var pastedCode by remember { mutableStateOf("") }
+
+    CloudStreamDialog(
+        onDismissRequest = onDismiss,
+        modifier = modifier,
+        maxWidth = 480.dp
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CloudQueue,
+                        contentDescription = null,
+                        tint = MaterialTheme.colors.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Text(
+                        text = stringResource(Res.string.cloud_sync_provider_onedrive),
+                        style = MaterialTheme.typography.h6.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = CloudStreamColors.TextPrimary
+                        )
+                    )
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = stringResource(Res.string.close),
+                        tint = CloudStreamColors.TextMuted,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Text(
+                text = stringResource(Res.string.cloud_sync_onedrive_oauth_instructions),
+                style = MaterialTheme.typography.body2,
+                color = CloudStreamColors.TextSecondary
+            )
+
+            SecondaryButton(
+                text = stringResource(Res.string.auth_reopen_browser),
+                onClick = {
+                    runCatching { uriHandler.openUri(authUrl) }
+                },
+                icon = Icons.Default.OpenInBrowser
+            )
+
+            CloudStreamTextField(
+                value = pastedCode,
+                onValueChange = { pastedCode = it },
+                label = stringResource(Res.string.cloud_sync_paste_code),
+                placeholder = "M.C...",
                 singleLine = true
             )
 

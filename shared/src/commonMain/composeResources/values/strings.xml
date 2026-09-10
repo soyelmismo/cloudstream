@@ -1836,4 +1836,15 @@ Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliqu
     <string name="cloud_sync_paste_code">Paste code or redirect URL</string>
     <string name="cloud_sync_auth_failed">Google Drive authentication failed</string>
     <string name="cloud_sync_failed">Cloud sync failed</string>
+    <string name="cloud_sync_provider_onedrive">Microsoft OneDrive</string>
+    <string name="cloud_sync_provider_s3">S3 / Cloudflare R2</string>
+    <string name="cloud_sync_connect_onedrive">Connect with OneDrive</string>
+    <string name="cloud_sync_onedrive_oauth_instructions">Log in with Microsoft, grant access, and paste the code or redirect URL here.</string>
+    <string name="cloud_sync_onedrive_auth_failed">Microsoft OneDrive authentication failed</string>
+    <string name="cloud_sync_s3_endpoint">Endpoint URL</string>
+    <string name="cloud_sync_s3_bucket">Bucket Name</string>
+    <string name="cloud_sync_s3_access_key">Access Key ID</string>
+    <string name="cloud_sync_s3_secret_key">Secret Access Key</string>
+    <string name="cloud_sync_s3_region">Region (e.g. auto, us-east-1)</string>
+    <string name="cloud_sync_save_s3">Save S3 Configuration</string>
 </resources>
