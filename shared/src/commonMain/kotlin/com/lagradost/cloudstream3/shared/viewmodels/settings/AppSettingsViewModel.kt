@@ -620,6 +620,7 @@ class AppSettingsViewModel(
             updateState { copy(isRestoring = true, backupErrorRes = null, backupSuccessRes = null) }
             when (val result = backupManager.restoreBackup(jsonContent, categories)) {
                 is BackupRestoreResult.Success -> {
+                    CloudSyncManager.resetSyncTimestamps()
                     loadSettings()
                     updateState {
                         copy(

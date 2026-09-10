@@ -227,7 +227,7 @@ object CloudSyncManager {
             lastSyncTimestamp = lastTimestamp
         ).getOrThrow()
 
-        Log.i("CloudSync", "Sync completed: applied=${applyResult.totalApplied}, skipped=${applyResult.conflictsSkipped}")
+        Log.i("CloudSync", "Sync completed: applied=${applyResult.totalApplied}, pushed=${applyResult.localItemsPushed}, skipped=${applyResult.conflictsSkipped}")
         recordSyncSuccess(applyResult, client.providerId)
         return applyResult
     }
@@ -248,6 +248,12 @@ object CloudSyncManager {
                 lastSyncSummary = summary
             )
         }
+    }
+
+    fun resetSyncTimestamps() {
+        AppPreferenceManager.deletePreferenceSync(PREF_CLOUD_SYNC_LAST_TIMESTAMP)
+        AppPreferenceManager.removeKeysSync(PREF_CLOUD_SYNC_LAST_TIMESTAMP)
+        _syncState.update { it.copy(lastSyncTimestamp = 0L) }
     }
 
     fun disconnectProvider(clearCredentials: Boolean = true) {
