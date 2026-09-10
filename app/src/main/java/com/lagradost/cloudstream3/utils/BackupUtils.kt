@@ -1,5 +1,6 @@
 package com.lagradost.cloudstream3.utils
 
+import android.app.Activity
 import android.content.Context
 import android.net.Uri
 import android.widget.Toast
@@ -257,7 +258,7 @@ object BackupUtils {
         }
     }
 
-    fun FragmentActivity.restorePrompt() {
+    fun Activity.restorePrompt() {
         runOnUiThread {
             try {
                 restoreFileSelector?.launch(

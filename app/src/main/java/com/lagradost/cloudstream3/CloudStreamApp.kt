@@ -58,6 +58,7 @@ class CloudStreamApp : Application(), SingletonImageLoader.Factory {
                 else -> null
             }
         }
+
     }
 }
 

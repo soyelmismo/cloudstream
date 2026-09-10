@@ -314,10 +314,13 @@ dependencies {
     implementation(libs.work.runtime.ktx)
     implementation(libs.nicehttp) // HTTP Lib
 
+    implementation(libs.bundles.compose)
     implementation(libs.activity.compose)
+    implementation(libs.kotlinx.io.core) // Logcat parser
     implementation(libs.room.runtime)
     implementation(libs.anime.db)
     implementation(project(":library"))
+    implementation(project(":shared"))
     implementation(project(":shared-ui"))
 }
 
