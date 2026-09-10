@@ -98,7 +98,19 @@ data class SyncDelta(
             bookmarks.isEmpty() &&
             favorites.isEmpty() &&
             tombstones.isEmpty()
+
+    val totalItems: Int
+        get() = watchProgress.size + bookmarks.size + favorites.size + tombstones.size
 }
+
+@Serializable
+@Immutable
+data class SyncManifest(
+    val schemaVersion: Int = 1,
+    val appName: String = "CloudStream",
+    val deviceId: String = "",
+    val updatedAt: Long = 0L
+)
 
 @Serializable
 @Immutable
@@ -107,17 +119,22 @@ data class SyncApplyResult(
     val bookmarksApplied: Int,
     val favoritesApplied: Int,
     val tombstonesApplied: Int,
-    val conflictsSkipped: Int
+    val conflictsSkipped: Int,
+    val localItemsPushed: Int = 0
 ) {
     val totalApplied: Int
         get() = watchProgressApplied + bookmarksApplied + favoritesApplied + tombstonesApplied
+
+    val totalChanges: Int
+        get() = totalApplied + localItemsPushed
 
     operator fun plus(other: SyncApplyResult): SyncApplyResult = SyncApplyResult(
         watchProgressApplied = watchProgressApplied + other.watchProgressApplied,
         bookmarksApplied = bookmarksApplied + other.bookmarksApplied,
         favoritesApplied = favoritesApplied + other.favoritesApplied,
         tombstonesApplied = tombstonesApplied + other.tombstonesApplied,
-        conflictsSkipped = conflictsSkipped + other.conflictsSkipped
+        conflictsSkipped = conflictsSkipped + other.conflictsSkipped,
+        localItemsPushed = localItemsPushed + other.localItemsPushed
     )
 
     companion object {
@@ -126,7 +143,8 @@ data class SyncApplyResult(
             bookmarksApplied = 0,
             favoritesApplied = 0,
             tombstonesApplied = 0,
-            conflictsSkipped = 0
+            conflictsSkipped = 0,
+            localItemsPushed = 0
         )
     }
 }

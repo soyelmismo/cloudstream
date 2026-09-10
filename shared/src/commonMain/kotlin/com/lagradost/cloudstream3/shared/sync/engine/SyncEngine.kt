@@ -127,6 +127,9 @@ class SyncEngineImpl(
         transport: SyncTransport,
         lastSyncTimestamp: Long
     ): Result<SyncApplyResult> = runCatching {
+        // 0. Ensure remote repo root is initialized
+        transport.initRepository(deviceId).getOrThrow()
+
         // 1. Fetch remote deltas (git fetch)
         val remoteDeltas = transport.fetchDeltas(lastSyncTimestamp).getOrThrow()
         var accumulatedResult = SyncApplyResult.EMPTY
@@ -141,11 +144,14 @@ class SyncEngineImpl(
         val localDelta = createDelta(accountId, deviceId, lastSyncTimestamp)
 
         // 4. Push local changes only (git push)
-        if (!localDelta.isEmpty) {
+        val pushedCount = if (!localDelta.isEmpty) {
             transport.pushDelta(localDelta).getOrThrow()
+            localDelta.totalItems
+        } else {
+            0
         }
 
-        accumulatedResult
+        accumulatedResult.copy(localItemsPushed = pushedCount)
     }
 
     private suspend fun applyTombstones(

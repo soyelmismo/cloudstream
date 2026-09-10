@@ -1,12 +1,14 @@
 package com.lagradost.cloudstream3.shared.sync.transport
 
 import androidx.compose.runtime.Immutable
+import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.shared.sync.cloud.CloudStorageClient
 import com.lagradost.cloudstream3.shared.sync.cloud.RemoteFileMetadata
 import com.lagradost.cloudstream3.shared.sync.layout.CloudFileLayoutMapper
 import com.lagradost.cloudstream3.shared.sync.models.BookmarkDelta
 import com.lagradost.cloudstream3.shared.sync.models.FavoriteDelta
 import com.lagradost.cloudstream3.shared.sync.models.SyncDelta
+import com.lagradost.cloudstream3.shared.sync.models.SyncManifest
 import com.lagradost.cloudstream3.shared.sync.models.TombstoneDelta
 import com.lagradost.cloudstream3.shared.sync.models.WatchProgressDelta
 import kotlinx.collections.immutable.ImmutableList
@@ -24,7 +26,19 @@ class CloudStorageSyncTransport(
 
     override val transportId: String = "cloud_storage_${storageClient.providerId}"
 
+    override suspend fun initRepository(deviceId: String): Result<Unit> = runCatching {
+        val manifest = SyncManifest(
+            schemaVersion = 1,
+            appName = "CloudStream",
+            deviceId = deviceId,
+            updatedAt = APIHolder.unixTimeMS
+        )
+        val content = json.encodeToString(SyncManifest.serializer(), manifest)
+        storageClient.writeFile(CloudFileLayoutMapper.getManifestPath(), content).getOrThrow()
+    }
+
     override suspend fun pushDelta(delta: SyncDelta): Result<Unit> = runCatching {
+        initRepository(delta.deviceId).getOrThrow()
         val accountUuid = delta.accountUuid.ifBlank { delta.accountId.toString() }
         pushWatchProgress(accountUuid, delta.watchProgress)
         pushBookmarks(accountUuid, delta.bookmarks)

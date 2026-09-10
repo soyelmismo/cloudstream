@@ -1,6 +1,7 @@
 package com.lagradost.cloudstream3.shared.sync.manager
 
 import androidx.compose.runtime.Immutable
+import com.lagradost.api.Log
 import com.lagradost.cloudstream3.APIHolder
 import com.lagradost.cloudstream3.shared.persistence.driver.DatabaseDriverFactory
 import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager
@@ -196,6 +197,9 @@ object CloudSyncManager {
             _syncState.update { it.copy(isSyncing = true) }
             try {
                 executeSync(client, accountId, deviceId)
+            } catch (t: Throwable) {
+                Log.e("CloudSync", "Sync failed for ${client.providerId}: ${t.message}")
+                throw t
             } finally {
                 _syncState.update { it.copy(isSyncing = false) }
             }
@@ -207,26 +211,36 @@ object CloudSyncManager {
         accountId: Int,
         deviceId: String
     ): SyncApplyResult {
+        val effectiveAccountId = if (accountId != 0) accountId else AppPreferenceManager.getIntSync("active_account_id", 0)
         val transport = CloudStorageSyncTransport(storageClient = client)
         val syncEngine = resolveSyncEngine()
         val effectiveDeviceId = deviceId.ifBlank { getOrCreateDeviceId() }
-        val lastTimestamp = AppPreferenceManager.getStringSync(PREF_CLOUD_SYNC_LAST_TIMESTAMP)?.toLongOrNull() ?: 0L
+        val providerTimestampKey = "${PREF_CLOUD_SYNC_LAST_TIMESTAMP}_${client.providerId}"
+        val lastTimestamp = AppPreferenceManager.getStringSync(providerTimestampKey)?.toLongOrNull() ?: 0L
+
+        Log.i("CloudSync", "Starting sync: provider=${client.providerId}, account=$effectiveAccountId, device=$effectiveDeviceId, since=$lastTimestamp")
 
         val applyResult = syncEngine.sync(
-            accountId = accountId,
+            accountId = effectiveAccountId,
             deviceId = effectiveDeviceId,
             transport = transport,
             lastSyncTimestamp = lastTimestamp
         ).getOrThrow()
 
-        recordSyncSuccess(applyResult)
+        Log.i("CloudSync", "Sync completed: applied=${applyResult.totalApplied}, skipped=${applyResult.conflictsSkipped}")
+        recordSyncSuccess(applyResult, client.providerId)
         return applyResult
     }
 
-    private fun recordSyncSuccess(result: SyncApplyResult) {
+    private fun recordSyncSuccess(result: SyncApplyResult, providerId: String) {
         val now = APIHolder.unixTimeMS
-        val summary = "Applied ${result.totalApplied}, Skipped ${result.conflictsSkipped}"
+        val summary = if (result.localItemsPushed > 0) {
+            "Applied ${result.totalApplied}, Pushed ${result.localItemsPushed}, Skipped ${result.conflictsSkipped}"
+        } else {
+            "Applied ${result.totalApplied}, Skipped ${result.conflictsSkipped}"
+        }
         AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_LAST_TIMESTAMP, now.toString())
+        AppPreferenceManager.setStringSync("${PREF_CLOUD_SYNC_LAST_TIMESTAMP}_$providerId", now.toString())
         AppPreferenceManager.setStringSync(PREF_CLOUD_SYNC_LAST_SUMMARY, summary)
         _syncState.update {
             it.copy(

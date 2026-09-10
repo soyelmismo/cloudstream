@@ -8,6 +8,7 @@ import kotlinx.coroutines.sync.withLock
 
 interface SyncTransport {
     val transportId: String
+    suspend fun initRepository(deviceId: String): Result<Unit>
     suspend fun pushDelta(delta: SyncDelta): Result<Unit>
     suspend fun fetchDeltas(sinceTimestamp: Long): Result<ImmutableList<SyncDelta>>
 }
@@ -17,6 +18,8 @@ class InMemorySyncTransport(
 ) : SyncTransport {
     private val mutex = Mutex()
     private val deltas = mutableListOf<SyncDelta>()
+
+    override suspend fun initRepository(deviceId: String): Result<Unit> = Result.success(Unit)
 
     override suspend fun pushDelta(delta: SyncDelta): Result<Unit> = runCatching {
         mutex.withLock {
