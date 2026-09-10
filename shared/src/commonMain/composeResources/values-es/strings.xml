@@ -1466,4 +1466,36 @@
         <item quantity="many">%d enlaces ocultos</item>
         <item quantity="other">%d enlaces ocultos</item>
     </plurals>
+
+    <!-- Sincronización en la nube -->
+    <string name="section_cloud_sync">Sincronización en la Nube</string>
+    <string name="cloud_sync_desc">Sincroniza historial, marcadores y favoritos entre dispositivos</string>
+    <string name="cloud_sync_provider">Proveedor de Sincronización</string>
+    <string name="cloud_sync_provider_none">Desactivado</string>
+    <string name="cloud_sync_provider_gdrive">Google Drive</string>
+    <string name="cloud_sync_provider_webdav">WebDAV (Nextcloud / NAS)</string>
+    <string name="cloud_sync_provider_local">Carpeta Local / Syncthing</string>
+    <string name="cloud_sync_connect_google">Conectar con Google Drive</string>
+    <string name="cloud_sync_disconnect">Desconectar</string>
+    <string name="cloud_sync_connected_as" formatted="true">Conectado como %s</string>
+    <string name="cloud_sync_webdav_url">URL del Servidor WebDAV</string>
+    <string name="cloud_sync_webdav_user">Usuario</string>
+    <string name="cloud_sync_webdav_pass">Contraseña</string>
+    <string name="cloud_sync_local_path">Ruta del Directorio Local</string>
+    <string name="cloud_sync_now">Sincronizar Ahora</string>
+    <string name="cloud_sync_syncing">Sincronizando...</string>
+    <string name="cloud_sync_test_connection">Probar Conexión</string>
+    <string name="cloud_sync_connection_ok">¡Conexión exitosa!</string>
+    <string name="cloud_sync_connection_error">Fallo en la conexión</string>
+    <string name="cloud_sync_auto_title">Sincronización Automática</string>
+    <string name="cloud_sync_auto_desc">Sincronizar automáticamente al iniciar y tras cambios</string>
+    <string name="cloud_sync_last_synced" formatted="true">Última sincronización: %s</string>
+    <string name="cloud_sync_never">Nunca</string>
+    <string name="cloud_sync_save_config">Guardar Configuración</string>
+    <string name="cloud_sync_save_path">Guardar Ruta</string>
+    <string name="cloud_sync_browse">Examinar</string>
+    <string name="cloud_sync_oauth_instructions">Inicia sesión con Google, concede acceso y pega el código o URL de redirección aquí.</string>
+    <string name="cloud_sync_paste_code">Pegar código o URL de redirección</string>
+    <string name="cloud_sync_auth_failed">Error en la autenticación con Google Drive</string>
+    <string name="cloud_sync_failed">Error en la sincronización en la nube</string>
 </resources>

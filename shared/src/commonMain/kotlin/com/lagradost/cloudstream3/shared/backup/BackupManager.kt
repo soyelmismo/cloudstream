@@ -35,6 +35,7 @@ interface BackupManager {
          * or local file paths that must NEVER be exported or shared.
          */
         val nonTransferableKeys: Set<String> = setOf(
+            "cloud_sync_",
             "account_token",
             "account_ids",
             "biometric_key",

@@ -40,6 +40,10 @@ import com.lagradost.cloudstream3.shared.syncproviders.AuthLoginResponse
 import com.lagradost.cloudstream3.shared.syncproviders.AuthPinData
 import com.lagradost.cloudstream3.shared.syncproviders.AuthRepo
 import com.lagradost.cloudstream3.shared.syncproviders.AuthUser
+import com.lagradost.cloudstream3.shared.sync.manager.CloudSyncManager
+import com.lagradost.cloudstream3.shared.sync.manager.CloudSyncProvider
+import com.lagradost.cloudstream3.shared.sync.manager.CloudSyncState
+import com.lagradost.cloudstream3.shared.sync.oauth.GoogleDriveOAuth
 import com.lagradost.cloudstream3.utils.UiText
 import com.lagradost.cloudstream3.utils.txt
 import org.jetbrains.compose.resources.StringResource
@@ -165,7 +169,12 @@ data class AppSettingsState(
     val availableBackupCategories: ImmutableSet<BackupCategory> = BackupCategory.entries.toImmutableSet(),
     val isLoading: Boolean = false,
     @Transient
-    val error: UiText? = null
+    val error: UiText? = null,
+    val cloudSync: CloudSyncState = CloudSyncState(),
+    val isTestingCloudConnection: Boolean = false,
+    val cloudConnectionTestResult: Boolean? = null,
+    val pendingOAuthUrl: String? = null,
+    val pendingOAuthVerifier: String? = null
 ) : UiState
 
 class AppSettingsViewModel(
@@ -324,6 +333,7 @@ class AppSettingsViewModel(
                     skipStartupAccountSelect = skipStartupAccountSelect,
                     showSourcesOnPlay = showSourcesOnPlay,
                     activeAuthAccounts = activeAuthAccounts,
+                    cloudSync = CloudSyncManager.syncState.value,
                     isLoading = false,
                     error = null
                 )
@@ -402,6 +412,13 @@ class AppSettingsViewModel(
         AccountManager.accountsState
             .onEach { accounts ->
                 updateState { copy(activeAuthAccounts = accounts.toImmutableMap()) }
+            }
+            .catch { /* ignore */ }
+            .launchIn(viewModelScope)
+
+        CloudSyncManager.syncState
+            .onEach { syncState ->
+                updateState { copy(cloudSync = syncState) }
             }
             .catch { /* ignore */ }
             .launchIn(viewModelScope)
@@ -725,8 +742,148 @@ class AppSettingsViewModel(
             preferenceRepository.setBoolean(KEY_SYNC_WIFI_ONLY, defaultState.syncWifiOnly)
             preferenceRepository.setBoolean(KEY_SKIP_STARTUP_ACCOUNT_SELECT, defaultState.skipStartupAccountSelect)
             preferenceRepository.setBoolean(KEY_SHOW_SOURCES_ON_PLAY, defaultState.showSourcesOnPlay)
-            setState(defaultState.copy(activeAuthAccounts = AccountManager.accountsState.value.toImmutableMap()))
+            setState(
+                defaultState.copy(
+                    activeAuthAccounts = AccountManager.accountsState.value.toImmutableMap(),
+                    cloudSync = CloudSyncManager.syncState.value
+                )
+            )
         }
+    }
+
+    fun setCloudSyncProvider(provider: CloudSyncProvider) {
+        CloudSyncManager.setProvider(provider)
+    }
+
+    fun saveWebDavConfig(url: String, username: String, pass: String) {
+        CloudSyncManager.saveWebDavConfig(url, username, pass)
+    }
+
+    fun saveLocalSyncPath(path: String) {
+        CloudSyncManager.saveLocalSyncPath(path)
+    }
+
+    fun startGoogleDriveAuth() {
+        val verifier = GoogleDriveOAuth.generateCodeVerifier()
+        val challenge = GoogleDriveOAuth.generateCodeChallenge(verifier)
+        val url = GoogleDriveOAuth.buildAuthorizationUrl(codeChallenge = challenge)
+        updateState {
+            copy(
+                pendingOAuthUrl = url,
+                pendingOAuthVerifier = verifier
+            )
+        }
+    }
+
+    fun completeGoogleDriveAuth(rawInput: String) {
+        val verifier = currentState.pendingOAuthVerifier ?: return
+        launchSafeJob(
+            key = "google_drive_auth",
+            onError = { t ->
+                updateState {
+                    copy(
+                        pendingOAuthUrl = null,
+                        pendingOAuthVerifier = null,
+                        error = t.message?.let { txt(it) } ?: txt(Res.string.cloud_sync_auth_failed)
+                    )
+                }
+            }
+        ) {
+            val result = CloudSyncManager.authenticateGoogleDrive(
+                authCode = rawInput,
+                codeVerifier = verifier
+            )
+            result.fold(
+                onSuccess = {
+                    updateState {
+                        copy(
+                            pendingOAuthUrl = null,
+                            pendingOAuthVerifier = null
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    updateState {
+                        copy(
+                            pendingOAuthUrl = null,
+                            pendingOAuthVerifier = null,
+                            error = error.message?.let { txt(it) } ?: txt(Res.string.cloud_sync_auth_failed)
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun cancelGoogleDriveAuth() {
+        updateState {
+            copy(
+                pendingOAuthUrl = null,
+                pendingOAuthVerifier = null
+            )
+        }
+    }
+
+    fun disconnectCloudSync() {
+        CloudSyncManager.disconnect()
+    }
+
+    fun testCloudSyncConnection() {
+        launchSafeJob(
+            key = "test_cloud_connection",
+            onError = {
+                updateState {
+                    copy(
+                        isTestingCloudConnection = false,
+                        cloudConnectionTestResult = false
+                    )
+                }
+            }
+        ) {
+            updateState {
+                copy(
+                    isTestingCloudConnection = true,
+                    cloudConnectionTestResult = null
+                )
+            }
+            val result = CloudSyncManager.testConnection().getOrDefault(false)
+            updateState {
+                copy(
+                    isTestingCloudConnection = false,
+                    cloudConnectionTestResult = result
+                )
+            }
+        }
+    }
+
+    fun performCloudSync() {
+        launchSafeJob(
+            key = "perform_cloud_sync",
+            onError = { t ->
+                updateState {
+                    copy(error = t.message?.let { txt(it) } ?: txt(Res.string.cloud_sync_failed))
+                }
+            }
+        ) {
+            val result = CloudSyncManager.syncNow()
+            result.onFailure { error ->
+                updateState {
+                    copy(error = error.message?.let { txt(it) } ?: txt(Res.string.cloud_sync_failed))
+                }
+            }
+        }
+    }
+
+    fun toggleAutoCloudSync(enabled: Boolean) {
+        CloudSyncManager.setAutoSyncEnabled(enabled)
+    }
+
+    fun toggleCloudAutoSync(enabled: Boolean) = toggleAutoCloudSync(enabled)
+
+    fun runCloudSyncNow() = performCloudSync()
+
+    fun clearCloudSyncTestResult() {
+        updateState { copy(cloudConnectionTestResult = null) }
     }
 
     private fun parseStringList(value: String?, default: List<String>): List<String> {

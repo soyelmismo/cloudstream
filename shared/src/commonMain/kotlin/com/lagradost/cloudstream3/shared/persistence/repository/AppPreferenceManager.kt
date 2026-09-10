@@ -49,6 +49,20 @@ object AppPreferenceManager {
     const val KEY_SEARCH_SELECTED_TYPES = "search_selected_types"
     const val KEY_SEARCH_SELECTED_QUALITIES = "search_selected_qualities"
     const val KEY_SEARCH_DISPLAY_MODE = "search_display_mode"
+    const val KEY_CLOUD_SYNC_PROVIDER = "cloud_sync_provider"
+    const val KEY_CLOUD_SYNC_WEBDAV_URL = "cloud_sync_webdav_url"
+    const val KEY_CLOUD_SYNC_WEBDAV_USER = "cloud_sync_webdav_user"
+    const val KEY_CLOUD_SYNC_WEBDAV_PASS = "cloud_sync_webdav_pass"
+    const val KEY_CLOUD_SYNC_LOCAL_PATH = "cloud_sync_local_path"
+    const val KEY_CLOUD_SYNC_GDRIVE_REFRESH_TOKEN = "cloud_sync_gdrive_refresh_token"
+    const val KEY_CLOUD_SYNC_GDRIVE_ACCESS_TOKEN = "cloud_sync_gdrive_access_token"
+    const val KEY_CLOUD_SYNC_GDRIVE_TOKEN_EXPIRY = "cloud_sync_gdrive_token_expiry"
+    const val KEY_CLOUD_SYNC_GDRIVE_EMAIL = "cloud_sync_gdrive_email"
+    const val KEY_CLOUD_SYNC_GDRIVE_NAME = "cloud_sync_gdrive_name"
+    const val KEY_CLOUD_SYNC_GDRIVE_PICTURE = "cloud_sync_gdrive_picture"
+    const val KEY_CLOUD_SYNC_LAST_TIMESTAMP = "cloud_sync_last_timestamp"
+    const val KEY_CLOUD_SYNC_LAST_SUMMARY = "cloud_sync_last_summary"
+    const val KEY_CLOUD_SYNC_AUTO_ENABLED = "cloud_sync_auto_enabled"
 
     fun getLastSyncApiKey(accountId: Int): String = "${accountId}_last_sync_api"
 
@@ -70,6 +84,12 @@ object AppPreferenceManager {
     fun init(repository: AppPreferenceRepository) {
         _repository = repository
     }
+
+    suspend fun getString(key: String, defaultValue: String? = null): String? =
+        currentRepository.getString(key, defaultValue)
+
+    suspend fun setString(key: String, value: String) =
+        currentRepository.setString(key, value)
 
     suspend fun getInt(key: String, defaultValue: Int = 0): Int =
         currentRepository.getInt(key, defaultValue)

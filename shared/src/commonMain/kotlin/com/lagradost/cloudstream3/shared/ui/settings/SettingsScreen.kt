@@ -6,6 +6,7 @@ import com.lagradost.cloudstream3.shared.viewmodels.settings.SubtitleStyle
 import com.lagradost.cloudstream3.shared.viewmodels.settings.DohProvider
 import com.lagradost.cloudstream3.shared.syncproviders.AuthUser
 import com.lagradost.cloudstream3.shared.syncproviders.AuthLoginResponse
+import com.lagradost.cloudstream3.shared.sync.manager.CloudSyncProvider
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -246,7 +247,17 @@ fun SettingsScreen(
                 onExportBackup = appSettingsViewModel::exportBackupWithPicker,
                 onImportBackup = appSettingsViewModel::importBackupWithPicker,
                 onClearBackupMessage = appSettingsViewModel::clearBackupMessage,
-                onRequestReset = { showResetDialog = true }
+                onRequestReset = { showResetDialog = true },
+                onProviderSelected = appSettingsViewModel::setCloudSyncProvider,
+                onStartGoogleAuth = appSettingsViewModel::startGoogleDriveAuth,
+                onCompleteGoogleAuth = appSettingsViewModel::completeGoogleDriveAuth,
+                onCancelGoogleAuth = appSettingsViewModel::cancelGoogleDriveAuth,
+                onDisconnectCloudSync = appSettingsViewModel::disconnectCloudSync,
+                onSaveWebDavConfig = appSettingsViewModel::saveWebDavConfig,
+                onSaveLocalPath = appSettingsViewModel::saveLocalSyncPath,
+                onSyncNow = appSettingsViewModel::runCloudSyncNow,
+                onTestConnection = appSettingsViewModel::testCloudSyncConnection,
+                onAutoSyncToggled = appSettingsViewModel::toggleCloudAutoSync
             )
             "network_dns" -> NetworkDnsSettingsSection(
                 state = appState,
@@ -1028,7 +1039,17 @@ fun BackupRestoreSettingsSection(
     onImportBackup: () -> Unit,
     onClearBackupMessage: () -> Unit,
     modifier: Modifier = Modifier,
-    onRequestReset: (() -> Unit)? = null
+    onRequestReset: (() -> Unit)? = null,
+    onProviderSelected: (CloudSyncProvider) -> Unit = {},
+    onStartGoogleAuth: () -> Unit = {},
+    onCompleteGoogleAuth: (String) -> Unit = {},
+    onCancelGoogleAuth: () -> Unit = {},
+    onDisconnectCloudSync: () -> Unit = {},
+    onSaveWebDavConfig: (url: String, username: String, pass: String) -> Unit = { _, _, _ -> },
+    onSaveLocalPath: (path: String) -> Unit = {},
+    onSyncNow: () -> Unit = {},
+    onTestConnection: () -> Unit = {},
+    onAutoSyncToggled: (Boolean) -> Unit = {}
 ) {
     var showBackupDialog by remember { mutableStateOf(false) }
     var selectedBackupCategories by remember {
@@ -1060,6 +1081,23 @@ fun BackupRestoreSettingsSection(
             onAutoBackupEnabledChange = { autoBackupEnabled = it },
             autoBackupFrequency = autoBackupFrequency,
             onOpenFrequencyDialog = { showFrequencyDialog = true }
+        )
+
+        CloudSyncCard(
+            state = state.cloudSync,
+            isTestingConnection = state.isTestingCloudConnection,
+            testConnectionResult = state.cloudConnectionTestResult,
+            pendingOAuthUrl = state.pendingOAuthUrl,
+            onProviderSelected = onProviderSelected,
+            onStartGoogleAuth = onStartGoogleAuth,
+            onCompleteGoogleAuth = onCompleteGoogleAuth,
+            onCancelGoogleAuth = onCancelGoogleAuth,
+            onDisconnect = onDisconnectCloudSync,
+            onSaveWebDavConfig = onSaveWebDavConfig,
+            onSaveLocalPath = onSaveLocalPath,
+            onSyncNow = onSyncNow,
+            onTestConnection = onTestConnection,
+            onAutoSyncToggled = onAutoSyncToggled
         )
     }
 
