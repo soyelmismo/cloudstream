@@ -3,10 +3,19 @@ package com.lagradost.cloudstream3.shared.sync.oauth
 import androidx.compose.runtime.Immutable
 import com.lagradost.cloudstream3.app
 import com.lagradost.cloudstream3.base64Encode
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.io.BufferedReader
 import java.io.IOException
+import java.io.InputStreamReader
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.security.MessageDigest
@@ -32,15 +41,34 @@ data class GoogleUserInfo(
     @SerialName("picture") val picture: String? = null
 )
 
+@Serializable
+@Immutable
+data class GoogleDriveAboutUser(
+    @SerialName("displayName") val displayName: String? = null,
+    @SerialName("emailAddress") val emailAddress: String? = null,
+    @SerialName("photoLink") val photoLink: String? = null,
+    @SerialName("permissionId") val permissionId: String? = null
+)
+
+@Serializable
+@Immutable
+data class GoogleDriveAboutResponse(
+    @SerialName("user") val user: GoogleDriveAboutUser? = null
+)
+
 object GoogleDriveOAuth {
-    const val DEFAULT_CLIENT_ID = "1043236712316-4tq98dksfq240g6p4gq92955qsl0o1u1.apps.googleusercontent.com"
-    const val DEFAULT_REDIRECT_URI = "http://127.0.0.1:8080"
+    // Official clasp (Google's Apps Script CLI) client credentials as used in CloudRedirect
+    const val DEFAULT_CLIENT_ID = "1072944905499-vm2v2i5dvn0a0d2o4ca36i1vge8cvbn0.apps.googleusercontent.com"
+    const val DEFAULT_CLIENT_SECRET = "v6V3fKV_zWU7iw1DrpO1rknX"
+    const val DEFAULT_PORT = 8085
+    const val DEFAULT_REDIRECT_URI = "http://127.0.0.1:8085/callback"
     const val CUSTOM_SCHEME_REDIRECT_URI = "cloudstream://oauth2/google"
 
     private const val AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
     private const val TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
     private const val USER_INFO_ENDPOINT = "https://www.googleapis.com/oauth2/v2/userinfo"
-    private const val OAUTH_SCOPES = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile"
+    private const val DRIVE_ABOUT_ENDPOINT = "https://www.googleapis.com/drive/v3/about?fields=user"
+    private const val OAUTH_SCOPES = "https://www.googleapis.com/auth/drive.file"
     private const val PKCE_CHARACTERS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
 
     private val json = Json {
@@ -108,7 +136,7 @@ object GoogleDriveOAuth {
 
     suspend fun exchangeCode(
         clientId: String = DEFAULT_CLIENT_ID,
-        clientSecret: String? = null,
+        clientSecret: String? = DEFAULT_CLIENT_SECRET,
         code: String,
         codeVerifier: String,
         redirectUri: String = DEFAULT_REDIRECT_URI
@@ -135,7 +163,7 @@ object GoogleDriveOAuth {
 
     suspend fun refreshAccessToken(
         clientId: String = DEFAULT_CLIENT_ID,
-        clientSecret: String? = null,
+        clientSecret: String? = DEFAULT_CLIENT_SECRET,
         refreshToken: String
     ): Result<GoogleOAuthToken> = runCatching {
         val params = mutableMapOf(
@@ -157,6 +185,22 @@ object GoogleDriveOAuth {
     }
 
     suspend fun fetchUserInfo(accessToken: String): Result<GoogleUserInfo> = runCatching {
+        val aboutResp = app.get(
+            DRIVE_ABOUT_ENDPOINT,
+            headers = mapOf("Authorization" to "Bearer $accessToken")
+        )
+        if (aboutResp.isSuccessful) {
+            val about = json.decodeFromString<GoogleDriveAboutResponse>(aboutResp.text)
+            val user = about.user
+            if (user != null) {
+                return@runCatching GoogleUserInfo(
+                    id = user.permissionId ?: "",
+                    email = user.emailAddress ?: "",
+                    name = user.displayName ?: user.emailAddress ?: "Google Drive",
+                    picture = user.photoLink
+                )
+            }
+        }
         val response = app.get(
             USER_INFO_ENDPOINT,
             headers = mapOf("Authorization" to "Bearer $accessToken")
@@ -165,5 +209,94 @@ object GoogleDriveOAuth {
             throw IOException("Failed to fetch Google user info: HTTP ${response.code} ${response.text}")
         }
         json.decodeFromString<GoogleUserInfo>(response.text)
+    }
+
+    fun startLocalCallbackServer(
+        scope: CoroutineScope,
+        port: Int = DEFAULT_PORT,
+        onCodeReceived: (String) -> Unit
+    ): AutoCloseable {
+        val server = LocalOAuthCallbackServer(port, onCodeReceived)
+        server.start(scope)
+        return server
+    }
+}
+
+class LocalOAuthCallbackServer(
+    private val port: Int = GoogleDriveOAuth.DEFAULT_PORT,
+    private val onCodeReceived: (String) -> Unit
+) : AutoCloseable {
+    private var serverSocket: ServerSocket? = null
+    private var job: Job? = null
+    @Volatile private var isClosed = false
+
+    fun start(scope: CoroutineScope) {
+        job = scope.launch(Dispatchers.IO) {
+            try {
+                val server = ServerSocket(port, 1, InetAddress.getByName("127.0.0.1"))
+                serverSocket = server
+                while (!isClosed && !server.isClosed) {
+                    val socket = try {
+                        server.accept()
+                    } catch (_: Throwable) {
+                        break
+                    }
+                    launch(Dispatchers.IO) {
+                        handleConnection(socket)
+                    }
+                }
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    private fun handleConnection(socket: Socket) {
+        try {
+            socket.soTimeout = 5000
+            val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+            val firstLine = reader.readLine() ?: return
+            if (firstLine.contains("code=")) {
+                val code = GoogleDriveOAuth.sanitizeAuthCode(firstLine)
+                sendHtmlResponse(socket)
+                onCodeReceived(code)
+                close()
+            } else {
+                sendNoContentResponse(socket)
+            }
+        } catch (_: Throwable) {
+        } finally {
+            runCatching { socket.close() }
+        }
+    }
+
+    private fun sendHtmlResponse(socket: Socket) {
+        val html = """
+            <!DOCTYPE html>
+            <html>
+            <head><meta charset="utf-8"><title>CloudStream</title></head>
+            <body style="font-family:system-ui,sans-serif;text-align:center;padding:50px;background:#121212;color:#ffffff;">
+              <h2>¡Autenticación con Google Drive exitosa!</h2>
+              <p>Puedes cerrar esta pestaña y regresar a la aplicación de CloudStream.</p>
+            </body>
+            </html>
+        """.trimIndent()
+        val bytes = html.toByteArray(Charsets.UTF_8)
+        val out = socket.getOutputStream()
+        out.write("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray(Charsets.UTF_8))
+        out.write(bytes)
+        out.flush()
+    }
+
+    private fun sendNoContentResponse(socket: Socket) {
+        val out = socket.getOutputStream()
+        out.write("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n".toByteArray(Charsets.UTF_8))
+        out.flush()
+    }
+
+    override fun close() {
+        if (isClosed) return
+        isClosed = true
+        runCatching { serverSocket?.close() }
+        job?.cancel()
     }
 }

@@ -193,6 +193,8 @@ class AppSettingsViewModel(
     val currentState: AppSettingsState
         get() = _state.value
 
+    private var oauthCallbackServer: AutoCloseable? = null
+
     protected fun updateState(reducer: AppSettingsState.() -> AppSettingsState) {
         _state.update { it.reducer() }
     }
@@ -764,6 +766,10 @@ class AppSettingsViewModel(
     }
 
     fun startGoogleDriveAuth() {
+        oauthCallbackServer?.close()
+        oauthCallbackServer = GoogleDriveOAuth.startLocalCallbackServer(viewModelScope) { code ->
+            completeGoogleDriveAuth(code)
+        }
         val verifier = GoogleDriveOAuth.generateCodeVerifier()
         val challenge = GoogleDriveOAuth.generateCodeChallenge(verifier)
         val url = GoogleDriveOAuth.buildAuthorizationUrl(codeChallenge = challenge)
@@ -776,6 +782,8 @@ class AppSettingsViewModel(
     }
 
     fun completeGoogleDriveAuth(rawInput: String) {
+        oauthCallbackServer?.close()
+        oauthCallbackServer = null
         val verifier = currentState.pendingOAuthVerifier ?: return
         launchSafeJob(
             key = "google_drive_auth",
@@ -816,12 +824,20 @@ class AppSettingsViewModel(
     }
 
     fun cancelGoogleDriveAuth() {
+        oauthCallbackServer?.close()
+        oauthCallbackServer = null
         updateState {
             copy(
                 pendingOAuthUrl = null,
                 pendingOAuthVerifier = null
             )
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        oauthCallbackServer?.close()
+        oauthCallbackServer = null
     }
 
     fun disconnectCloudSync() {

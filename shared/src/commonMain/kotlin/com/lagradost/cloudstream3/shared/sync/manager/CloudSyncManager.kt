@@ -239,7 +239,7 @@ object CloudSyncManager {
         authCode: String,
         codeVerifier: String,
         clientId: String = GoogleDriveOAuth.DEFAULT_CLIENT_ID,
-        clientSecret: String? = null,
+        clientSecret: String? = GoogleDriveOAuth.DEFAULT_CLIENT_SECRET,
         redirectUri: String = GoogleDriveOAuth.DEFAULT_REDIRECT_URI
     ): Result<GoogleUserInfo> = runCatching {
         val sanitizedCode = GoogleDriveOAuth.sanitizeAuthCode(authCode)
