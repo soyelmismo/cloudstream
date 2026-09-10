@@ -6,10 +6,10 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
-import com.lagradost.cloudstream3.ui.settings.Globals.EMULATOR
-import com.lagradost.cloudstream3.ui.settings.Globals.TV
-import com.lagradost.cloudstream3.ui.settings.Globals.isLandscape
-import com.lagradost.cloudstream3.ui.settings.Globals.isLayout
+import com.lagradost.cloudstream3.utils.Globals.EMULATOR
+import com.lagradost.cloudstream3.utils.Globals.TV
+import com.lagradost.cloudstream3.utils.Globals.isLandscape
+import com.lagradost.cloudstream3.utils.Globals.isLayout
 import com.lagradost.cloudstream3.utils.UIHelper.fixSystemBarsPadding
 import com.lagradost.cloudstream4.compose.Screen
 import com.lagradost.cloudstream4.compose.createComposeView
