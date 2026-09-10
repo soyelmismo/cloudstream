@@ -26,6 +26,9 @@ interface WatchProgressDao {
     @Query("SELECT mediaId FROM watch_progress WHERE accountId = :accountId")
     suspend fun getAllMediaIds(accountId: Int): List<Int>
 
+    @Query("SELECT * FROM watch_progress WHERE accountId = :accountId AND lastUpdated > :sinceTimestamp ORDER BY lastUpdated ASC")
+    suspend fun getWatchProgressSince(accountId: Int, sinceTimestamp: Long): List<WatchProgressEntity>
+
     @Upsert
     suspend fun upsertWatchProgress(progress: WatchProgressEntity)
 

@@ -13,6 +13,7 @@ import com.lagradost.cloudstream3.shared.persistence.dao.FavoriteDao
 import com.lagradost.cloudstream3.shared.persistence.dao.ResumeWatchingDao
 import com.lagradost.cloudstream3.shared.persistence.dao.SubscriptionDao
 import com.lagradost.cloudstream3.shared.persistence.dao.SyncMappingDao
+import com.lagradost.cloudstream3.shared.persistence.dao.SyncTombstoneDao
 import com.lagradost.cloudstream3.shared.persistence.dao.WatchProgressDao
 import com.lagradost.cloudstream3.shared.persistence.entity.AccountEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.AppPreferenceEntity
@@ -23,6 +24,7 @@ import com.lagradost.cloudstream3.shared.persistence.entity.FavoriteEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.ResumeWatchingEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.SubscriptionEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.SyncMappingEntity
+import com.lagradost.cloudstream3.shared.persistence.entity.SyncTombstoneEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.WatchProgressEntity
 
 @Database(
@@ -36,7 +38,8 @@ import com.lagradost.cloudstream3.shared.persistence.entity.WatchProgressEntity
         DownloadHeaderEntity::class,
         DownloadEpisodeEntity::class,
         SyncMappingEntity::class,
-        AppPreferenceEntity::class
+        AppPreferenceEntity::class,
+        SyncTombstoneEntity::class
     ],
     version = 1,
     exportSchema = false
@@ -52,6 +55,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun favoriteDao(): FavoriteDao
     abstract fun downloadCacheDao(): DownloadCacheDao
     abstract fun syncMappingDao(): SyncMappingDao
+    abstract fun syncTombstoneDao(): SyncTombstoneDao
     abstract fun appPreferenceDao(): AppPreferenceDao
 
     companion object {

@@ -7,9 +7,12 @@ import com.lagradost.cloudstream3.shared.persistence.dao.BookmarkDao
 import com.lagradost.cloudstream3.shared.persistence.dao.DownloadCacheDao
 import com.lagradost.cloudstream3.shared.persistence.dao.FavoriteDao
 import com.lagradost.cloudstream3.shared.persistence.dao.ResumeWatchingDao
+import androidx.compose.runtime.Immutable
 import com.lagradost.cloudstream3.shared.persistence.dao.SubscriptionDao
 import com.lagradost.cloudstream3.shared.persistence.dao.SyncMappingDao
+import com.lagradost.cloudstream3.shared.persistence.dao.SyncTombstoneDao
 import com.lagradost.cloudstream3.shared.persistence.dao.WatchProgressDao
+import com.lagradost.cloudstream3.shared.persistence.database.AppDatabase
 import com.lagradost.cloudstream3.shared.persistence.entity.AccountEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.AppPreferenceEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.BookmarkEntity
@@ -19,6 +22,7 @@ import com.lagradost.cloudstream3.shared.persistence.entity.FavoriteEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.ResumeWatchingEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.SubscriptionEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.SyncMappingEntity
+import com.lagradost.cloudstream3.shared.persistence.entity.SyncTombstoneEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.WatchProgressEntity
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.ImmutableMap
@@ -56,12 +60,22 @@ interface WatchProgressRepository {
     fun getProgressFlow(accountId: Int, mediaId: Int): Flow<WatchProgressEntity?>
     suspend fun getAllProgress(accountId: Int): ImmutableList<WatchProgressEntity>
     fun getAllProgressFlow(accountId: Int): Flow<ImmutableList<WatchProgressEntity>>
+    suspend fun getWatchProgressSince(accountId: Int, sinceTimestamp: Long): ImmutableList<WatchProgressEntity> =
+        getAllProgress(accountId).filter { it.lastUpdated > sinceTimestamp }.toImmutableList()
     suspend fun setProgress(accountId: Int, mediaId: Int, position: Long, duration: Long, watchState: Int = 0)
     suspend fun deleteProgress(accountId: Int, mediaId: Int)
     suspend fun clearProgress(accountId: Int)
 }
 
-class WatchProgressRepositoryImpl(private val dao: WatchProgressDao) : WatchProgressRepository {
+class WatchProgressRepositoryImpl(
+    private val dao: WatchProgressDao,
+    private val syncTombstoneDao: SyncTombstoneDao? = null
+) : WatchProgressRepository {
+    constructor(dao: WatchProgressDao, syncTombstoneRepository: SyncTombstoneRepository) : this(
+        dao,
+        (syncTombstoneRepository as? SyncTombstoneRepositoryImpl)?.dao
+    )
+
     override suspend fun getProgress(accountId: Int, mediaId: Int): WatchProgressEntity? =
         dao.getWatchProgress(accountId, mediaId)
 
@@ -73,6 +87,9 @@ class WatchProgressRepositoryImpl(private val dao: WatchProgressDao) : WatchProg
 
     override fun getAllProgressFlow(accountId: Int): Flow<ImmutableList<WatchProgressEntity>> =
         dao.getAllWatchProgressFlow(accountId).map { it.toImmutableList() }
+
+    override suspend fun getWatchProgressSince(accountId: Int, sinceTimestamp: Long): ImmutableList<WatchProgressEntity> =
+        dao.getWatchProgressSince(accountId, sinceTimestamp).toImmutableList()
 
     override suspend fun setProgress(
         accountId: Int,
@@ -93,11 +110,38 @@ class WatchProgressRepositoryImpl(private val dao: WatchProgressDao) : WatchProg
         )
     }
 
-    override suspend fun deleteProgress(accountId: Int, mediaId: Int) =
+    override suspend fun deleteProgress(accountId: Int, mediaId: Int) {
         dao.deleteWatchProgress(accountId, mediaId)
+        syncTombstoneDao?.upsertTombstone(
+            SyncTombstoneEntity(
+                accountId = accountId,
+                entityType = SyncTombstoneEntity.TYPE_WATCH_PROGRESS,
+                entityId = mediaId.toString(),
+                deletedAt = APIHolder.unixTimeMS
+            )
+        )
+    }
 
-    override suspend fun clearProgress(accountId: Int) =
+    override suspend fun clearProgress(accountId: Int) {
+        val mediaIds = if (syncTombstoneDao != null) dao.getAllMediaIds(accountId) else emptyList()
         dao.clearAccountProgress(accountId)
+        recordTombstones(accountId, SyncTombstoneEntity.TYPE_WATCH_PROGRESS, mediaIds)
+    }
+
+    private suspend fun recordTombstones(accountId: Int, entityType: String, ids: List<Int>) {
+        if (ids.isEmpty() || syncTombstoneDao == null) return
+        val now = APIHolder.unixTimeMS
+        syncTombstoneDao.upsertAll(
+            ids.map { id ->
+                SyncTombstoneEntity(
+                    accountId = accountId,
+                    entityType = entityType,
+                    entityId = id.toString(),
+                    deletedAt = now
+                )
+            }
+        )
+    }
 }
 
 interface ResumeWatchingRepository {
@@ -172,12 +216,22 @@ interface BookmarkRepository {
     fun getAllBookmarksFlow(accountId: Int): Flow<ImmutableList<BookmarkEntity>>
     suspend fun getBookmarksByWatchType(accountId: Int, watchType: Int): ImmutableList<BookmarkEntity>
     fun getBookmarksByWatchTypeFlow(accountId: Int, watchType: Int): Flow<ImmutableList<BookmarkEntity>>
+    suspend fun getBookmarksSince(accountId: Int, sinceTimestamp: Long): ImmutableList<BookmarkEntity> =
+        getAllBookmarks(accountId).filter { it.latestUpdatedTime > sinceTimestamp }.toImmutableList()
     suspend fun saveBookmark(bookmark: BookmarkEntity)
     suspend fun deleteBookmark(accountId: Int, id: Int)
     suspend fun clearAll(accountId: Int)
 }
 
-class BookmarkRepositoryImpl(private val dao: BookmarkDao) : BookmarkRepository {
+class BookmarkRepositoryImpl(
+    private val dao: BookmarkDao,
+    private val syncTombstoneDao: SyncTombstoneDao? = null
+) : BookmarkRepository {
+    constructor(dao: BookmarkDao, syncTombstoneRepository: SyncTombstoneRepository) : this(
+        dao,
+        (syncTombstoneRepository as? SyncTombstoneRepositoryImpl)?.dao
+    )
+
     override suspend fun getBookmark(accountId: Int, id: Int): BookmarkEntity? =
         dao.getBookmark(accountId, id)
 
@@ -196,14 +250,44 @@ class BookmarkRepositoryImpl(private val dao: BookmarkDao) : BookmarkRepository 
     override fun getBookmarksByWatchTypeFlow(accountId: Int, watchType: Int): Flow<ImmutableList<BookmarkEntity>> =
         dao.getBookmarksByWatchTypeFlow(accountId, watchType).map { it.toImmutableList() }
 
+    override suspend fun getBookmarksSince(accountId: Int, sinceTimestamp: Long): ImmutableList<BookmarkEntity> =
+        dao.getBookmarksSince(accountId, sinceTimestamp).toImmutableList()
+
     override suspend fun saveBookmark(bookmark: BookmarkEntity) =
         dao.upsertBookmark(bookmark)
 
-    override suspend fun deleteBookmark(accountId: Int, id: Int) =
+    override suspend fun deleteBookmark(accountId: Int, id: Int) {
         dao.deleteBookmark(accountId, id)
+        syncTombstoneDao?.upsertTombstone(
+            SyncTombstoneEntity(
+                accountId = accountId,
+                entityType = SyncTombstoneEntity.TYPE_BOOKMARK,
+                entityId = id.toString(),
+                deletedAt = APIHolder.unixTimeMS
+            )
+        )
+    }
 
-    override suspend fun clearAll(accountId: Int) =
+    override suspend fun clearAll(accountId: Int) {
+        val ids = if (syncTombstoneDao != null) dao.getAllBookmarkIds(accountId) else emptyList()
         dao.clearAccountBookmarks(accountId)
+        recordTombstones(accountId, SyncTombstoneEntity.TYPE_BOOKMARK, ids)
+    }
+
+    private suspend fun recordTombstones(accountId: Int, entityType: String, ids: List<Int>) {
+        if (ids.isEmpty() || syncTombstoneDao == null) return
+        val now = APIHolder.unixTimeMS
+        syncTombstoneDao.upsertAll(
+            ids.map { id ->
+                SyncTombstoneEntity(
+                    accountId = accountId,
+                    entityType = entityType,
+                    entityId = id.toString(),
+                    deletedAt = now
+                )
+            }
+        )
+    }
 }
 
 interface SubscriptionRepository {
@@ -211,12 +295,22 @@ interface SubscriptionRepository {
     fun getSubscriptionFlow(accountId: Int, id: Int): Flow<SubscriptionEntity?>
     suspend fun getAllSubscriptions(accountId: Int): ImmutableList<SubscriptionEntity>
     fun getAllSubscriptionsFlow(accountId: Int): Flow<ImmutableList<SubscriptionEntity>>
+    suspend fun getSubscriptionsSince(accountId: Int, sinceTimestamp: Long): ImmutableList<SubscriptionEntity> =
+        getAllSubscriptions(accountId).filter { it.latestUpdatedTime > sinceTimestamp }.toImmutableList()
     suspend fun saveSubscription(subscription: SubscriptionEntity)
     suspend fun deleteSubscription(accountId: Int, id: Int)
     suspend fun clearAll(accountId: Int)
 }
 
-class SubscriptionRepositoryImpl(private val dao: SubscriptionDao) : SubscriptionRepository {
+class SubscriptionRepositoryImpl(
+    private val dao: SubscriptionDao,
+    private val syncTombstoneDao: SyncTombstoneDao? = null
+) : SubscriptionRepository {
+    constructor(dao: SubscriptionDao, syncTombstoneRepository: SyncTombstoneRepository) : this(
+        dao,
+        (syncTombstoneRepository as? SyncTombstoneRepositoryImpl)?.dao
+    )
+
     override suspend fun getSubscription(accountId: Int, id: Int): SubscriptionEntity? =
         dao.getSubscription(accountId, id)
 
@@ -229,14 +323,44 @@ class SubscriptionRepositoryImpl(private val dao: SubscriptionDao) : Subscriptio
     override fun getAllSubscriptionsFlow(accountId: Int): Flow<ImmutableList<SubscriptionEntity>> =
         dao.getAllSubscriptionsFlow(accountId).map { it.toImmutableList() }
 
+    override suspend fun getSubscriptionsSince(accountId: Int, sinceTimestamp: Long): ImmutableList<SubscriptionEntity> =
+        dao.getSubscriptionsSince(accountId, sinceTimestamp).toImmutableList()
+
     override suspend fun saveSubscription(subscription: SubscriptionEntity) =
         dao.upsertSubscription(subscription)
 
-    override suspend fun deleteSubscription(accountId: Int, id: Int) =
+    override suspend fun deleteSubscription(accountId: Int, id: Int) {
         dao.deleteSubscription(accountId, id)
+        syncTombstoneDao?.upsertTombstone(
+            SyncTombstoneEntity(
+                accountId = accountId,
+                entityType = SyncTombstoneEntity.TYPE_SUBSCRIPTION,
+                entityId = id.toString(),
+                deletedAt = APIHolder.unixTimeMS
+            )
+        )
+    }
 
-    override suspend fun clearAll(accountId: Int) =
+    override suspend fun clearAll(accountId: Int) {
+        val ids = if (syncTombstoneDao != null) dao.getAllSubscriptions(accountId).map { it.id } else emptyList()
         dao.clearAccountSubscriptions(accountId)
+        recordTombstones(accountId, SyncTombstoneEntity.TYPE_SUBSCRIPTION, ids)
+    }
+
+    private suspend fun recordTombstones(accountId: Int, entityType: String, ids: List<Int>) {
+        if (ids.isEmpty() || syncTombstoneDao == null) return
+        val now = APIHolder.unixTimeMS
+        syncTombstoneDao.upsertAll(
+            ids.map { id ->
+                SyncTombstoneEntity(
+                    accountId = accountId,
+                    entityType = entityType,
+                    entityId = id.toString(),
+                    deletedAt = now
+                )
+            }
+        )
+    }
 }
 
 interface FavoriteRepository {
@@ -244,12 +368,22 @@ interface FavoriteRepository {
     fun getFavoriteFlow(accountId: Int, id: Int): Flow<FavoriteEntity?>
     suspend fun getAllFavorites(accountId: Int): ImmutableList<FavoriteEntity>
     fun getAllFavoritesFlow(accountId: Int): Flow<ImmutableList<FavoriteEntity>>
+    suspend fun getFavoritesSince(accountId: Int, sinceTimestamp: Long): ImmutableList<FavoriteEntity> =
+        getAllFavorites(accountId).filter { it.latestUpdatedTime > sinceTimestamp }.toImmutableList()
     suspend fun saveFavorite(favorite: FavoriteEntity)
     suspend fun deleteFavorite(accountId: Int, id: Int)
     suspend fun clearAll(accountId: Int)
 }
 
-class FavoriteRepositoryImpl(private val dao: FavoriteDao) : FavoriteRepository {
+class FavoriteRepositoryImpl(
+    private val dao: FavoriteDao,
+    private val syncTombstoneDao: SyncTombstoneDao? = null
+) : FavoriteRepository {
+    constructor(dao: FavoriteDao, syncTombstoneRepository: SyncTombstoneRepository) : this(
+        dao,
+        (syncTombstoneRepository as? SyncTombstoneRepositoryImpl)?.dao
+    )
+
     override suspend fun getFavorite(accountId: Int, id: Int): FavoriteEntity? =
         dao.getFavorite(accountId, id)
 
@@ -262,14 +396,44 @@ class FavoriteRepositoryImpl(private val dao: FavoriteDao) : FavoriteRepository 
     override fun getAllFavoritesFlow(accountId: Int): Flow<ImmutableList<FavoriteEntity>> =
         dao.getAllFavoritesFlow(accountId).map { it.toImmutableList() }
 
+    override suspend fun getFavoritesSince(accountId: Int, sinceTimestamp: Long): ImmutableList<FavoriteEntity> =
+        dao.getFavoritesSince(accountId, sinceTimestamp).toImmutableList()
+
     override suspend fun saveFavorite(favorite: FavoriteEntity) =
         dao.upsertFavorite(favorite)
 
-    override suspend fun deleteFavorite(accountId: Int, id: Int) =
+    override suspend fun deleteFavorite(accountId: Int, id: Int) {
         dao.deleteFavorite(accountId, id)
+        syncTombstoneDao?.upsertTombstone(
+            SyncTombstoneEntity(
+                accountId = accountId,
+                entityType = SyncTombstoneEntity.TYPE_FAVORITE,
+                entityId = id.toString(),
+                deletedAt = APIHolder.unixTimeMS
+            )
+        )
+    }
 
-    override suspend fun clearAll(accountId: Int) =
+    override suspend fun clearAll(accountId: Int) {
+        val ids = if (syncTombstoneDao != null) dao.getAllFavorites(accountId).map { it.id } else emptyList()
         dao.clearAccountFavorites(accountId)
+        recordTombstones(accountId, SyncTombstoneEntity.TYPE_FAVORITE, ids)
+    }
+
+    private suspend fun recordTombstones(accountId: Int, entityType: String, ids: List<Int>) {
+        if (ids.isEmpty() || syncTombstoneDao == null) return
+        val now = APIHolder.unixTimeMS
+        syncTombstoneDao.upsertAll(
+            ids.map { id ->
+                SyncTombstoneEntity(
+                    accountId = accountId,
+                    entityType = entityType,
+                    entityId = id.toString(),
+                    deletedAt = now
+                )
+            }
+        )
+    }
 }
 
 interface DownloadCacheRepository {
@@ -496,3 +660,89 @@ class SyncMappingRepositoryImpl(
     override suspend fun clearSyncMappings(accountId: Int, mediaId: Int) =
         dao.deleteSyncMappingsForMedia(accountId, mediaId)
 }
+
+interface SyncTombstoneRepository {
+    suspend fun getTombstonesSince(accountId: Int, sinceTimestamp: Long): ImmutableList<SyncTombstoneEntity>
+    suspend fun getTombstone(accountId: Int, entityType: String, entityId: String): SyncTombstoneEntity?
+    suspend fun recordTombstone(accountId: Int, entityType: String, entityId: String, deletedAt: Long = APIHolder.unixTimeMS)
+    suspend fun recordTombstone(tombstone: SyncTombstoneEntity)
+    suspend fun recordTombstones(tombstones: List<SyncTombstoneEntity>)
+    suspend fun deleteTombstone(accountId: Int, entityType: String, entityId: String)
+    suspend fun purgeOldTombstones(cutoffTimestamp: Long)
+}
+
+class SyncTombstoneRepositoryImpl(
+    val dao: SyncTombstoneDao
+) : SyncTombstoneRepository {
+    override suspend fun getTombstonesSince(accountId: Int, sinceTimestamp: Long): ImmutableList<SyncTombstoneEntity> =
+        dao.getTombstonesSince(accountId, sinceTimestamp).toImmutableList()
+
+    override suspend fun getTombstone(accountId: Int, entityType: String, entityId: String): SyncTombstoneEntity? =
+        dao.getTombstone(accountId, entityType, entityId)
+
+    override suspend fun recordTombstone(
+        accountId: Int,
+        entityType: String,
+        entityId: String,
+        deletedAt: Long
+    ) {
+        dao.upsertTombstone(
+            SyncTombstoneEntity(
+                accountId = accountId,
+                entityType = entityType,
+                entityId = entityId,
+                deletedAt = deletedAt
+            )
+        )
+    }
+
+    override suspend fun recordTombstone(tombstone: SyncTombstoneEntity) {
+        dao.upsertTombstone(tombstone)
+    }
+
+    override suspend fun recordTombstones(tombstones: List<SyncTombstoneEntity>) {
+        dao.upsertAll(tombstones)
+    }
+
+    override suspend fun deleteTombstone(accountId: Int, entityType: String, entityId: String) {
+        dao.deleteTombstone(accountId, entityType, entityId)
+    }
+
+    override suspend fun purgeOldTombstones(cutoffTimestamp: Long) {
+        dao.purgeOldTombstones(cutoffTimestamp)
+    }
+}
+
+@Immutable
+data class AppRepositories(
+    val preferenceRepository: AppPreferenceRepository,
+    val bookmarkRepository: BookmarkRepository,
+    val watchProgressRepository: WatchProgressRepository,
+    val favoriteRepository: FavoriteRepository,
+    val resumeWatchingRepository: ResumeWatchingRepository,
+    val subscriptionRepository: SubscriptionRepository,
+    val accountRepository: AccountRepository,
+    val syncTombstones: SyncTombstoneRepository,
+    val syncMappingRepository: SyncMappingRepository? = null,
+    val downloadCacheRepository: DownloadCacheRepository? = null
+) {
+    companion object {
+        fun fromDatabase(database: AppDatabase): AppRepositories {
+            val tombstoneDao = database.syncTombstoneDao()
+            val tombstoneRepo = SyncTombstoneRepositoryImpl(tombstoneDao)
+            return AppRepositories(
+                preferenceRepository = AppPreferenceRepositoryImpl(database.appPreferenceDao()),
+                bookmarkRepository = BookmarkRepositoryImpl(database.bookmarkDao(), tombstoneDao),
+                watchProgressRepository = WatchProgressRepositoryImpl(database.watchProgressDao(), tombstoneDao),
+                favoriteRepository = FavoriteRepositoryImpl(database.favoriteDao(), tombstoneDao),
+                resumeWatchingRepository = ResumeWatchingRepositoryImpl(database.resumeWatchingDao()),
+                subscriptionRepository = SubscriptionRepositoryImpl(database.subscriptionDao(), tombstoneDao),
+                accountRepository = AccountRepositoryImpl(database.accountDao()),
+                syncTombstones = tombstoneRepo,
+                syncMappingRepository = SyncMappingRepositoryImpl(database.syncMappingDao()),
+                downloadCacheRepository = DownloadCacheRepositoryImpl(database.downloadCacheDao())
+            )
+        }
+    }
+}
+

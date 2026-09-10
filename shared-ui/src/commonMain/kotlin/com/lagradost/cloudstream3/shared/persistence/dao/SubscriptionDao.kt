@@ -23,6 +23,9 @@ interface SubscriptionDao {
     @Query("SELECT * FROM subscriptions WHERE accountId = :accountId ORDER BY latestUpdatedTime DESC")
     fun getAllSubscriptionsFlow(accountId: Int): Flow<List<SubscriptionEntity>>
 
+    @Query("SELECT * FROM subscriptions WHERE accountId = :accountId AND latestUpdatedTime > :sinceTimestamp ORDER BY latestUpdatedTime ASC")
+    suspend fun getSubscriptionsSince(accountId: Int, sinceTimestamp: Long): List<SubscriptionEntity>
+
     @Upsert
     suspend fun upsertSubscription(subscription: SubscriptionEntity)
 

@@ -10,6 +10,7 @@ import com.lagradost.cloudstream3.shared.persistence.dao.FavoriteDao
 import com.lagradost.cloudstream3.shared.persistence.dao.ResumeWatchingDao
 import com.lagradost.cloudstream3.shared.persistence.dao.SubscriptionDao
 import com.lagradost.cloudstream3.shared.persistence.dao.SyncMappingDao
+import com.lagradost.cloudstream3.shared.persistence.dao.SyncTombstoneDao
 import com.lagradost.cloudstream3.shared.persistence.dao.WatchProgressDao
 import com.lagradost.cloudstream3.shared.persistence.entity.AccountEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.AppPreferenceEntity
@@ -20,6 +21,7 @@ import com.lagradost.cloudstream3.shared.persistence.entity.FavoriteEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.ResumeWatchingEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.SubscriptionEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.SyncMappingEntity
+import com.lagradost.cloudstream3.shared.persistence.entity.SyncTombstoneEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.WatchProgressEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,6 +40,7 @@ abstract class DefaultAppDatabase(
     private val _favoriteDao = DefaultFavoriteDao()
     private val _downloadCacheDao = DefaultDownloadCacheDao()
     private val _syncMappingDao = DefaultSyncMappingDao()
+    private val _syncTombstoneDao = DefaultSyncTombstoneDao()
     private val _appPreferenceDao = DefaultAppPreferenceDao(
         storageFile = storageDir?.let { java.io.File(it, "preferences.properties") }
     )
@@ -50,6 +53,7 @@ abstract class DefaultAppDatabase(
     override fun favoriteDao(): FavoriteDao = _favoriteDao
     override fun downloadCacheDao(): DownloadCacheDao = _downloadCacheDao
     override fun syncMappingDao(): SyncMappingDao = _syncMappingDao
+    override fun syncTombstoneDao(): SyncTombstoneDao = _syncTombstoneDao
     override fun appPreferenceDao(): AppPreferenceDao = _appPreferenceDao
 
     override fun createInvalidationTracker(): InvalidationTracker {
@@ -66,7 +70,8 @@ abstract class DefaultAppDatabase(
             "download_headers",
             "download_episodes",
             "sync_mappings",
-            "app_preferences"
+            "app_preferences",
+            "sync_tombstones"
         )
     }
 }
@@ -216,6 +221,11 @@ internal class DefaultBookmarkDao : BookmarkDao {
     override suspend fun getAllBookmarkIds(accountId: Int): List<Int> =
         store.value.filterKeys { it.first == accountId }.values.map { it.id }
 
+    override suspend fun getBookmarksSince(accountId: Int, sinceTimestamp: Long): List<BookmarkEntity> =
+        store.value.filterKeys { it.first == accountId }.values
+            .filter { it.latestUpdatedTime > sinceTimestamp }
+            .sortedBy { it.latestUpdatedTime }
+
     override suspend fun getWatchType(accountId: Int, id: Int): Int? =
         store.value[accountId to id]?.watchType
 
@@ -250,6 +260,11 @@ internal class DefaultFavoriteDao : FavoriteDao {
 
     override fun getAllFavoritesFlow(accountId: Int): Flow<List<FavoriteEntity>> =
         store.map { it.filterKeys { k -> k.first == accountId }.values.toList() }
+
+    override suspend fun getFavoritesSince(accountId: Int, sinceTimestamp: Long): List<FavoriteEntity> =
+        store.value.filterKeys { it.first == accountId }.values
+            .filter { it.latestUpdatedTime > sinceTimestamp }
+            .sortedBy { it.latestUpdatedTime }
 
     override suspend fun upsertFavorite(favorite: FavoriteEntity) {
         store.update { it + ((favorite.accountId to favorite.id) to favorite) }
@@ -289,6 +304,11 @@ internal class DefaultWatchProgressDao : WatchProgressDao {
 
     override suspend fun getAllMediaIds(accountId: Int): List<Int> =
         store.value.filterKeys { it.first == accountId }.values.map { it.mediaId }
+
+    override suspend fun getWatchProgressSince(accountId: Int, sinceTimestamp: Long): List<WatchProgressEntity> =
+        store.value.filterKeys { it.first == accountId }.values
+            .filter { it.lastUpdated > sinceTimestamp }
+            .sortedBy { it.lastUpdated }
 
     override suspend fun upsertWatchProgress(progress: WatchProgressEntity) {
         store.update { it + ((progress.accountId to progress.mediaId) to progress) }
@@ -364,6 +384,11 @@ internal class DefaultSubscriptionDao : SubscriptionDao {
 
     override fun getAllSubscriptionsFlow(accountId: Int): Flow<List<SubscriptionEntity>> =
         store.map { it.filterKeys { k -> k.first == accountId }.values.toList() }
+
+    override suspend fun getSubscriptionsSince(accountId: Int, sinceTimestamp: Long): List<SubscriptionEntity> =
+        store.value.filterKeys { it.first == accountId }.values
+            .filter { it.latestUpdatedTime > sinceTimestamp }
+            .sortedBy { it.latestUpdatedTime }
 
     override suspend fun upsertSubscription(subscription: SubscriptionEntity) {
         store.update { it + ((subscription.accountId to subscription.id) to subscription) }
@@ -453,4 +478,30 @@ internal class DefaultDownloadCacheDao : DownloadCacheDao {
     }
     override suspend fun clearAllHeaders() { headersState.value = emptyMap() }
     override suspend fun clearAllEpisodes() { episodesState.value = emptyMap() }
+}
+
+internal class DefaultSyncTombstoneDao : SyncTombstoneDao {
+    private val store = MutableStateFlow<Map<Triple<Int, String, String>, SyncTombstoneEntity>>(emptyMap())
+
+    override suspend fun getTombstonesSince(accountId: Int, sinceTimestamp: Long): List<SyncTombstoneEntity> =
+        store.value.values.filter { it.accountId == accountId && it.deletedAt > sinceTimestamp }
+
+    override suspend fun getTombstone(accountId: Int, entityType: String, entityId: String): SyncTombstoneEntity? =
+        store.value[Triple(accountId, entityType, entityId)]
+
+    override suspend fun upsertTombstone(tombstone: SyncTombstoneEntity) {
+        store.update { it + (Triple(tombstone.accountId, tombstone.entityType, tombstone.entityId) to tombstone) }
+    }
+
+    override suspend fun upsertAll(tombstones: List<SyncTombstoneEntity>) {
+        store.update { it + tombstones.associateBy { t -> Triple(t.accountId, t.entityType, t.entityId) } }
+    }
+
+    override suspend fun deleteTombstone(accountId: Int, entityType: String, entityId: String) {
+        store.update { it - Triple(accountId, entityType, entityId) }
+    }
+
+    override suspend fun purgeOldTombstones(cutoffTimestamp: Long) {
+        store.update { it.filterValues { t -> t.deletedAt >= cutoffTimestamp } }
+    }
 }

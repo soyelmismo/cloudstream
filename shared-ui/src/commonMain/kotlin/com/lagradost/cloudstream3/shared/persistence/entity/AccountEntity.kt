@@ -13,5 +13,6 @@ data class AccountEntity(
     val name: String,
     val customImage: String? = null,
     val defaultImageIndex: Int = 0,
-    val lockPin: String? = null
+    val lockPin: String? = null,
+    val accountUuid: String = ""
 )

@@ -23,6 +23,9 @@ interface FavoriteDao {
     @Query("SELECT * FROM favorites WHERE accountId = :accountId ORDER BY favoritesTime DESC")
     fun getAllFavoritesFlow(accountId: Int): Flow<List<FavoriteEntity>>
 
+    @Query("SELECT * FROM favorites WHERE accountId = :accountId AND latestUpdatedTime > :sinceTimestamp ORDER BY latestUpdatedTime ASC")
+    suspend fun getFavoritesSince(accountId: Int, sinceTimestamp: Long): List<FavoriteEntity>
+
     @Upsert
     suspend fun upsertFavorite(favorite: FavoriteEntity)
 

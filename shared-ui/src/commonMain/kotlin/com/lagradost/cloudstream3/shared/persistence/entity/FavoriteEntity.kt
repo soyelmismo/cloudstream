@@ -11,7 +11,8 @@ import kotlinx.serialization.Serializable
     primaryKeys = ["accountId", "id"],
     indices = [
         Index(value = ["accountId"]),
-        Index(value = ["favoritesTime"])
+        Index(value = ["favoritesTime"]),
+        Index(value = ["latestUpdatedTime"])
     ]
 )
 @Serializable
@@ -24,5 +25,6 @@ data class FavoriteEntity(
     val apiName: String,
     val type: TvType? = null,
     val posterUrl: String? = null,
-    val favoritesTime: Long = 0L
+    val favoritesTime: Long = 0L,
+    val latestUpdatedTime: Long = favoritesTime
 )

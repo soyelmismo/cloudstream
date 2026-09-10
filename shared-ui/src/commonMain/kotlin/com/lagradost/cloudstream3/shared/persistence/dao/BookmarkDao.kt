@@ -32,6 +32,9 @@ interface BookmarkDao {
     @Query("SELECT id FROM bookmarks WHERE accountId = :accountId")
     suspend fun getAllBookmarkIds(accountId: Int): List<Int>
 
+    @Query("SELECT * FROM bookmarks WHERE accountId = :accountId AND latestUpdatedTime > :sinceTimestamp ORDER BY latestUpdatedTime ASC")
+    suspend fun getBookmarksSince(accountId: Int, sinceTimestamp: Long): List<BookmarkEntity>
+
     @Query("SELECT watchType FROM bookmarks WHERE accountId = :accountId AND id = :id LIMIT 1")
     suspend fun getWatchType(accountId: Int, id: Int): Int?
 

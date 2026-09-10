@@ -166,20 +166,21 @@ private fun rememberAppRepositories(database: AppDatabase): AppRepositories {
     val preferenceRepository = remember(database) {
         AppPreferenceRepositoryImpl(database.appPreferenceDao())
     }
-    val bookmarkRepository = remember(database) {
-        BookmarkRepositoryImpl(database.bookmarkDao())
+    val tombstoneDao = remember(database) { database.syncTombstoneDao() }
+    val bookmarkRepository = remember(database, tombstoneDao) {
+        BookmarkRepositoryImpl(database.bookmarkDao(), tombstoneDao)
     }
-    val watchProgressRepository = remember(database) {
-        WatchProgressRepositoryImpl(database.watchProgressDao())
+    val watchProgressRepository = remember(database, tombstoneDao) {
+        WatchProgressRepositoryImpl(database.watchProgressDao(), tombstoneDao)
     }
-    val favoriteRepository = remember(database) {
-        FavoriteRepositoryImpl(database.favoriteDao())
+    val favoriteRepository = remember(database, tombstoneDao) {
+        FavoriteRepositoryImpl(database.favoriteDao(), tombstoneDao)
     }
     val resumeWatchingRepository = remember(database) {
         ResumeWatchingRepositoryImpl(database.resumeWatchingDao())
     }
-    val subscriptionRepository = remember(database) {
-        SubscriptionRepositoryImpl(database.subscriptionDao())
+    val subscriptionRepository = remember(database, tombstoneDao) {
+        SubscriptionRepositoryImpl(database.subscriptionDao(), tombstoneDao)
     }
     val accountRepository = remember(database) {
         AccountRepositoryImpl(database.accountDao())
