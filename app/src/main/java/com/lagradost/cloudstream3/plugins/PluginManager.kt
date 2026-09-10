@@ -33,7 +33,7 @@ import com.lagradost.cloudstream3.MainActivity.Companion.afterPluginsLoadedEvent
 import com.lagradost.cloudstream3.MainActivity.Companion.lastError
 import com.lagradost.cloudstream3.PROVIDER_STATUS_DOWN
 import com.lagradost.cloudstream3.PROVIDER_STATUS_OK
-import cloudstream.shared_ui.generated.resources.*
+import com.lagradost.cloudstream4.generated.resources.*
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.TvType
 import com.lagradost.cloudstream3.utils.txt
@@ -333,7 +333,7 @@ object PluginManager {
         }
 
         main {
-            val uitext = txt(cloudstream.shared_ui.generated.resources.Res.string.plugins_updated, updatedPlugins.size)
+            val uitext = txt(com.lagradost.cloudstream4.generated.resources.Res.string.plugins_updated, updatedPlugins.size)
             createNotification(activity, uitext, updatedPlugins)
             /*val navBadge = (activity as MainActivity).binding?.navRailView?.getOrCreateBadge(R.id.navigation_settings)
             navBadge?.isVisible = true
@@ -443,7 +443,7 @@ object PluginManager {
         }
 
         main {
-            val uitext = txt(cloudstream.shared_ui.generated.resources.Res.string.plugins_downloaded, newDownloadPlugins.size)
+            val uitext = txt(com.lagradost.cloudstream4.generated.resources.Res.string.plugins_downloaded, newDownloadPlugins.size)
             createNotification(activity, uitext, newDownloadPlugins)
         }
 
@@ -612,7 +612,7 @@ object PluginManager {
                 currentlyLoading = null
                 showToast(
                     // context.getActivity(), // we are not always on the main thread
-                    txt(cloudstream.shared_ui.generated.resources.Res.string.plugin_load_fail, fileName),
+                    txt(com.lagradost.cloudstream4.generated.resources.Res.string.plugin_load_fail, fileName),
                     Toast.LENGTH_LONG
                 )
                 return false
@@ -658,7 +658,7 @@ object PluginManager {
             Log.e(TAG, "Failed to load $file: ${Log.getStackTraceString(e)}")
             showToast(
                 // context.getActivity(), // we are not always on the main thread
-                txt(cloudstream.shared_ui.generated.resources.Res.string.plugin_load_fail, fileName),
+                txt(com.lagradost.cloudstream4.generated.resources.Res.string.plugin_load_fail, fileName),
                 Toast.LENGTH_LONG
             )
             currentlyLoading = null
@@ -821,7 +821,7 @@ object PluginManager {
     suspend fun ___DO_NOT_CALL_FROM_A_PLUGIN_manuallyReloadAndUpdatePlugins(activity: Activity) {
         assertNonRecursiveCallstack()
 
-        showToast(cloudstream.shared_ui.generated.resources.Res.string.starting_plugin_update_manually, Toast.LENGTH_LONG)
+        showToast(com.lagradost.cloudstream4.generated.resources.Res.string.starting_plugin_update_manually, Toast.LENGTH_LONG)
 
         ___DO_NOT_CALL_FROM_A_PLUGIN_loadAllOnlinePlugins(activity)
         afterPluginsLoadedEvent.invoke(false)
@@ -867,14 +867,14 @@ object PluginManager {
         }.also {
             main {
                 val message = if (updatedPlugins.isNotEmpty()) {
-                    txt(cloudstream.shared_ui.generated.resources.Res.string.plugins_updated_manually, updatedPlugins.size)
+                    txt(com.lagradost.cloudstream4.generated.resources.Res.string.plugins_updated_manually, updatedPlugins.size)
                 } else {
-                    txt(cloudstream.shared_ui.generated.resources.Res.string.no_plugins_updated_manually)
+                    txt(com.lagradost.cloudstream4.generated.resources.Res.string.no_plugins_updated_manually)
                 }
                 showToast(message, Toast.LENGTH_LONG)
 
                 val notificationText = txt(
-                    cloudstream.shared_ui.generated.resources.Res.string.plugins_updated_manually,
+                    com.lagradost.cloudstream4.generated.resources.Res.string.plugins_updated_manually,
                     updatedPlugins.size
                 )
                 createNotification(activity, notificationText, updatedPlugins)

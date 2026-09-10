@@ -39,7 +39,7 @@ jobs:
           cache-read-only: false
 
       - name: Run KMP Unit Tests
-        run: ./gradlew :shared-ui:jvmTest
+        run: ./gradlew :shared:jvmTest
 
   build-android:
     name: Build Android APK
@@ -98,15 +98,15 @@ jobs:
           cache-read-only: false
 
       - name: Build Linux Desktop Distributable & Deb
-        run: ./gradlew :desktop:createDistributable :desktop:packageDeb
+        run: ./gradlew :desktopApp:createDistributable :desktopApp:packageDeb
 
       - name: Package Linux Standalone Bundle & Deb
         run: |
           mkdir -p build-outputs/linux
-          if compgen -G "desktop/build/compose/binaries/main/deb/*.deb" > /dev/null; then
-            cp desktop/build/compose/binaries/main/deb/*.deb build-outputs/linux/
+          if compgen -G "desktopApp/build/compose/binaries/main/deb/*.deb" > /dev/null; then
+            cp desktopApp/build/compose/binaries/main/deb/*.deb build-outputs/linux/
           fi
-          tar -czf build-outputs/linux/cloudstream-linux-x64-portable.tar.gz -C desktop/build/compose/binaries/main/app .
+          tar -czf build-outputs/linux/cloudstream-linux-x64-portable.tar.gz -C desktopApp/build/compose/binaries/main/app .
 
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
@@ -134,19 +134,19 @@ jobs:
           cache-read-only: false
 
       - name: Build Windows Desktop Distributable & Installers
-        run: ./gradlew :desktop:createDistributable :desktop:packageMsi :desktop:packageExe
+        run: ./gradlew :desktopApp:createDistributable :desktopApp:packageMsi :desktopApp:packageExe
 
       - name: Package Windows Standalone Bundle & Installers
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path build-outputs/windows
-          if (Test-Path "desktop/build/compose/binaries/main/msi/*.msi") {
-            Copy-Item "desktop/build/compose/binaries/main/msi/*.msi" "build-outputs/windows/"
+          if (Test-Path "desktopApp/build/compose/binaries/main/msi/*.msi") {
+            Copy-Item "desktopApp/build/compose/binaries/main/msi/*.msi" "build-outputs/windows/"
           }
-          if (Test-Path "desktop/build/compose/binaries/main/exe/*.exe") {
-            Copy-Item "desktop/build/compose/binaries/main/exe/*.exe" "build-outputs/windows/"
+          if (Test-Path "desktopApp/build/compose/binaries/main/exe/*.exe") {
+            Copy-Item "desktopApp/build/compose/binaries/main/exe/*.exe" "build-outputs/windows/"
           }
-          Compress-Archive -Path "desktop/build/compose/binaries/main/app/*" -DestinationPath "build-outputs/windows/cloudstream-windows-x64-portable.zip"
+          Compress-Archive -Path "desktopApp/build/compose/binaries/main/app/*" -DestinationPath "build-outputs/windows/cloudstream-windows-x64-portable.zip"
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4

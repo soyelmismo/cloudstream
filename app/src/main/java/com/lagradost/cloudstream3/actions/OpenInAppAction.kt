@@ -6,7 +6,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
-import cloudstream.shared_ui.generated.resources.*
+import com.lagradost.cloudstream4.generated.resources.*
 import com.lagradost.cloudstream3.models.LinkLoadingResult
 import com.lagradost.cloudstream3.models.ResultEpisode
 import com.lagradost.cloudstream3.mvvm.logError

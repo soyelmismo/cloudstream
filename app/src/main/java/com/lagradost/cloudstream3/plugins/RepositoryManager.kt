@@ -6,7 +6,7 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceManager
 import com.lagradost.cloudstream3.utils.AppUtils.parseJson
 import com.lagradost.cloudstream3.utils.AppUtils.toJson
-import cloudstream.shared_ui.generated.resources.*
+import com.lagradost.cloudstream4.generated.resources.*
 import com.lagradost.cloudstream3.R
 import com.lagradost.cloudstream3.amap
 import com.lagradost.cloudstream3.app

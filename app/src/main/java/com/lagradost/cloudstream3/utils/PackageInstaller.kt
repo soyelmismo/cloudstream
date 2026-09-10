@@ -11,7 +11,7 @@ import android.content.pm.PackageInstaller
 import android.os.Build
 import android.util.Log
 import android.widget.Toast
-import cloudstream.shared_ui.generated.resources.*
+import com.lagradost.cloudstream4.generated.resources.*
 import com.lagradost.cloudstream3.appContext
 import com.lagradost.cloudstream3.utils.txt
 import com.lagradost.cloudstream3.R

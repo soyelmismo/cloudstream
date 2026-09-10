@@ -1,7 +1,7 @@
 package com.lagradost.cloudstream3.actions
 
 import android.content.Context
-import cloudstream.shared_ui.generated.resources.*
+import com.lagradost.cloudstream4.generated.resources.*
 import com.lagradost.cloudstream3.models.LinkLoadingResult
 import com.lagradost.cloudstream3.models.ResultEpisode
 import com.lagradost.cloudstream3.utils.txt

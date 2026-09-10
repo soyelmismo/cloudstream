@@ -16,7 +16,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.ContextCompat.getString
 import androidx.fragment.app.FragmentActivity
 import com.lagradost.cloudstream3.CommonActivity.showToast
-import cloudstream.shared_ui.generated.resources.*
+import com.lagradost.cloudstream4.generated.resources.*
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.getString

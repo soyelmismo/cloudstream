@@ -208,7 +208,7 @@ android {
     sourceSets {
         getByName("main") {
             res.srcDirs(
-                "../shared-ui/src/androidMain/res"
+                "../shared/src/androidMain/res"
             )
         }
     }
@@ -218,7 +218,7 @@ android {
 
 abstract class CopyComposeResourcesTask : DefaultTask() {
     @get:InputDirectory
-    abstract val sharedUiResourcesDir: DirectoryProperty
+    abstract val sharedResourcesDir: DirectoryProperty
 
     @get:InputDirectory
     abstract val preparedResourcesDir: DirectoryProperty
@@ -229,9 +229,9 @@ abstract class CopyComposeResourcesTask : DefaultTask() {
     @TaskAction
     fun copyResources() {
         val out = outputDirectory.get().asFile
-        val targetDir = File(out, "composeResources/cloudstream.shared_ui.generated.resources")
+        val targetDir = File(out, "composeResources/com.lagradost.cloudstream4.generated.resources")
         targetDir.mkdirs()
-        val srcDir = sharedUiResourcesDir.get().asFile
+        val srcDir = sharedResourcesDir.get().asFile
         if (srcDir.exists()) {
             srcDir.copyRecursively(targetDir, overwrite = true)
         }
@@ -243,9 +243,9 @@ abstract class CopyComposeResourcesTask : DefaultTask() {
 }
 
 val copyComposeResourcesToAppAssets by tasks.registering(CopyComposeResourcesTask::class) {
-    dependsOn(":shared-ui:prepareComposeResourcesTaskForCommonMain")
-    sharedUiResourcesDir.set(project(":shared-ui").projectDir.resolve("src/commonMain/composeResources"))
-    preparedResourcesDir.set(project(":shared-ui").layout.buildDirectory.dir("generated/compose/resourceGenerator/preparedResources/commonMain/composeResources"))
+    dependsOn(":shared:prepareComposeResourcesTaskForCommonMain")
+    sharedResourcesDir.set(project(":shared").projectDir.resolve("src/commonMain/composeResources"))
+    preparedResourcesDir.set(project(":shared").layout.buildDirectory.dir("generated/compose/resourceGenerator/preparedResources/commonMain/composeResources"))
     outputDirectory.set(layout.buildDirectory.dir("intermediates/composeResourcesAssets"))
 }
 
@@ -321,7 +321,6 @@ dependencies {
     implementation(libs.anime.db)
     implementation(project(":library"))
     implementation(project(":shared"))
-    implementation(project(":shared-ui"))
 }
 
 tasks.register<Jar>("androidSourcesJar") {

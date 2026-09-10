@@ -2,7 +2,7 @@ package com.lagradost.cloudstream3.actions.temp
 
 import android.content.Context
 import android.content.Intent
-import cloudstream.shared_ui.generated.resources.*
+import com.lagradost.cloudstream4.generated.resources.*
 import com.lagradost.cloudstream3.actions.VideoClickAction
 import com.lagradost.cloudstream3.actions.makeTempM3U8Intent
 import com.lagradost.cloudstream3.models.LinkLoadingResult
