@@ -208,4 +208,35 @@ class CloudStorageSyncTransportTest {
         val hxhCloudFile = File(tempDir, "user_data/0/bookmarks/456.json")
         assertTrue(hxhCloudFile.exists(), "Bookmark from Device B should have been pushed to cloud")
     }
+
+    @Test
+    fun testPushAndFetchSettingsPluginsAndAccounts() = runTest {
+        val delta = SyncDelta(
+            deviceId = "device-sender",
+            accountId = 0,
+            timestamp = 2000L,
+            settings = kotlinx.collections.immutable.persistentMapOf("key1" to "val1"),
+            plugins = kotlinx.collections.immutable.persistentMapOf("pluginA" to "repoA"),
+            accounts = kotlinx.collections.immutable.persistentListOf(
+                com.lagradost.cloudstream3.shared.persistence.entity.AccountEntity(keyIndex = 0, name = "Cloud User", accountUuid = "uuid-cloud")
+            )
+        )
+        transport.pushDelta(delta).getOrThrow()
+
+        val appSettingsFile = File(tempDir, "settings/app_settings.json")
+        val pluginsFile = File(tempDir, "settings/plugins.json")
+        val accountsFile = File(tempDir, "settings/accounts.json")
+
+        assertTrue(appSettingsFile.exists(), "settings/app_settings.json should exist")
+        assertTrue(pluginsFile.exists(), "settings/plugins.json should exist")
+        assertTrue(accountsFile.exists(), "settings/accounts.json should exist")
+
+        val fetchedDeltas = transport.fetchDeltas(0L).getOrThrow()
+        val settingsDelta = fetchedDeltas.firstOrNull { it.settings.isNotEmpty() }
+        assertNotNull(settingsDelta)
+        assertEquals("val1", settingsDelta.settings["key1"])
+        assertEquals("repoA", settingsDelta.plugins["pluginA"])
+        assertEquals(1, settingsDelta.accounts.size)
+        assertEquals("Cloud User", settingsDelta.accounts.first().name)
+    }
 }

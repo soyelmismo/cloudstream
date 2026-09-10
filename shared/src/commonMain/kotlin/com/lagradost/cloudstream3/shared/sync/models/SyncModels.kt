@@ -1,15 +1,20 @@
-@file:UseSerializers(ImmutableListSerializer::class)
+@file:UseSerializers(ImmutableListSerializer::class, ImmutableMapSerializer::class)
 
 package com.lagradost.cloudstream3.shared.sync.models
 
 import androidx.compose.runtime.Immutable
+import com.lagradost.cloudstream3.shared.persistence.entity.AccountEntity
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toImmutableMap
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.UseSerializers
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
@@ -26,6 +31,22 @@ class ImmutableListSerializer<T>(
 
     override fun deserialize(decoder: Decoder): ImmutableList<T> {
         return delegate.deserialize(decoder).toImmutableList()
+    }
+}
+
+class ImmutableMapSerializer<K, V>(
+    keySerializer: KSerializer<K>,
+    valueSerializer: KSerializer<V>
+) : KSerializer<ImmutableMap<K, V>> {
+    private val delegate = MapSerializer(keySerializer, valueSerializer)
+    override val descriptor: SerialDescriptor = delegate.descriptor
+
+    override fun serialize(encoder: Encoder, value: ImmutableMap<K, V>) {
+        delegate.serialize(encoder, value)
+    }
+
+    override fun deserialize(decoder: Decoder): ImmutableMap<K, V> {
+        return delegate.deserialize(decoder).toImmutableMap()
     }
 }
 
@@ -91,16 +112,23 @@ data class SyncDelta(
     val watchProgress: ImmutableList<WatchProgressDelta> = persistentListOf(),
     val bookmarks: ImmutableList<BookmarkDelta> = persistentListOf(),
     val favorites: ImmutableList<FavoriteDelta> = persistentListOf(),
-    val tombstones: ImmutableList<TombstoneDelta> = persistentListOf()
+    val tombstones: ImmutableList<TombstoneDelta> = persistentListOf(),
+    val settings: ImmutableMap<String, String> = persistentMapOf(),
+    val plugins: ImmutableMap<String, String> = persistentMapOf(),
+    val accounts: ImmutableList<AccountEntity> = persistentListOf()
 ) {
     val isEmpty: Boolean
         get() = watchProgress.isEmpty() &&
             bookmarks.isEmpty() &&
             favorites.isEmpty() &&
-            tombstones.isEmpty()
+            tombstones.isEmpty() &&
+            settings.isEmpty() &&
+            plugins.isEmpty() &&
+            accounts.isEmpty()
 
     val totalItems: Int
-        get() = watchProgress.size + bookmarks.size + favorites.size + tombstones.size
+        get() = watchProgress.size + bookmarks.size + favorites.size + tombstones.size +
+            settings.size + plugins.size + accounts.size
 }
 
 @Serializable
@@ -120,10 +148,14 @@ data class SyncApplyResult(
     val favoritesApplied: Int,
     val tombstonesApplied: Int,
     val conflictsSkipped: Int,
-    val localItemsPushed: Int = 0
+    val localItemsPushed: Int = 0,
+    val settingsApplied: Int = 0,
+    val pluginsApplied: Int = 0,
+    val accountsApplied: Int = 0
 ) {
     val totalApplied: Int
-        get() = watchProgressApplied + bookmarksApplied + favoritesApplied + tombstonesApplied
+        get() = watchProgressApplied + bookmarksApplied + favoritesApplied + tombstonesApplied +
+            settingsApplied + pluginsApplied + accountsApplied
 
     val totalChanges: Int
         get() = totalApplied + localItemsPushed
@@ -134,7 +166,10 @@ data class SyncApplyResult(
         favoritesApplied = favoritesApplied + other.favoritesApplied,
         tombstonesApplied = tombstonesApplied + other.tombstonesApplied,
         conflictsSkipped = conflictsSkipped + other.conflictsSkipped,
-        localItemsPushed = localItemsPushed + other.localItemsPushed
+        localItemsPushed = localItemsPushed + other.localItemsPushed,
+        settingsApplied = settingsApplied + other.settingsApplied,
+        pluginsApplied = pluginsApplied + other.pluginsApplied,
+        accountsApplied = accountsApplied + other.accountsApplied
     )
 
     companion object {
@@ -144,7 +179,10 @@ data class SyncApplyResult(
             favoritesApplied = 0,
             tombstonesApplied = 0,
             conflictsSkipped = 0,
-            localItemsPushed = 0
+            localItemsPushed = 0,
+            settingsApplied = 0,
+            pluginsApplied = 0,
+            accountsApplied = 0
         )
     }
 }

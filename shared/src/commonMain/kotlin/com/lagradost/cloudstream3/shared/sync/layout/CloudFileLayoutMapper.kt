@@ -8,6 +8,9 @@ object CloudFileLayoutMapper {
     const val USER_DATA_ROOT = "user_data"
     const val SETTINGS_ROOT = "settings"
     const val MANIFEST_FILE = "manifest.json"
+    const val APP_SETTINGS_FILE = "app_settings.json"
+    const val PLUGINS_FILE = "plugins.json"
+    const val ACCOUNTS_FILE = "accounts.json"
     const val WATCH_PROGRESS_DIR = "watch_progress"
     const val BOOKMARKS_DIR = "bookmarks"
     const val FAVORITES_DIR = "favorites"
@@ -25,6 +28,12 @@ object CloudFileLayoutMapper {
         SyncEntityType.FAVORITE,
         SyncEntityType.SUBSCRIPTION
     )
+
+    fun getAppSettingsPath(): String = "$SETTINGS_ROOT/$APP_SETTINGS_FILE"
+
+    fun getPluginsPath(): String = "$SETTINGS_ROOT/$PLUGINS_FILE"
+
+    fun getAccountsPath(): String = "$SETTINGS_ROOT/$ACCOUNTS_FILE"
 
     fun getWatchProgressPath(accountUuid: String, mediaId: Int): String =
         "$USER_DATA_ROOT/$accountUuid/$WATCH_PROGRESS_DIR/$mediaId.json"

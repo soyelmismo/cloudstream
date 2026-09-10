@@ -69,17 +69,50 @@ class GoogleDriveStorageClient(
     override suspend fun listFiles(remoteDir: String, modifiedSince: Long): Result<List<RemoteFileMetadata>> = runCatching {
         val headers = getAuthHeaders()
         val folderId = findFolderId(remoteDir, headers) ?: return@runCatching emptyList()
+        val result = mutableListOf<RemoteFileMetadata>()
+        listFolderRecursive(folderId, remoteDir.trim('/'), modifiedSince, headers, result)
+        result
+    }
+
+    private suspend fun listFolderRecursive(
+        folderId: String,
+        currentRelativeDir: String,
+        modifiedSince: Long,
+        headers: Map<String, String>,
+        result: MutableList<RemoteFileMetadata>
+    ) {
+        val fileList = fetchDriveFileList(folderId, headers) ?: return
+        for (file in fileList.files) {
+            processDriveListItem(file, currentRelativeDir, modifiedSince, headers, result)
+        }
+    }
+
+    private suspend fun fetchDriveFileList(folderId: String, headers: Map<String, String>): GoogleDriveFileList? {
         val query = "'$folderId' in parents and trashed = false"
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val url = "$DRIVE_API_URL?q=$encodedQuery&fields=files(id,name,mimeType,size,modifiedTime)&pageSize=1000&spaces=drive"
         val response = app.get(url, headers = headers)
-        if (!response.isSuccessful) {
-            throw IOException("Failed to list Google Drive files: HTTP ${response.code}")
+        if (!response.isSuccessful) return null
+        return runCatching { json.decodeFromString<GoogleDriveFileList>(response.text) }.getOrNull()
+    }
+
+    private suspend fun processDriveListItem(
+        file: GoogleDriveFile,
+        currentRelativeDir: String,
+        modifiedSince: Long,
+        headers: Map<String, String>,
+        result: MutableList<RemoteFileMetadata>
+    ) {
+        if (file.mimeType == FOLDER_MIME_TYPE) {
+            val subDir = resolveSubDirPath(currentRelativeDir, file.name)
+            listFolderRecursive(file.id, subDir, modifiedSince, headers, result)
+        } else {
+            mapToFileMetadata(file, currentRelativeDir, modifiedSince)?.let { result.add(it) }
         }
-        val fileList = json.decodeFromString<GoogleDriveFileList>(response.text)
-        fileList.files.mapNotNull { file ->
-            mapToFileMetadata(file, remoteDir, modifiedSince)
-        }
+    }
+
+    private fun resolveSubDirPath(baseDir: String, name: String): String {
+        return if (baseDir.isEmpty() || baseDir == ".") name else "$baseDir/$name"
     }
 
     override suspend fun readFile(remotePath: String): Result<String> = runCatching {

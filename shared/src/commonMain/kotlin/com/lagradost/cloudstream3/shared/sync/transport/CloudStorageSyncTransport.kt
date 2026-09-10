@@ -11,8 +11,13 @@ import com.lagradost.cloudstream3.shared.sync.models.SyncDelta
 import com.lagradost.cloudstream3.shared.sync.models.SyncManifest
 import com.lagradost.cloudstream3.shared.sync.models.TombstoneDelta
 import com.lagradost.cloudstream3.shared.sync.models.WatchProgressDelta
+import com.lagradost.cloudstream3.shared.persistence.entity.AccountEntity
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 
 @Immutable
@@ -44,6 +49,9 @@ class CloudStorageSyncTransport(
         pushBookmarks(accountUuid, delta.bookmarks)
         pushFavorites(accountUuid, delta.favorites)
         pushTombstones(accountUuid, delta.tombstones)
+        pushSettings(delta.settings)
+        pushPlugins(delta.plugins)
+        pushAccounts(delta.accounts)
     }
 
     override suspend fun fetchDeltas(sinceTimestamp: Long): Result<ImmutableList<SyncDelta>> = runCatching {
@@ -54,10 +62,70 @@ class CloudStorageSyncTransport(
             processRemoteFile(file, sinceTimestamp, accumulators)
         }
 
-        accumulators.values
+        val settingsDelta = fetchSettingsDelta(sinceTimestamp)
+
+        val deltas = accumulators.values
             .map { it.toSyncDelta(transportId, sinceTimestamp) }
-            .filterNot { it.isEmpty }
-            .toImmutableList()
+            .toMutableList()
+
+        if (settingsDelta != null && !settingsDelta.isEmpty) {
+            deltas.add(settingsDelta)
+        }
+
+        deltas.filterNot { it.isEmpty }.toImmutableList()
+    }
+
+    private suspend fun fetchSettingsDelta(sinceTimestamp: Long): SyncDelta? {
+        val settingsFiles = storageClient.listFiles(CloudFileLayoutMapper.SETTINGS_ROOT, sinceTimestamp).getOrElse { emptyList() }
+        if (settingsFiles.isEmpty()) return null
+
+        val acc = SettingsAccumulator()
+        for (file in settingsFiles) {
+            processSettingsFile(file, sinceTimestamp, acc)
+        }
+        return acc.toSyncDelta(transportId, sinceTimestamp)
+    }
+
+    private suspend fun processSettingsFile(
+        file: RemoteFileMetadata,
+        sinceTimestamp: Long,
+        acc: SettingsAccumulator
+    ) {
+        val normalizedPath = file.path.replace('\\', '/')
+        if (!isEligibleFile(normalizedPath, file.modifiedTime, file.isDirectory, sinceTimestamp)) return
+        val content = storageClient.readFile(file.path).getOrNull() ?: return
+        applySettingsContent(normalizedPath, content, acc)
+    }
+
+    private fun applySettingsContent(path: String, content: String, acc: SettingsAccumulator) {
+        runCatching {
+            when {
+                path.endsWith(CloudFileLayoutMapper.APP_SETTINGS_FILE) ->
+                    acc.settings = json.decodeFromString(MapSerializer(String.serializer(), String.serializer()), content)
+                path.endsWith(CloudFileLayoutMapper.PLUGINS_FILE) ->
+                    acc.plugins = json.decodeFromString(MapSerializer(String.serializer(), String.serializer()), content)
+                path.endsWith(CloudFileLayoutMapper.ACCOUNTS_FILE) ->
+                    acc.accounts = json.decodeFromString(ListSerializer(AccountEntity.serializer()), content)
+            }
+        }
+    }
+
+    private suspend fun pushSettings(settings: Map<String, String>) {
+        if (settings.isEmpty()) return
+        val content = json.encodeToString(MapSerializer(String.serializer(), String.serializer()), settings)
+        storageClient.writeFile(CloudFileLayoutMapper.getAppSettingsPath(), content).getOrThrow()
+    }
+
+    private suspend fun pushPlugins(plugins: Map<String, String>) {
+        if (plugins.isEmpty()) return
+        val content = json.encodeToString(MapSerializer(String.serializer(), String.serializer()), plugins)
+        storageClient.writeFile(CloudFileLayoutMapper.getPluginsPath(), content).getOrThrow()
+    }
+
+    private suspend fun pushAccounts(accounts: List<AccountEntity>) {
+        if (accounts.isEmpty()) return
+        val content = json.encodeToString(ListSerializer(AccountEntity.serializer()), accounts)
+        storageClient.writeFile(CloudFileLayoutMapper.getAccountsPath(), content).getOrThrow()
     }
 
     suspend fun testConnection(): Result<Boolean> = storageClient.testConnection()
@@ -176,5 +244,24 @@ private class AccountDeltaAccumulator(
         val favMax = favorites.maxOfOrNull { it.updatedAt } ?: 0L
         val tsMax = tombstones.maxOfOrNull { it.deletedAt } ?: 0L
         return maxOf(fallback, wpMax, bmMax, favMax, tsMax)
+    }
+}
+
+private class SettingsAccumulator(
+    var settings: Map<String, String> = emptyMap(),
+    var plugins: Map<String, String> = emptyMap(),
+    var accounts: List<AccountEntity> = emptyList()
+) {
+    fun toSyncDelta(deviceId: String, defaultTimestamp: Long): SyncDelta {
+        return SyncDelta(
+            schemaVersion = 1,
+            deviceId = deviceId,
+            accountId = 0,
+            accountUuid = "",
+            timestamp = defaultTimestamp,
+            settings = settings.toImmutableMap(),
+            plugins = plugins.toImmutableMap(),
+            accounts = accounts.toImmutableList()
+        )
     }
 }

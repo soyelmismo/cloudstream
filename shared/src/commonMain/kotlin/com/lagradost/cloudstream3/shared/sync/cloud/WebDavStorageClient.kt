@@ -32,20 +32,52 @@ class WebDavStorageClient(
     }
 
     override suspend fun listFiles(remoteDir: String, modifiedSince: Long): Result<List<RemoteFileMetadata>> = runCatching {
-        val url = buildUrl(remoteDir)
+        val result = mutableListOf<RemoteFileMetadata>()
+        listCollectionRecursive(remoteDir.trim('/'), modifiedSince, result)
+        result
+    }
+
+    private suspend fun listCollectionRecursive(
+        currentRelativeDir: String,
+        modifiedSince: Long,
+        result: MutableList<RemoteFileMetadata>
+    ) {
+        val items = fetchPropfindItems(currentRelativeDir, modifiedSince) ?: return
+        for (item in items) {
+            processWebDavItem(item, modifiedSince, result)
+        }
+    }
+
+    private suspend fun fetchPropfindItems(
+        currentRelativeDir: String,
+        modifiedSince: Long
+    ): List<RemoteFileMetadata>? {
+        val url = buildUrl(currentRelativeDir)
         val response = app.custom(
             method = "PROPFIND",
             url = url,
             headers = buildHeaders(mapOf("Depth" to "1", "Content-Type" to XML_MEDIA_TYPE)),
             requestBody = PROPFIND_XML.toRequestBody(XML_MEDIA_TYPE.toMediaTypeOrNull())
         )
-        if (response.code == 404) {
-            return@runCatching emptyList()
-        }
-        if (response.code != 207 && !response.isSuccessful) {
+        if (response.code == 404) return null
+        if (!isSuccessfulPropfind(response.code)) {
             throw IOException("WebDAV PROPFIND failed: HTTP ${response.code}")
         }
-        parsePropfindResponse(response.text, remoteDir, modifiedSince)
+        return parsePropfindResponse(response.text, currentRelativeDir, modifiedSince)
+    }
+
+    private fun isSuccessfulPropfind(code: Int): Boolean = code == 207 || (code in 200..299)
+
+    private suspend fun processWebDavItem(
+        item: RemoteFileMetadata,
+        modifiedSince: Long,
+        result: MutableList<RemoteFileMetadata>
+    ) {
+        if (item.isDirectory) {
+            listCollectionRecursive(item.path, modifiedSince, result)
+        } else {
+            result.add(item)
+        }
     }
 
     override suspend fun readFile(remotePath: String): Result<String> = runCatching {

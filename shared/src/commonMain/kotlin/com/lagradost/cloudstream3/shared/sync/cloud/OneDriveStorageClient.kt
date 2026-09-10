@@ -67,17 +67,40 @@ class OneDriveStorageClient(
 
     override suspend fun listFiles(remoteDir: String, modifiedSince: Long): Result<List<RemoteFileMetadata>> = runCatching {
         val headers = getAuthHeaders()
-        var currentUrl: String? = "${buildPathUrl(remoteDir, suffix = ":/children")}?\$top=1000"
         val result = mutableListOf<RemoteFileMetadata>()
+        listChildrenRecursive(remoteDir.trim('/'), modifiedSince, headers, result)
+        result
+    }
 
+    private suspend fun listChildrenRecursive(
+        currentRelativeDir: String,
+        modifiedSince: Long,
+        headers: Map<String, String>,
+        result: MutableList<RemoteFileMetadata>
+    ) {
+        var currentUrl: String? = "${buildPathUrl(currentRelativeDir, suffix = ":/children")}?\$top=1000"
         while (currentUrl != null) {
-            val page = fetchChildrenPage(currentUrl, headers) ?: return@runCatching emptyList()
-            page.value.mapNotNullTo(result) { item ->
-                mapToFileMetadata(item, remoteDir, modifiedSince)
+            val page = fetchChildrenPage(currentUrl, headers) ?: return
+            for (item in page.value) {
+                processOneDriveItem(item, currentRelativeDir, modifiedSince, headers, result)
             }
             currentUrl = page.nextLink
         }
-        result
+    }
+
+    private suspend fun processOneDriveItem(
+        item: OneDriveItem,
+        currentRelativeDir: String,
+        modifiedSince: Long,
+        headers: Map<String, String>,
+        result: MutableList<RemoteFileMetadata>
+    ) {
+        if (item.folder != null) {
+            val subDir = if (currentRelativeDir.isEmpty() || currentRelativeDir == ".") item.name else "$currentRelativeDir/${item.name}"
+            listChildrenRecursive(subDir, modifiedSince, headers, result)
+        } else {
+            mapToFileMetadata(item, currentRelativeDir, modifiedSince)?.let { result.add(it) }
+        }
     }
 
     override suspend fun readFile(remotePath: String): Result<String> = runCatching {

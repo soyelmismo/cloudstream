@@ -1,6 +1,8 @@
 package com.lagradost.cloudstream3.shared.sync
 
 import com.lagradost.cloudstream3.shared.persistence.database.DefaultAppDatabase
+import com.lagradost.cloudstream3.shared.persistence.entity.AccountEntity
+import com.lagradost.cloudstream3.shared.persistence.entity.AppPreferenceEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.BookmarkEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.FavoriteEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.SyncTombstoneEntity
@@ -225,5 +227,64 @@ class SyncEngineTest {
         assertNotNull(pushedByA)
         assertEquals(1, pushedByA.bookmarks.size)
         assertEquals(202, pushedByA.bookmarks.first().id)
+    }
+
+    @Test
+    fun testSettingsPluginsAndAccountsSync() = runTest {
+        val database = createTestDatabase()
+        val engine = SyncEngineImpl(database) { 5000L }
+
+        // Prepopulate local preferences and accounts
+        database.appPreferenceDao().upsertPreference(
+            AppPreferenceEntity(key = "app_theme", value = "Amoled", updatedAt = 1000L)
+        )
+        database.appPreferenceDao().upsertPreference(
+            AppPreferenceEntity(key = "INSTALLED_PLUGINS_KEY", value = "[\"pluginA\"]", updatedAt = 1000L)
+        )
+        database.appPreferenceDao().upsertPreference(
+            AppPreferenceEntity(key = "cloud_sync_token", value = "secret", updatedAt = 1000L)
+        )
+        database.accountDao().upsertAccount(
+            AccountEntity(keyIndex = 0, name = "Primary User", accountUuid = "uuid-root")
+        )
+
+        // Verify createDelta extracts transferable settings and plugins, excluding sensitive keys
+        val localDelta = engine.createDelta(accountId = 0, deviceId = "device-1", sinceTimestamp = 0L)
+        assertEquals("Amoled", localDelta.settings["app_theme"])
+        assertEquals("[\"pluginA\"]", localDelta.plugins["INSTALLED_PLUGINS_KEY"])
+        assertFalse(localDelta.settings.containsKey("cloud_sync_token"))
+        assertEquals(1, localDelta.accounts.size)
+        assertEquals("Primary User", localDelta.accounts.first().name)
+
+        // Verify applyDelta applies remote settings, plugins, and accounts
+        val incomingDelta = SyncDelta(
+            deviceId = "device-remote",
+            accountId = 0,
+            timestamp = 4000L,
+            settings = kotlinx.collections.immutable.persistentMapOf(
+                "subtitles_size" to "18",
+                "cloud_sync_evil_token" to "hacked" // should be ignored
+            ),
+            plugins = kotlinx.collections.immutable.persistentMapOf(
+                "REPOSITORIES_KEY" to "[\"repoX\"]"
+            ),
+            accounts = kotlinx.collections.immutable.persistentListOf(
+                AccountEntity(keyIndex = 1, name = "Secondary Profile", accountUuid = "uuid-secondary")
+            )
+        )
+
+        val result = engine.applyDelta(incomingDelta)
+        assertEquals(1, result.settingsApplied)
+        assertEquals(1, result.pluginsApplied)
+        assertEquals(1, result.accountsApplied)
+
+        assertEquals("18", database.appPreferenceDao().getString("subtitles_size"))
+        assertEquals("[\"repoX\"]", database.appPreferenceDao().getString("REPOSITORIES_KEY"))
+        assertNull(database.appPreferenceDao().getString("cloud_sync_evil_token"))
+
+        val secondaryAccount = database.accountDao().getAccountById(1)
+        assertNotNull(secondaryAccount)
+        assertEquals("Secondary Profile", secondaryAccount.name)
+        assertEquals("uuid-secondary", secondaryAccount.accountUuid)
     }
 }

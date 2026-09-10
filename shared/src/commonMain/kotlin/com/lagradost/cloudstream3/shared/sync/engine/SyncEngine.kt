@@ -1,7 +1,11 @@
 package com.lagradost.cloudstream3.shared.sync.engine
 
+import com.lagradost.cloudstream3.APIHolder.unixTimeMS
 import com.lagradost.cloudstream3.TvType
+import com.lagradost.cloudstream3.shared.backup.BackupManager
 import com.lagradost.cloudstream3.shared.persistence.database.AppDatabase
+import com.lagradost.cloudstream3.shared.persistence.entity.AccountEntity
+import com.lagradost.cloudstream3.shared.persistence.entity.AppPreferenceEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.BookmarkEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.FavoriteEntity
 import com.lagradost.cloudstream3.shared.persistence.entity.SyncTombstoneEntity
@@ -12,11 +16,12 @@ import com.lagradost.cloudstream3.shared.sync.models.SyncApplyResult
 import com.lagradost.cloudstream3.shared.sync.models.SyncDelta
 import com.lagradost.cloudstream3.shared.sync.models.SyncEntityType
 import com.lagradost.cloudstream3.shared.sync.models.TombstoneDelta
-import com.lagradost.cloudstream3.APIHolder.unixTimeMS
 import com.lagradost.cloudstream3.shared.sync.models.WatchProgressDelta
 import com.lagradost.cloudstream3.shared.sync.resolver.ConflictResolver
 import com.lagradost.cloudstream3.shared.sync.transport.SyncTransport
+import kotlinx.collections.immutable.ImmutableMap
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.collections.immutable.toImmutableMap
 
 interface SyncEngine {
     suspend fun createDelta(accountId: Int, deviceId: String, sinceTimestamp: Long): SyncDelta
@@ -35,7 +40,8 @@ class SyncEngineImpl(
         sinceTimestamp: Long
     ): SyncDelta {
         val now = timeProvider()
-        val accountUuid = database.accountDao().getAccountById(accountId)?.accountUuid ?: ""
+        val account = database.accountDao().getAccountById(accountId)
+        val accountUuid = account?.accountUuid?.ifBlank { null } ?: accountId.toString()
 
         val watchProgress = database.watchProgressDao()
             .getWatchProgressSince(accountId, sinceTimestamp)
@@ -93,6 +99,9 @@ class SyncEngineImpl(
             }
             .toImmutableList()
 
+        val (settingsMap, pluginsMap) = extractPreferences()
+        val accounts = database.accountDao().getAllAccounts().toImmutableList()
+
         return SyncDelta(
             schemaVersion = 1,
             deviceId = deviceId,
@@ -102,7 +111,10 @@ class SyncEngineImpl(
             watchProgress = watchProgress,
             bookmarks = bookmarks,
             favorites = favorites,
-            tombstones = tombstones
+            tombstones = tombstones,
+            settings = settingsMap,
+            plugins = pluginsMap,
+            accounts = accounts
         )
     }
 
@@ -111,13 +123,19 @@ class SyncEngineImpl(
         val (progressApplied, progressSkipped) = applyWatchProgress(delta.accountId, delta.watchProgress)
         val (bookmarksApplied, bookmarksSkipped) = applyBookmarks(delta.accountId, delta.bookmarks)
         val (favoritesApplied, favoritesSkipped) = applyFavorites(delta.accountId, delta.favorites)
+        val settingsApplied = applyPreferenceEntries(delta.settings)
+        val pluginsApplied = applyPreferenceEntries(delta.plugins)
+        val accountsApplied = applyAccounts(delta.accounts)
 
         return SyncApplyResult(
             watchProgressApplied = progressApplied,
             bookmarksApplied = bookmarksApplied,
             favoritesApplied = favoritesApplied,
             tombstonesApplied = tombstonesApplied,
-            conflictsSkipped = tombstonesSkipped + progressSkipped + bookmarksSkipped + favoritesSkipped
+            conflictsSkipped = tombstonesSkipped + progressSkipped + bookmarksSkipped + favoritesSkipped,
+            settingsApplied = settingsApplied,
+            pluginsApplied = pluginsApplied,
+            accountsApplied = accountsApplied
         )
     }
 
@@ -386,5 +404,115 @@ class SyncEngineImpl(
     private fun parseTvType(typeString: String?): TvType? {
         if (typeString == null) return null
         return runCatching { TvType.valueOf(typeString) }.getOrNull()
+    }
+
+    private suspend fun extractPreferences(): Pair<ImmutableMap<String, String>, ImmutableMap<String, String>> {
+        val allPrefs = database.appPreferenceDao().getAllPreferences()
+        val settings = mutableMapOf<String, String>()
+        val plugins = mutableMapOf<String, String>()
+
+        for (pref in allPrefs) {
+            if (!BackupManager.isKeyTransferable(pref.key)) continue
+            if (BackupManager.isPluginKey(pref.key)) {
+                plugins[pref.key] = pref.value
+            } else {
+                settings[pref.key] = pref.value
+            }
+        }
+        return settings.toImmutableMap() to plugins.toImmutableMap()
+    }
+
+    private suspend fun applyPreferenceEntries(entries: Map<String, String>): Int {
+        if (entries.isEmpty()) return 0
+        val current = database.appPreferenceDao().getAllPreferences().associate { it.key to it.value }
+        val toUpsert = filterChangedPreferences(entries, current, timeProvider())
+        if (toUpsert.isNotEmpty()) {
+            database.appPreferenceDao().insertPreferences(toUpsert)
+        }
+        return toUpsert.size
+    }
+
+    private fun filterChangedPreferences(
+        entries: Map<String, String>,
+        current: Map<String, String>,
+        now: Long
+    ): List<AppPreferenceEntity> {
+        val result = mutableListOf<AppPreferenceEntity>()
+        for ((key, value) in entries) {
+            if (BackupManager.isKeyTransferable(key) && current[key] != value) {
+                result.add(AppPreferenceEntity(key = key, value = value, updatedAt = now))
+            }
+        }
+        return result
+    }
+
+    private suspend fun applyAccounts(accounts: List<AccountEntity>): Int {
+        if (accounts.isEmpty()) return 0
+        val currentAccounts = database.accountDao().getAllAccounts()
+        val byUuid = currentAccounts.filter { it.accountUuid.isNotEmpty() }.associateBy { it.accountUuid }
+        val byKey = currentAccounts.associateBy { it.keyIndex }
+        var applied = 0
+        for (remote in accounts) {
+            if (applySingleAccount(remote, byUuid, byKey, currentAccounts)) {
+                applied++
+            }
+        }
+        return applied
+    }
+
+    private suspend fun applySingleAccount(
+        remote: AccountEntity,
+        byUuid: Map<String, AccountEntity>,
+        byKey: Map<Int, AccountEntity>,
+        currentAccounts: List<AccountEntity>
+    ): Boolean {
+        val localMatch = if (remote.accountUuid.isNotEmpty()) {
+            byUuid[remote.accountUuid]
+        } else {
+            byKey[remote.keyIndex]
+        }
+
+        return if (localMatch != null) {
+            updateExistingAccountIfChanged(localMatch, remote)
+        } else {
+            insertNewRemoteAccount(remote, byKey, currentAccounts)
+        }
+    }
+
+    private suspend fun updateExistingAccountIfChanged(
+        local: AccountEntity,
+        remote: AccountEntity
+    ): Boolean {
+        val hasChanges = local.name != remote.name ||
+            local.customImage != remote.customImage ||
+            local.defaultImageIndex != remote.defaultImageIndex ||
+            (local.accountUuid.isEmpty() && remote.accountUuid.isNotEmpty())
+
+        if (!hasChanges) return false
+
+        val updatedUuid = local.accountUuid.ifEmpty { remote.accountUuid }
+        database.accountDao().upsertAccount(
+            local.copy(
+                name = remote.name,
+                customImage = remote.customImage,
+                defaultImageIndex = remote.defaultImageIndex,
+                accountUuid = updatedUuid
+            )
+        )
+        return true
+    }
+
+    private suspend fun insertNewRemoteAccount(
+        remote: AccountEntity,
+        byKey: Map<Int, AccountEntity>,
+        currentAccounts: List<AccountEntity>
+    ): Boolean {
+        val targetKey = if (byKey.containsKey(remote.keyIndex)) {
+            (currentAccounts.maxOfOrNull { it.keyIndex } ?: 0) + 1
+        } else {
+            remote.keyIndex
+        }
+        database.accountDao().upsertAccount(remote.copy(keyIndex = targetKey))
+        return true
     }
 }

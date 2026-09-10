@@ -1,6 +1,8 @@
 package com.lagradost.cloudstream3.shared.backup
 
 import com.lagradost.cloudstream3.APIHolder
+import com.lagradost.cloudstream3.shared.backup.BackupManager.Companion.isKeyTransferable
+import com.lagradost.cloudstream3.shared.backup.BackupManager.Companion.isPluginKey
 import com.lagradost.cloudstream3.shared.persistence.database.AppDatabase
 import com.lagradost.cloudstream3.shared.persistence.migration.DataStoreToRoomMigrator
 import com.lagradost.cloudstream3.shared.persistence.repository.AppPreferenceRepository
@@ -78,6 +80,19 @@ interface BackupManager {
             "PLUGINS_KEY_LOCAL",
             "PLUGINS_KEY_HEADER"
         )
+
+        fun isKeyTransferable(key: String): Boolean {
+            val lower = key.lowercase()
+            return !nonTransferableKeys.any { lower.contains(it.lowercase()) }
+        }
+
+        fun isPluginKey(key: String): Boolean {
+            val upper = key.uppercase()
+            return pluginKeys.any { upper.contains(it) } ||
+                    upper.startsWith("PLUGIN_") ||
+                    upper.startsWith("REPOSITORY_") ||
+                    upper.startsWith("PLUGINS_")
+        }
     }
 }
 
@@ -94,19 +109,6 @@ class BackupManagerImpl(
         isLenient = true
         prettyPrint = true
         encodeDefaults = true
-    }
-
-    private fun isKeyTransferable(key: String): Boolean {
-        val lower = key.lowercase()
-        return !BackupManager.nonTransferableKeys.any { lower.contains(it.lowercase()) }
-    }
-
-    private fun isPluginKey(key: String): Boolean {
-        val upper = key.uppercase()
-        return BackupManager.pluginKeys.any { upper.contains(it) } ||
-                upper.startsWith("PLUGIN_") ||
-                upper.startsWith("REPOSITORY_") ||
-                upper.startsWith("PLUGINS_")
     }
 
     override suspend fun createBackup(categories: Set<BackupCategory>): String {
