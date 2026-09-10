@@ -15,10 +15,8 @@ kotlin {
     sourceSets {
         jvmMain.dependencies {
             implementation(libs.bundles.compose)
-            implementation(compose.desktop.currentOs) {
-                // compose.desktop.currentOs imports the wrong material 2, so we exclude it
-                exclude(group = "org.jetbrains.compose.material", module = "material")
-            }
+            implementation(compose.desktop.currentOs)
+            implementation(compose.material)
             implementation(project(":shared"))
             implementation(project(":library"))
             implementation(libs.vlcj)
@@ -55,25 +53,7 @@ compose.desktop {
         )
 
         nativeDistributions {
-            val isCi = System.getenv("CI") == "true" || System.getenv("GITHUB_ACTIONS") == "true"
-            val os = org.gradle.internal.os.OperatingSystem.current()
-            val availableFormats = mutableListOf<TargetFormat>()
-
-            if (os.isLinux) {
-                val pathDirs = (System.getenv("PATH") ?: "").split(File.pathSeparator).map { File(it) }
-                val hasDpkg = isCi || pathDirs.any { File(it, "dpkg-deb").exists() || File(it, "dpkg").exists() }
-                val hasRpm = isCi || pathDirs.any { File(it, "rpmbuild").exists() }
-
-                if (hasDpkg) availableFormats.add(TargetFormat.Deb)
-                if (hasRpm) availableFormats.add(TargetFormat.Rpm)
-            } else if (os.isWindows) {
-                availableFormats.add(TargetFormat.Msi)
-                availableFormats.add(TargetFormat.Exe)
-            } else if (os.isMacOsX) {
-                availableFormats.add(TargetFormat.Dmg)
-            }
-
-            targetFormats(*(availableFormats.toTypedArray()))
+            targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "CloudStream"
             packageVersion = "1.0.0"
 

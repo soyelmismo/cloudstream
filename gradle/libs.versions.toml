@@ -175,9 +175,6 @@ kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref 
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlinGradlePlugin" }
 room = { id = "androidx.room", version.ref = "room" }
 
-compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlinGradlePlugin" }
-compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
-
 [bundles]
 coil = ["coil", "coil-network-okhttp"]
 cryptography = ["cryptography-core", "cryptography-provider-optimal"]
