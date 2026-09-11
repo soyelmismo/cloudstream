@@ -674,10 +674,16 @@ private fun LastSyncTimeDisplay(
     modifier: Modifier = Modifier
 ) {
     val formattedDate = formatSyncTimestamp(lastSyncTimestamp)
-    val text = if (lastSyncTimestamp > 0L) {
-        stringResource(Res.string.cloud_sync_last_synced, formattedDate)
+    val dateArg = if (lastSyncTimestamp > 0L && formattedDate.isNotBlank()) {
+        formattedDate
     } else {
-        stringResource(Res.string.cloud_sync_last_synced, stringResource(Res.string.cloud_sync_never))
+        stringResource(Res.string.cloud_sync_never)
+    }
+    val rawText = stringResource(Res.string.cloud_sync_last_synced, dateArg)
+    val text = if (rawText.contains("%1\$s") || rawText.contains("%s")) {
+        rawText.replace("%1\$s", dateArg).replace("%s", dateArg)
+    } else {
+        rawText
     }
 
     Text(

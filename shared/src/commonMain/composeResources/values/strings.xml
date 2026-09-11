@@ -1815,7 +1815,7 @@ Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliqu
     <string name="cloud_sync_provider_local">Local Folder / Syncthing</string>
     <string name="cloud_sync_connect_google">Connect with Google Drive</string>
     <string name="cloud_sync_disconnect">Disconnect</string>
-    <string name="cloud_sync_connected_as" formatted="true">Connected as %s</string>
+    <string name="cloud_sync_connected_as" formatted="true">Connected as %1$s</string>
     <string name="cloud_sync_webdav_url">WebDAV Server URL</string>
     <string name="cloud_sync_webdav_user">Username</string>
     <string name="cloud_sync_webdav_pass">Password</string>
@@ -1827,7 +1827,7 @@ Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliqu
     <string name="cloud_sync_connection_error">Connection failed</string>
     <string name="cloud_sync_auto_title">Auto-Sync</string>
     <string name="cloud_sync_auto_desc">Automatically sync data on app launch and changes</string>
-    <string name="cloud_sync_last_synced" formatted="true">Last synced: %s</string>
+    <string name="cloud_sync_last_synced" formatted="true">Last synced: %1$s</string>
     <string name="cloud_sync_never">Never</string>
     <string name="cloud_sync_save_config">Save Configuration</string>
     <string name="cloud_sync_save_path">Save Path</string>

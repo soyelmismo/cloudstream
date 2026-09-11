@@ -1477,7 +1477,7 @@
     <string name="cloud_sync_provider_local">Carpeta Local / Syncthing</string>
     <string name="cloud_sync_connect_google">Conectar con Google Drive</string>
     <string name="cloud_sync_disconnect">Desconectar</string>
-    <string name="cloud_sync_connected_as" formatted="true">Conectado como %s</string>
+    <string name="cloud_sync_connected_as" formatted="true">Conectado como %1$s</string>
     <string name="cloud_sync_webdav_url">URL del Servidor WebDAV</string>
     <string name="cloud_sync_webdav_user">Usuario</string>
     <string name="cloud_sync_webdav_pass">Contraseña</string>
@@ -1489,7 +1489,7 @@
     <string name="cloud_sync_connection_error">Fallo en la conexión</string>
     <string name="cloud_sync_auto_title">Sincronización Automática</string>
     <string name="cloud_sync_auto_desc">Sincronizar automáticamente al iniciar y tras cambios</string>
-    <string name="cloud_sync_last_synced" formatted="true">Última sincronización: %s</string>
+    <string name="cloud_sync_last_synced" formatted="true">Última sincronización: %1$s</string>
     <string name="cloud_sync_never">Nunca</string>
     <string name="cloud_sync_save_config">Guardar Configuración</string>
     <string name="cloud_sync_save_path">Guardar Ruta</string>
